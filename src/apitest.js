@@ -1,0 +1,22 @@
+process.env.RESEND_API_KEY='re_test';process.env.MAIL_FROM='accounts@college.test';process.env.RECEIPT_API_KEY='secret123';
+const h=require('../vp-erp-demo/api/send-receipt.js');const fs=require('fs');
+const pdf=fs.readFileSync('mob/r.pdf').toString('base64');
+let sent=null;global.fetch=async(u,o)=>{sent={u,o:JSON.parse(o.body),h:o.headers};return{ok:true,status:200,json:async()=>({id:'em_1'})}};
+const call=async(method,headers,body)=>{const r={method,headers,body};const out={};const res={setHeader(){},end(s){out.body=JSON.parse(s)},set statusCode(v){out.code=v}};await h(r,res);return out};
+const good={to:['a@b.com'],subject:'Fee receipt RC-1',html:'<p>x</p>',text:'x',filename:'RC-1.pdf',pdfBase64:pdf,fromName:'Vidyapeeth'};
+const T=[];const t=(n,c)=>{T.push([n,c]);console.log(c?'PASS':'FAIL',n)};
+(async()=>{
+let r=await call('GET',{});t('GET reports configured',r.code===200&&r.body.configured===true);
+r=await call('POST',{'x-api-key':'wrong'},good);t('wrong key rejected 401',r.code===401&&!sent);
+r=await call('POST',{'x-api-key':'secret123'},{...good,to:['not-an-email']});t('bad recipient rejected',r.code===400);
+r=await call('POST',{'x-api-key':'secret123'},{...good,to:['a@b.com','b@b.com','c@b.com','d@b.com']});t('too many recipients rejected',r.code===400);
+r=await call('POST',{'x-api-key':'secret123'},{...good,pdfBase64:Buffer.from('hello world').toString('base64')});t('non-PDF attachment rejected',r.code===400);
+r=await call('POST',{'x-api-key':'secret123'},{...good,filename:'../evil.exe'});t('bad filename rejected',r.code===400);
+r=await call('POST',{'x-api-key':'secret123'},good);t('valid request sent to provider',r.code===200&&r.body.id==='em_1'&&sent.u==='https://api.resend.com/emails'&&sent.o.from==='Vidyapeeth <accounts@college.test>'&&sent.o.attachments[0].filename==='RC-1.pdf'&&sent.h.authorization==='Bearer re_test');
+process.env.MAIL_ALLOWED_DOMAINS='college.edu';r=await call('POST',{'x-api-key':'secret123'},good);t('domain allow-list enforced',r.code===400);delete process.env.MAIL_ALLOWED_DOMAINS;
+global.fetch=async()=>({ok:false,status:422,json:async()=>({message:'domain not verified'})});r=await call('POST',{'x-api-key':'secret123'},good);t('provider error surfaced as 502',r.code===502&&/domain not verified/.test(r.body.error));
+global.fetch=async()=>{throw new Error('net')};r=await call('POST',{'x-api-key':'secret123'},good);t('network failure handled',r.code===502);
+r=await call('PUT',{},{});t('other methods 405',r.code===405);
+delete process.env.RESEND_API_KEY;r=await call('POST',{'x-api-key':'secret123'},good);t('unconfigured returns 503',r.code===503);
+let n=0;process.env.RESEND_API_KEY='re_test';global.fetch=async()=>({ok:true,status:200,json:async()=>({id:'x'})});for(let i=0;i<45;i++){r=await call('POST',{'x-api-key':'secret123','x-forwarded-for':'9.9.9.9'},good);if(r.code===429)n++}t('rate limit kicks in',n>0);
+console.log('API TOTAL',T.length,'FAIL',T.filter(x=>!x[1]).length);})();
