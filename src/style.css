@@ -452,3 +452,22 @@ textarea{width:100%;resize:vertical}
 @media (min-width:821px) and (max-width:1500px){.repsel{display:block;max-width:440px;margin-bottom:12px}.repnav{display:none}.repgrid{grid-template-columns:minmax(0,1fr)}}
 /* desktop and tablet tables: let ordinary text wrap before the table grows sideways */
 @media (min-width:901px){.tablewrap td:not(.num):not(.mono):not(.nw){white-space:normal}}
+/* ---- Laptop polish: slim scrollbars everywhere, rail fits short screens ---- */
+html,body{margin:0}
+html{scrollbar-gutter:stable;-webkit-text-size-adjust:100%}
+*{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--muted) 45%,transparent) transparent}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-track,*::-webkit-scrollbar-corner{background:transparent}
+*::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--muted) 42%,transparent);border-radius:99px;border:3px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,var(--muted) 70%,transparent);background-clip:content-box}
+.rail{scrollbar-color:color-mix(in srgb,var(--rail-fg) 35%,transparent) transparent}
+@media (min-width:821px){.rail{height:100vh;height:100dvh}}
+@media (min-width:821px) and (max-height:820px){
+  .rail{padding:12px 10px;gap:10px}
+  .brand .seal{width:32px;height:32px;font-size:15px}
+  .nav{gap:1px}.nav button{padding:7px 10px}
+}
+@media (min-width:821px) and (max-height:700px){
+  .rail{gap:8px}.nav button{padding:6px 10px;font-size:13px}
+  .rail-foot{padding-top:8px;font-size:11px}
+}
