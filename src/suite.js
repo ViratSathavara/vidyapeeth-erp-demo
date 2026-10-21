@@ -21,10 +21,11 @@ async function mk(role,opts={}){
   p.c=c;
   p.db=()=>p.evaluate(()=>JSON.parse(localStorage.getItem('vp_erp_demo_v3')));
   p.toast=async()=>{await p.waitForTimeout(60);return p.$eval('.toast',e=>e.textContent).catch(()=>'')};
-  p.nav=async n=>{await p.click(`#nav button:has-text("${n}")`);await p.waitForTimeout(120)};
+  p.menu=async()=>{if(await p.evaluate(()=>{const m=document.querySelector('.menu-btn');return !!m&&getComputedStyle(m).display!=='none'&&!document.querySelector('.app.rail-open')}))await p.click('.menu-btn');await p.waitForTimeout(280)};
+  p.nav=async n=>{if(n==='My Profile'){await p.menu();await p.click('[data-act=profile]');await p.waitForTimeout(150);return}await p.menu();await p.click(`#nav button:has-text("${n}")`);await p.waitForTimeout(150)};
   p.tab=async n=>{await p.click(`#page [role=tab]:has-text("${n}")`);await p.waitForTimeout(100)};
   p.login=async(u,pw)=>{await p.fill('input[name=u]',u);await p.fill('input[name=p]',pw);await p.click('form[data-form=login] button.primary');await p.waitForTimeout(150);return !!(await p.$('#nav'))};
-  p.logout=async()=>{await p.keyboard.press('Escape');await p.keyboard.press('Escape');await p.click('[data-act=logout]');await p.waitForTimeout(100)};
+  p.logout=async()=>{await p.keyboard.press('Escape');await p.keyboard.press('Escape');await p.waitForTimeout(60);await p.menu();await p.click('[data-act=logout]');await p.waitForTimeout(100)};
   p.text=sel=>p.$eval(sel||'#page',e=>e.innerText).catch(()=>'');
   p.navs=()=>p.$$eval('#nav button',e=>e.map(x=>x.textContent.replace(/\d+$/,'').trim()));
   p.fill2=async(root,o)=>{for(const[k,v] of Object.entries(o)){const el=await p.$(`${root} [name=${k}]`);if(!el)throw new Error('no field '+k);const t=await el.evaluate(e=>e.tagName);if(t==='SELECT')await el.selectOption(v);else await el.fill(String(v))}};
@@ -70,7 +71,7 @@ browser=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
 for(const r of DEMO5){
   await T('Login and Roles','AU-'+r,`${r} demo button fills credentials and signs in`,null,async p=>{
     await p.click(`[data-act=fillLogin][data-u=${ACCT[r][0]}]`);await p.click('form[data-form=login] button.primary');await p.waitForTimeout(150);
-    ok(await p.$('#nav'),'not signed in');const u=await p.text('.chip');ok(u.length>3,'no user chip');
+    ok(await p.$('#nav'),'not signed in');const u=await p.text('.me');ok(u.length>3,'no user block');
   });
 }
 await T('Login and Roles','AU-bad','Wrong password is rejected with a message',null,async p=>{
@@ -97,7 +98,7 @@ const NAVS={admin:['Dashboard','Students','Fee Collection','Academic Setup','Att
  accountant:['Dashboard','Students','Fee Collection','Messages and Notices','Reports'],clerk:['Dashboard','Students','Fee Collection','Reports'],
  faculty:['Dashboard','Students','Attendance','Internal Marks','Practice Teaching','Reports'],parent:['Home','Fees and Receipts','Notices']};
 for(const r of Object.keys(NAVS)){
-  await T('Login and Roles','RB-'+r,`${r} sees exactly the permitted menus`,r,async p=>{const n=await p.navs();ok(JSON.stringify(n)===JSON.stringify(NAVS[r]),'menus: '+n.join(', '))});
+  await T('Login and Roles','RB-'+r,`${r} sees exactly the permitted menus`,r,async p=>{const n=await p.navs();ok(JSON.stringify([...n].sort())===JSON.stringify([...NAVS[r]].sort()),'menus: '+n.join(', '))});
 }
 await T('Login and Roles','RB-guard','Route guard: restricted page cannot be opened by direct call','clerk',async p=>{
   await p.evaluate(()=>go('settings'));await p.waitForTimeout(100);const t=await p.text();ok(!/College details/.test(t),'clerk reached Settings');
@@ -1000,7 +1001,7 @@ await T('Notifications','NT-nostorage','Notifications work when browser storage 
 },{noStorage:true});
 await T('Notifications','NT-mobile','On a phone the bell fits, the drawer is usable, and the rules grid does not overlap','admin',async p=>{
   ok(!(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1)),'page overflows');const b=await p.$eval('#bell',e=>{const r=e.getBoundingClientRect();return[r.left,r.right,r.top,r.bottom]});ok(b[0]>=0&&b[1]<=390,'bell off screen '+b);
-  const chip=await p.$eval('.topbar .chip',e=>{const r=e.getBoundingClientRect();return r.width});ok(chip>60,'name chip squeezed '+chip);
+  const tg=await p.$eval('.topbar [data-act=theme]',e=>{const r=e.getBoundingClientRect();return[r.left,r.right,r.width]});ok(tg[0]>=0&&tg[1]<=390&&tg[2]>=36,'theme button squeezed or off screen '+tg);
   await p.click('#bell');await p.waitForTimeout(250);ok(!(await p.evaluate(()=>{const d=document.querySelector('.drawer');return d.scrollWidth>d.clientWidth+1})),'drawer overflows');
   ok(await p.evaluate(()=>{const r=document.querySelector('.drawer .nt').getBoundingClientRect();return r.width>250&&r.right<=innerWidth}),'cards too narrow');await p.keyboard.press('Escape');
   await p.nav('Settings');const boxes=await p.$$eval('table.matrix tbody tr:first-child td[data-check] input',e=>e.map(x=>{const r=x.getBoundingClientRect();return[r.left,r.top,r.right,r.bottom]}));
@@ -1159,7 +1160,7 @@ await T('Email and PDF','EM-dark','Email preview stays readable in dark theme','
 
 /* ================= STUDENT PORTAL ================= */
 await T('Student Portal','SP-login','Student demo account signs in to the student portal','student',async p=>{
-  const n=await p.navs();ok(n.join('|')==='Home|My Academics|Fees and Receipts|Notices|My Profile',n.join('|'));const t=await p.text('.chip');ok(/Student/.test(t)&&/Riya Joshi/.test(t),t);ok(/Hello, Riya/.test(await p.text()),'greeting');
+  const n=await p.navs();ok(n.join('|')==='Home|My Academics|Fees and Receipts|Notices',n.join('|'));const t=await p.text('.me');ok(/Student/.test(t)&&/Riya Joshi/.test(t),t);ok(/Hello, Riya/.test(await p.text()),'greeting');
 });
 await T('Student Portal','SP-home','Home shows own attendance, fee and marks that match the records','student',async p=>{
   const r=await p.evaluate(()=>{const s=myChild();return{a:attPct(s),pay:feeSum(s).payable,name:s.name}});const t=await p.text();ok(t.includes(r.a+'%'),'attendance '+r.a);ok(t.includes(inr0(r.pay)),'payable');ok(!/Aarav Patel/.test(t),'other student');ok(await p.$('.attstrip'),'strip');
@@ -1207,7 +1208,7 @@ await T('Student Portal','SP-same-data','Parent and student of one child see the
   const f1=await p.evaluate(()=>feeSum(myChild()).payable);await p.logout();await p.login('student','student123');const f2=await p.evaluate(()=>feeSum(myChild()).payable);ok(f1===f2,f1+' vs '+f2);
 });
 await T('Student Portal','SP-per-student','Every seeded student has a working student login','admin',async p=>{
-  const ids=await p.evaluate(()=>db.students.slice(0,3).map(s=>s.id));await p.logout();for(const id of ids){ok(await p.login('stu-'+id.toLowerCase(),'student123'),'login '+id);ok(new RegExp(id).test(await p.text('.chip')),'wrong student');await p.logout()}
+  const ids=await p.evaluate(()=>db.students.slice(0,3).map(s=>s.id));await p.logout();for(const id of ids){ok(await p.login('stu-'+id.toLowerCase(),'student123'),'login '+id);ok(new RegExp(id).test(await p.text('.me')),'wrong student');await p.logout()}
 });
 await T('Student Portal','SP-switched-off','Switching off a student login blocks sign-in','admin',async p=>{
   await p.evaluate(()=>{db.users.find(u=>u.username==='student').active=false;save()});await p.logout();ok(!(await p.login('student','student123')),'inactive login worked');ok(/switched off/.test(await p.text('.err')),'message');
@@ -1215,11 +1216,71 @@ await T('Student Portal','SP-switched-off','Switching off a student login blocks
 await T('Student Portal','SP-crawl','Every student menu opens without errors','student',async p=>{
   for(const n of await p.navs()){await p.nav(n);await p.waitForTimeout(80);ok((await p.text()).length>40,'empty '+n)}
 });
-await T('Student Portal','SP-mobile','Student portal on a phone: cards, bottom bar, no sideways scroll','student',async p=>{
+await T('Student Portal','SP-mobile','Student portal on a phone: cards, menu drawer, no sideways scroll','student',async p=>{
   for(const n of ['Home','My Academics','Fees and Receipts','Notices','My Profile']){await p.nav(n);await p.waitForTimeout(100);ok(!(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1)),'overflow on '+n);ok(await p.evaluate(()=>[...document.querySelectorAll('#page thead')].every(t=>getComputedStyle(t).display==='none')),'table shown on '+n)}
-  ok(await p.evaluate(()=>getComputedStyle(document.querySelector('#nav')).position==='fixed'),'bottom bar');
+  ok(await p.evaluate(()=>getComputedStyle(document.querySelector('.rail')).position==='fixed'&&getComputedStyle(document.querySelector('.menu-btn')).display!=='none'),'menu drawer');
 },{vp:{width:390,height:844}});
 await T('Student Portal','SP-dark','Student portal works in dark theme','student',async p=>{await p.click('[data-act=theme]');await p.waitForTimeout(450);for(const n of ['Home','My Academics','My Profile']){await p.nav(n);ok((await p.text()).length>50,n)}});
+
+/* ================= APP SHELL: sidebar, top bar, drawer ================= */
+await T('App Shell','SH-account','Profile and Sign out are in the sidebar, not the top bar','admin',async p=>{
+  ok(await p.$('.rail [data-act=profile]'),'no profile in sidebar');ok(await p.$('.rail [data-act=logout]'),'no sign out in sidebar');
+  ok(!(await p.$('.topbar [data-act=profile]'))&&!(await p.$('.topbar [data-act=logout]')),'duplicate in top bar');
+  ok((await p.$$('[data-act=logout]')).length===1&&(await p.$$('[data-act=profile]')).length===1,'duplicate controls');
+  ok(/Rajiv|Super Admin/.test(await p.text('.me')),'account block');
+});
+await T('App Shell','SH-topbar','Top bar holds only notifications and the theme switch (menu button on phones)','principal',async p=>{
+  const ids=await p.$$eval('.topbar button',b=>b.filter(x=>getComputedStyle(x).display!=='none').map(x=>x.dataset.act));
+  ok(ids.join()==='bell,theme',ids.join());
+});
+await T('App Shell','SH-groups','Sidebar menu is grouped with labels and the open page is highlighted','admin',async p=>{
+  const g=await p.$$eval('#nav .gl',e=>e.map(x=>x.textContent));ok(g.join()==='Overview,People,Finance,Academics,Communication,Insights,System',g.join());
+  ok((await p.$$('#nav [aria-current=page]')).length===1,'active count');await p.nav('Reports');ok(/Reports/.test(await p.text('#nav [aria-current=page]')),'active not moved');ok(/Reports/.test(await p.text('#crumb')),'crumb');
+});
+await T('App Shell','SH-collapse','Sidebar collapses to icons, keeps tooltips, and remembers the choice','admin',async p=>{
+  const w0=await p.$eval('.rail',e=>e.getBoundingClientRect().width);ok(w0>=240,'width '+w0);
+  await p.click('[data-act=railToggle]');await p.waitForTimeout(400);const w1=await p.$eval('.rail',e=>e.getBoundingClientRect().width);ok(w1<90,'collapsed width '+w1);
+  ok(await p.$eval('.rail-toggle',e=>e.getAttribute('aria-expanded'))==='false','aria-expanded');ok(await p.$eval('#nav button',e=>!!e.title),'tooltip');
+  ok(!(await p.evaluate(()=>[...document.querySelectorAll('#nav .nl')].some(x=>x.getBoundingClientRect().width>0))),'labels still visible');
+  await p.nav('Students');ok(/Students/.test(await p.text('#crumb')),'navigation works while collapsed');
+  await p.reload();await p.waitForTimeout(300);ok((await p.$eval('.app',e=>e.dataset.rail))==='mini','not remembered');
+  await p.click('[data-act=railToggle]');await p.waitForTimeout(400);ok((await p.$eval('.rail',e=>e.getBoundingClientRect().width))>=240,'did not expand');
+});
+await T('App Shell','SH-profile-staff','Profile opens account details and the password form for staff','accountant',async p=>{
+  await p.click('[data-act=profile]');await p.waitForTimeout(250);const t=await p.text('.drawer');ok(/Accountant/.test(t)&&/What you can open/.test(t)&&await p.$('.drawer form[data-form=myPassword]'),t.slice(0,80));
+  await p.keyboard.press('Escape');await p.waitForTimeout(250);ok(!(await p.$('.drawer')),'did not close');
+});
+await T('App Shell','SH-profile-student','Profile opens My Profile for a student and highlights the button','student',async p=>{
+  await p.click('[data-act=profile]');await p.waitForTimeout(200);ok(/Parent \/ guardian/.test(await p.text()),'profile page');ok(await p.$('[data-act=profile][aria-current=page]'),'not highlighted');
+});
+await T('App Shell','SH-theme-persist','Theme switch changes every surface and survives a reload','admin',async p=>{
+  const bg=()=>p.evaluate(()=>[document.body,document.querySelector('.rail'),document.querySelector('.topbar'),document.querySelector('.panel,.kpi')].map(e=>getComputedStyle(e).backgroundColor).join('|'));
+  const a=await bg();await p.click('[data-act=theme]');await p.waitForTimeout(500);const b=await bg();ok(a!==b,'surfaces unchanged');
+  ok(await p.evaluate(()=>document.documentElement.getAttribute('data-theme')==='dark'),'not dark');await p.reload();await p.waitForTimeout(300);ok(await p.evaluate(()=>document.documentElement.getAttribute('data-theme')==='dark'),'theme lost on reload');
+  const r=await p.$eval('.rail',e=>getComputedStyle(e).backgroundColor);ok(r!=='rgb(255, 255, 255)','rail still light');
+},{});
+await T('App Shell','SH-fits-laptop','Whole menu fits a 1366x657 laptop without a scrollbar of its own','admin',async p=>{
+  ok(await p.evaluate(()=>{const n=document.querySelector('#nav'),r=document.querySelector('.rail');return n.scrollHeight<=n.clientHeight+1&&r.scrollHeight<=r.clientHeight+1}),'sidebar scrolls');
+  ok(await p.evaluate(()=>document.querySelector('[data-act=logout]').getBoundingClientRect().bottom<=innerHeight),'sign out below the fold');
+},{vp:{width:1366,height:657}});
+await T('App Shell','SH-drawer','On a phone the menu is a drawer: hidden, opens, closes on choice, Escape and backdrop','clerk',async p=>{
+  ok(await p.evaluate(()=>getComputedStyle(document.querySelector('.rail')).visibility==='hidden'),'drawer visible at start');
+  await p.click('.menu-btn');await p.waitForTimeout(350);ok(await p.evaluate(()=>getComputedStyle(document.querySelector('.rail')).visibility==='visible'&&document.querySelector('.menu-btn').getAttribute('aria-expanded')==='true'),'did not open');
+  ok(await p.evaluate(()=>getComputedStyle(document.body).overflow==='hidden'),'page scrolls behind drawer');
+  const r=await p.$eval('.rail',e=>{const b=e.getBoundingClientRect();return[b.left,b.right]});ok(r[0]>=-1&&r[1]<=390,'drawer off screen '+r);
+  ok(await p.evaluate(()=>{const a=document.querySelector('[data-act=logout]').getBoundingClientRect(),b=document.querySelector('[data-act=profile]').getBoundingClientRect();return a.bottom<=innerHeight&&b.bottom<=innerHeight&&a.height>=36}),'account actions not reachable');
+  await p.click('#nav button:has-text("Fee Collection")');await p.waitForTimeout(350);ok(/Fee Collection/.test(await p.text('#crumb')),'did not navigate');ok(await p.evaluate(()=>getComputedStyle(document.querySelector('.rail')).visibility==='hidden'),'drawer stayed open');
+  await p.click('.menu-btn');await p.waitForTimeout(300);await p.keyboard.press('Escape');await p.waitForTimeout(350);ok(await p.evaluate(()=>getComputedStyle(document.querySelector('.rail')).visibility==='hidden'),'Escape did not close');
+  await p.click('.menu-btn');await p.waitForTimeout(300);await p.mouse.click(370,400);await p.waitForTimeout(350);ok(await p.evaluate(()=>getComputedStyle(document.querySelector('.rail')).visibility==='hidden'),'backdrop did not close');
+  ok(!(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1)),'overflow');
+},{vp:{width:390,height:844}});
+await T('App Shell','SH-signout-phone','Sign out works from the phone drawer','faculty',async p=>{
+  await p.click('.menu-btn');await p.waitForTimeout(300);await p.click('.rail [data-act=logout]');await p.waitForTimeout(200);ok(await p.$('form[data-form=login]'),'not signed out');ok(await p.evaluate(()=>getComputedStyle(document.body).overflow!=='hidden'),'scroll lock stuck');
+},{vp:{width:390,height:844}});
+await T('App Shell','SH-keyboard','Menu, Profile, Sign out, bell and theme are all reachable by keyboard','admin',async p=>{
+  const tabs=await p.evaluate(()=>[...document.querySelectorAll('button,a,input,select')].filter(e=>getComputedStyle(e).visibility!=='hidden'&&e.getBoundingClientRect().width>0&&e.tabIndex>=0).map(e=>e.dataset.act||''));
+  for(const a of ['nav','profile','logout','bell','theme','railToggle'])ok(tabs.includes(a),a+' not focusable');
+});
 
 await browser.close();
 fs.writeFileSync('results.json',JSON.stringify(results,null,1));

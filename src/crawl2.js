@@ -46,12 +46,12 @@ const AUDIT=()=>{
     if(c.textOverflow==='ellipsis'&&e.scrollWidth>e.clientWidth+1)out.push(['ellipsis',`${e.scrollWidth}px of text in ${e.clientWidth}px`,s]);
     else out.push(['clipped',`content ${e.scrollWidth}x${e.scrollHeight} in box ${e.clientWidth}x${e.clientHeight}`,s]);if(seenC.size>14)break}
   // tap targets and obstruction
-  if(iw<=820){const seenT=new Set();const nv=document.querySelector('.nav');const navTop=nv&&cs(nv).position==='fixed'?nv.getBoundingClientRect().top:innerHeight;
+  if(iw<=820){const seenT=new Set();const navTop=innerHeight;const drawerOpen=!!document.querySelector('.app.rail-open');
     for(const e of all.filter(e=>e.matches('button,a[href],select,input:not([type=hidden]),textarea,[role=tab],[data-act]'))){
       const r=e.getBoundingClientRect();const chk=e.matches('input[type=checkbox],input[type=radio]');if(e.matches('[disabled]'))continue;
       const small=chk?(r.width<18||r.height<18):(r.height<30||r.width<30);
       if(small){const s=sig(e);if(!seenT.has(s)){seenT.add(s);if(seenT.size<=8)out.push(['smallTap',`${Math.round(r.width)}x${Math.round(r.height)}px`,s])}}
-      if(r.top>=0&&r.bottom<=navTop&&r.left>=0&&r.right<=iw&&!fixedAnc(e)){const x=r.left+r.width/2,y=r.top+r.height/2;const t=document.elementFromPoint(x,y);
+      if(!drawerOpen&&r.top>=0&&r.bottom<=navTop&&r.left>=0&&r.right<=iw&&!fixedAnc(e)){const x=r.left+r.width/2,y=r.top+r.height/2;const t=document.elementFromPoint(x,y);
         if(t&&!(e.contains(t)||t.contains(e))&&!e.closest('label')&&!(t.closest&&t.closest('label')&&t.closest('label').contains(e))){const s=sig(e);if(!seenT.has('c'+s)){seenT.add('c'+s);out.push(['covered',`centre is covered by ${sig(t)}`,s])}}}}}
   // tables on phones
   if(iw<=900){for(const t of document.querySelectorAll('table')){if(!shown(t))continue;const th=t.querySelector('thead');if(th&&cs(th).display!=='none'&&!t.closest('.tablewrap.keep'))out.push(['tableOnPhone','table header still visible',sig(t)])}}
@@ -85,7 +85,7 @@ const UNDERNAV=()=>{
     const snap=async(label,full)=>{
       states++;
       const res=await p.evaluate(AUDIT).catch(e=>[['auditError',e.message,'audit']]);
-      const un=await p.evaluate(UNDERNAV).catch(()=>null);if(un)res.push(['underNav',un,'#page']);
+      
       if(pe.length){res.push(['jsError',pe.slice(0,2).join(' | '),'page']);pe.length=0}
       res.forEach(r=>add(u,label,r));
       const f=`${DIR}/${u}__${label.replace(/[^A-Za-z0-9]+/g,'_').slice(0,60)}.jpg`;
@@ -98,6 +98,10 @@ const UNDERNAV=()=>{
     await snap('home-after-login');
     // bell
     await p.evaluate(()=>{const b=document.querySelector('[data-act=bell]');if(b)b.click()});await p.waitForTimeout(300);if(await p.$('#layer .drawer'))await snap('bell-open');await closeAll();
+    // shell states: phone drawer or collapsed rail, then the Profile panel
+    if(await p.evaluate(()=>getComputedStyle(document.querySelector('.menu-btn')).display!=='none')){await p.evaluate(()=>document.querySelector('.menu-btn').click());await p.waitForTimeout(350);await snap('menu-drawer-open');await p.evaluate(()=>document.querySelector('.rail-close').click());await p.waitForTimeout(300)}
+    else{await p.evaluate(()=>document.querySelector('.rail-toggle').click());await p.waitForTimeout(350);await snap('sidebar-collapsed');await p.evaluate(()=>document.querySelector('.rail-toggle').click());await p.waitForTimeout(300)}
+    await p.evaluate(()=>{const b=document.querySelector('[data-act=profile]');if(b)b.click()});await p.waitForTimeout(300);await snap('profile');await closeAll();
     const navs=await p.$$eval('#nav button',a=>a.map(x=>x.textContent.trim().replace(/\s+/g,' ')));
     for(let i=0;i<navs.length;i++){
       const nm=navs[i];

@@ -52,7 +52,7 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if
 document.addEventListener('submit',e=>{const f=e.target.closest('form[data-form]');if(!f)return;e.preventDefault();const name=f.dataset.form,h=FORM[name];if(h){const ok=run('Form',humanize(name)+' form',name,h,f,Object.fromEntries(new FormData(f)));if(ok&&name!=='login')ev('Form',humanize(name)+' form','Saved')}});
 document.addEventListener('input',e=>{const el=e.target.closest('[data-live]');if(el&&LIVE[el.dataset.live])safe(LIVE[el.dataset.live],el,e)});
 document.addEventListener('change',e=>{const el=e.target.closest('[data-change]');if(el&&CHG[el.dataset.change]){if(!/^ev/.test(el.dataset.change))ev('Change',humanize(el.dataset.change),((el.name||el.id||'').replace(/^f_/,'')+' = '+(el.type==='checkbox'?(el.checked?'on':'off'):String(el.value).slice(0,60))).trim());run('Change',humanize(el.dataset.change),'',CHG[el.dataset.change],el,e)}});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('#dlg').innerHTML)closeDialog();else closeLayer()}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('#dlg').innerHTML)closeDialog();else if($('#layer').innerHTML)closeLayer();else railClose()}});
 ACT.close=closeLayer;ACT.closeDialog=closeDialog;
 ACT.tab=el=>{ui.tab[el.dataset.key]=el.dataset.id;ev('Page','Opened tab',humanize(el.dataset.key)+' › '+el.textContent.trim().slice(0,40));renderPage();playEnter('swap')};
 ACT.go=el=>{closeLayer();go(el.dataset.to)};
@@ -110,6 +110,7 @@ ACT.theme=()=>{const dark=document.documentElement.getAttribute('data-theme')===
 /* ---------- login ---------- */
 const DEMO_ACCTS=[['admin','admin123','Super Admin','College owner or IT admin'],['principal','principal123','Principal','Approves, reviews, reports'],['accountant','account123','Accountant','Fees, day close, bank match'],['parent','parent123','Parent','Fee portal for one student'],['student','student123','Student','Own fees, marks, attendance']];
 function renderLogin(msg){
+  document.body.classList.remove('rail-lock');
   $('#root').innerHTML=`<div class="login"><section class="login-art"><div><div class="seal">V</div><h1>${E(db.settings.college)}</h1><p>Admissions, student records, fee collection and staff in one place. This is a working demo: everything you add is saved in this browser.</p></div>
    <div class="points"><span>Online (Google Pay / UPI) and cash fees in one ledger</span><span>Fees applied to heads and installments automatically</span><span>Each role sees only what it is allowed to</span></div></section>
    <section class="login-form"><div><h2>Sign in</h2><p class="muted" style="margin:4px 0 0">Pick a demo account or type a username. The admin can add Clerk and Faculty logins later.</p></div>
@@ -158,20 +159,69 @@ function badgeFor(id){
   if(id==='fees'&&can('fees.concession.approve')){const n=db.students.filter(s=>s.fee.concession.status==='pending').length;return n?`<span class="badge" title="Concessions waiting for approval">${n}</span>`:''}
   return'';
 }
+/* ---------- shell: grouped sidebar (collapsible, drawer on phones), Profile and Sign out live at the bottom of it ---------- */
+const RAIL_KEY='vp_erp_rail';
+const NAV_HIDDEN=new Set(['sprofile']);
+const NAV_GROUP={dashboard:'Overview',students:'People',staff:'People',fees:'Finance',academic:'Academics',attendance:'Academics',marks:'Academics',practice:'Academics',messages:'Communication',reports:'Insights',audit:'Insights',eventlog:'Insights',settings:'System'};
+const ICON_MENU=IC('<path d="M4 6h16M4 12h16M4 18h16"/>'),ICON_PANEL=IC('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>'),ICON_X=IC('<path d="M6 6l12 12M18 6 6 18"/>'),ICON_USER=IC('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>');
+const railMini=()=>{const p=lsGet(RAIL_KEY);return p?p==='mini':innerWidth<1100};
+function navGroups(u){
+  const items=navFor(u).filter(n=>!NAV_HIDDEN.has(n[0])),fixed=u.role==='Parent'?'Parent portal':u.role==='Student'?'Student portal':'',map=new Map();
+  items.forEach(n=>{const g=fixed||NAV_GROUP[n[0]]||'More';if(!map.has(g))map.set(g,[]);map.get(g).push(n)});
+  return[...map];
+}
 function renderApp(){
   const u=cur();if(!u){renderLogin();return}
   const nav=navFor(u);if(!nav.find(n=>n[0]===ui.route))ui.route=nav[0][0];
-  $('#root').innerHTML=`<div class="app"><aside class="rail"><div class="brand"><div class="seal">V</div><div><b>${E(db.settings.college)}</b><small>${E(db.settings.year)}</small></div></div>
-   <nav class="nav" id="nav" aria-label="Main menu"></nav><div class="rail-foot">Demo data is saved in this browser only.</div></aside>
-   <main><div class="topbar"><button class="iconbtn tb" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl">${isDark()?'Light mode':'Dark mode'}</span></button>${bellHtml()}
-    <div class="chip"><div class="av">${E(initials(u.name))}</div><div><b>${E(u.name)}</b><small>${E(u.role)}${u.role==='Parent'?' of '+E(stu(u.studentId).name):''}${u.role==='Student'?' · '+E(u.studentId):''}</small></div></div>
-    <button class="iconbtn tb" data-act="logout" type="button" aria-label="Sign out" title="Sign out">${ICON_OUT}<span class="lbl">Sign out</span></button></div><div id="page"></div></main></div>`;
+  const mini=railMini(),who=E(u.role)+(u.role==='Parent'?' of '+E(stu(u.studentId).name):'')+(u.role==='Student'?' · '+E(u.studentId):'');
+  document.body.classList.remove('rail-lock');
+  $('#root').innerHTML=`<div class="app" data-rail="${mini?'mini':'open'}"><aside class="rail" id="rail" aria-label="Sidebar">
+   <div class="rail-head"><div class="brand"><div class="seal">V</div><div class="bt"><b>${E(db.settings.college)}</b><small>${E(db.settings.year)}</small></div></div>
+    <button class="rail-toggle" data-act="railToggle" type="button" aria-expanded="${!mini}" aria-label="${mini?'Expand sidebar':'Collapse sidebar'}" title="${mini?'Expand sidebar':'Collapse sidebar'}">${ICON_PANEL}</button>
+    <button class="rail-close" data-act="railClose" type="button" aria-label="Close menu">${ICON_X}</button></div>
+   <nav class="nav" id="nav" aria-label="Main menu"></nav>
+   <div class="rail-acct" role="group" aria-label="Your account"><div class="me" title="${E(u.name)}"><div class="av">${E(initials(u.name))}</div><div class="mt"><b>${E(u.name)}</b><small>${who}</small></div></div>
+    <button class="rb" data-act="profile" type="button" title="Profile">${ICON_USER}<span>Profile</span></button>
+    <button class="rb out" data-act="logout" type="button" title="Sign out">${ICON_OUT}<span>Sign out</span></button>
+    <div class="rail-foot">Demo data is saved in this browser only.</div></div></aside>
+   <div class="rail-scrim" data-act="railClose"></div>
+   <main><div class="topbar"><button class="iconbtn menu-btn" data-act="railOpen" type="button" aria-label="Open menu" aria-controls="rail" aria-expanded="false">${ICON_MENU}</button><div class="crumb" id="crumb"></div>
+    <div class="tb-end">${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button></div></div><div id="page"></div></main></div>`;
   renderNav();renderPage();playEnter('enter');
 }
-function renderNav(){const u=cur();$('#nav').innerHTML=navFor(u).map(n=>`<button data-act="nav" data-id="${n[0]}" ${ui.route===n[0]?'aria-current="page"':''}><svg viewBox="0 0 24 24">${ICONS[n[0]]||ICONS.dashboard}</svg><span class="nl">${E(n[1])}</span>${badgeFor(n[0])}</button>`).join('')}
+function renderNav(){
+  const u=cur();
+  $('#nav').innerHTML=navGroups(u).map(([g,items],i)=>`<div class="ng" role="group" aria-labelledby="gl${i}"><div class="gl" id="gl${i}">${E(g)}</div>${items.map(n=>`<button data-act="nav" data-id="${n[0]}" title="${E(n[1])}" ${ui.route===n[0]?'aria-current="page"':''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[n[0]]||ICONS.dashboard}</svg><span class="nl">${E(n[1])}</span>${badgeFor(n[0])}</button>`).join('')}</div>`).join('');
+  const cr=$('#crumb');if(cr){const n=navFor(u).find(x=>x[0]===ui.route);cr.textContent=n?n[1]:''}
+  const pb=document.querySelector('[data-act=profile]');if(pb){if(ui.route==='sprofile')pb.setAttribute('aria-current','page');else pb.removeAttribute('aria-current')}
+}
+function railSet(open){
+  const a=$('.app');if(!a)return;a.classList.toggle('rail-open',open);document.body.classList.toggle('rail-lock',open);
+  const m=$('.menu-btn');if(m)m.setAttribute('aria-expanded',String(open));
+  if(open){const f=$('#nav [aria-current]')||$('#nav button');if(f)f.focus({preventScroll:true})}else if(m&&a._viaMenu){a._viaMenu=false;try{m.focus({preventScroll:true})}catch(e){}}
+}
+function railClose(){railSet(false)}
+ACT.railOpen=()=>{const a=$('.app');if(a)a._viaMenu=true;railSet(true)};
+ACT.railClose=railClose;
+ACT.railToggle=()=>{
+  const a=$('.app');if(!a)return;const mini=a.dataset.rail!=='mini';a.dataset.rail=mini?'mini':'open';lsSet(RAIL_KEY,mini?'mini':'open');
+  const b=$('.rail-toggle');if(b){b.setAttribute('aria-expanded',String(!mini));const t=mini?'Expand sidebar':'Collapse sidebar';b.setAttribute('aria-label',t);b.setAttribute('title',t)}
+};
+try{matchMedia('(min-width:821px)').addEventListener('change',e=>{if(e.matches)railClose()})}catch(e){}
+/* Profile: students have a full My Profile page; everyone else gets their account details and password change in a side panel */
+function profileHtml(){
+  const u=cur(),st=(db.staff||[]).find(x=>x.userId===u.id),kid=u.role==='Parent'?stu(u.studentId):null;
+  const L=(k,v)=>`<div class="rline"><span>${k}</span><b style="overflow-wrap:anywhere;text-align:right;font-weight:500">${E(v||'-')}</b></div>`;
+  const mods=navFor(u).filter(n=>!NAV_HIDDEN.has(n[0])).map(n=>n[1]);
+  return`<button class="btn x" data-act="close">Close</button><div class="who" style="margin:4px 0 14px"><div class="av">${E(initials(u.name))}</div><div><h2 style="margin:0">${E(u.name)}</h2><small class="muted">${E(u.role)}</small></div></div>
+   <div class="panel">${L('Role',u.role)}${L('Status',u.active?'Active':'Switched off')}${st?L('Designation',st.designation)+L('Department',st.department)+L('Mobile',st.phone)+L('Email',st.email):''}${kid?L('Student',kid.name+' · '+kid.id):''}</div>
+   <div class="panel" style="margin-top:12px"><h2>What you can open</h2><div class="actions">${mods.map(m=>`<span class="pill">${E(m)}</span>`).join('')}</div></div>
+   <div style="margin-top:12px">${accountPanel()}</div>`;
+}
+ACT.profile=()=>{const u=cur();railClose();if(u.role==='Student'){go('sprofile');return}drawer(profileHtml())};
 function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();pg.innerHTML=n?n[3]():'';renderNav()}
 function go(route){ui.route=route;{const n=navFor(cur()).find(x=>x[0]===route);if(n)ev('Page','Opened '+n[1],route)}renderPage();window.scrollTo(0,0);playEnter('enter')}
-ACT.nav=el=>{closeLayer();go(el.dataset.id)};
+ACT.nav=el=>{closeLayer();railClose();go(el.dataset.id)};
 function refresh(){save();renderPage()}
 
 /* ---------- dashboard ---------- */
