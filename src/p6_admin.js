@@ -113,14 +113,34 @@ function viewAudit(){
 const auditRows=l=>l.map(a=>`<tr><td>${fmtT(a.ts)}</td><td>${E(a.user)} ${a.role&&a.role!=='-'?pill(a.role):''}</td><td><b>${E(a.action)}</b></td><td style="white-space:normal;min-width:240px">${E(a.detail)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">Nothing in the log yet.</td></tr>';
 LIVE.auditQ=el=>{ui.f.audit=el.value;const q=el.value.toLowerCase();$('#auditRows').innerHTML=auditRows(db.audit.filter(a=>!q||(a.action+' '+a.detail+' '+a.user).toLowerCase().includes(q)).slice(0,120))};
 
-/* ----- settings ----- */
+/* ----- settings: one card per job ----- */
+const SET_IC={
+ college:'<path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/>',
+ access:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5M17 11l2 2 3.5-4"/>',
+ fees:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/>',
+ mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+ bell:'<path d="M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7M10 20a2 2 0 0 0 4 0"/>',
+ data:'<ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+ reset:'<path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/>'};
+const setIc=k=>`<span class="sic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${SET_IC[k]}</svg></span>`;
+const setCard=(id,ic,title,desc,body,cls='')=>`<section class="scard ${cls}" id="set-${id}" aria-labelledby="set-${id}-h"><header class="shead">${setIc(ic)}<div><h2 id="set-${id}-h">${E(title)}</h2><p>${E(desc)}</p></div></header><div class="sbody">${body}</div></section>`;
+const setGroup=(id,title,cards)=>cards.filter(Boolean).length?`<div class="sgroup" id="set-g-${id}"><h3 class="sglabel">${E(title)}</h3><div class="sgrid">${cards.filter(Boolean).join('')}</div></div>`:'';
 function viewSettings(){
-  const st=db.settings;const n=k=>db[k].length;
-  return head('Settings','College details and demo data tools.')+`<div class="grid even"><div class="panel"><h2>College</h2><form data-form="saveSettings" class="form">${F('college','College name',{val:st.college,req:1,span:1})}${F('short','Short name (messages)',{val:st.short})}${F('city','City',{val:st.city})}${F('year','Academic year',{val:st.year})}<button class="btn primary span">Save</button></form></div>
-   <div class="panel"><h2>Demo data</h2><div class="list"><div class="li"><span>Students</span><b>${n('students')}</b></div><div class="li"><span>Receipts</span><b>${n('payments')}</b></div><div class="li"><span>Staff</span><b>${n('staff')}</b></div><div class="li"><span>Logins</span><b>${n('users')}</b></div><div class="li"><span>Audit entries</span><b>${n('audit')}</b></div></div>
-   <div class="actions" style="margin-top:12px"><button class="btn" data-act="backupOut">Show backup</button><button class="btn" data-act="backupIn">Restore from backup</button><button class="btn danger" data-act="resetDemo">Reset to sample data</button></div>
-   <p class="note">Everything is stored in this browser with localStorage. Another browser or device starts with its own sample data.</p></div>${mailSettingsPanel()}</div>${ntRulesPanel()}`;
+  const st=db.settings;const n=k=>db[k].length;const su=cur().role==='Super Admin';
+  const stat=(l,v)=>`<div class="li"><span>${l}</span><b>${v}</b></div>`;
+  const college=setCard('college','college','College profile','Name and academic year shown on receipts, messages and the sidebar.',`<form data-form="saveSettings" class="form">${F('college','College name',{val:st.college,req:1,span:1})}${F('short','Short name (messages)',{val:st.short})}${F('city','City',{val:st.city})}${F('year','Academic year',{val:st.year})}<button class="btn primary span">Save</button></form>`);
+  const access=setCard('access','access','Logins and roles','Who can sign in. Roles and their permissions are managed under Staff and Roles.',`<div class="list">${stat('Staff members',n('staff'))}${stat('Logins',n('users'))}${stat('Active logins',db.users.filter(u=>u.active!==false).length)}</div>${can('staff.view')?'<div class="actions" style="margin-top:12px"><button class="btn" data-act="go" data-to="staff">Open Staff and Roles</button></div>':''}`);
+  const fees=setCard('fees','fees','Fees and receipts','Current rules used for every payment. Change them in Fee setup.',`<div class="list">${stat('Next receipt number',E(st.receiptPrefix)+db.counters.rc)}${stat('Late fee per day',inr(st.lateFeePerDay))}${stat('Late fee cap',inr(st.lateCap))}${stat('Grace days',st.graceDays)}${stat('Installments due after',E(st.dueOffsets.join(', '))+' days')}</div>${can('fees.setup')?'<div class="actions" style="margin-top:12px"><button class="btn" data-act="alertGo" data-to="fees" data-sub="setup">Open Fee setup</button></div>':''}`);
+  const mail=mailSettingsPanel();
+  const nt=su?ntRulesPanel():'';
+  const data=setCard('data','data','Data and backup','Everything is kept in this browser (localStorage). Another browser or device starts with its own sample data.',`<div class="list">${stat('Students',n('students'))}${stat('Receipts',n('payments'))}${stat('Audit entries',n('audit'))}</div><div class="actions" style="margin-top:12px"><button class="btn" data-act="backupOut">Show backup</button><button class="btn" data-act="backupIn">Restore from backup</button></div>`);
+  const reset=setCard('reset','reset','Reset demo','Wipes every change you made and brings back the original sample students, fees and logins.',`<div class="actions"><button class="btn danger" data-act="resetDemo">Reset to sample data</button></div>`,'danger');
+  const jump=[['college','College'],['fees','Fees and receipts'],['mail','Email'],...(su?[['notify','Notifications']]:[]),['data','Data and backup']];
+  return head('Settings','Everything that can be configured, grouped by what it controls.')+
+   `<nav class="sjump" aria-label="Jump to a settings card">${jump.map(([k,l])=>`<button type="button" data-act="setJump" data-to="${k==='mail'?'mail':k}">${E(l)}</button>`).join('')}</nav>`+
+   setGroup('org','College and access',[college,access])+setGroup('fin','Fees and email',[fees,mail])+(nt?`<div class="sgroup" id="set-g-notify"><h3 class="sglabel">Notifications</h3><div class="sgrid one">${nt}</div></div>`:'')+setGroup('data','Data',[data,reset]);
 }
+ACT.setJump=el=>{const t=document.getElementById('set-'+el.dataset.to);if(t){t.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth',block:'start'});t.classList.add('flash');setTimeout(()=>t.classList.remove('flash'),1400)}};
 FORM.saveSettings=(f,d)=>{if(!can('settings.manage'))throw new Error('You do not have access to settings');Object.assign(db.settings,{college:d.college,short:d.short||d.college,city:d.city,year:d.year});log('Settings changed','College details');save();toast('Saved');renderApp()};
 ACT.backupOut=()=>drawer(`<button class="btn x" data-act="close">Close</button><h2>Backup</h2><p class="note">Copy this text and keep it safe. Paste it into Restore to bring the data back.</p><textarea class="csvbox" id="csvText" readonly>${E(JSON.stringify(db))}</textarea><div class="actions" style="margin-top:12px"><button class="btn primary" data-act="copyCsv">Copy to clipboard</button></div>`,true);
 ACT.backupIn=()=>drawer(`<button class="btn x" data-act="close">Close</button><h2>Restore from backup</h2><form data-form="restore" class="grid" style="gap:12px;margin-top:12px"><textarea class="csvbox" name="json" required placeholder="Paste backup text here"></textarea><button class="btn danger">Replace all data with this backup</button></form>`,true);

@@ -225,15 +225,14 @@ function feeOutbox(){
 /* ---------- Settings: e-mail ---------- */
 function mailSettingsPanel(){
   const m=mailCfg();
-  return`<div class="panel"><h2>Email receipts</h2><p class="note" style="margin:0 0 12px">A PDF receipt is emailed automatically after every payment: counter, online gateway, parent portal and student portal.</p>
-   <form data-form="saveMail" class="form">${F('enabled','Automatic emails',{opts:[['1','On'],['0','Off']],val:m.enabled?'1':'0'})}${F('to','Send to',{opts:[['both','Parent and student'],['guardian','Parent only'],['student','Student only']],val:m.to})}
+  return setCard('mail','mail','Email receipts','A PDF receipt is emailed automatically after every payment: counter, online gateway, parent portal and student portal.',`   <form data-form="saveMail" class="form">${F('enabled','Automatic emails',{opts:[['1','On'],['0','Off']],val:m.enabled?'1':'0'})}${F('to','Send to',{opts:[['both','Parent and student'],['guardian','Parent only'],['student','Student only']],val:m.to})}
    ${F('fromName','Sender name',{val:m.fromName,ph:db.settings.college,span:1})}${F('replyTo','Reply-to address',{val:m.replyTo,type:'email',ph:'accounts@yourcollege.edu',span:1})}
    ${F('mode','Sending mode',{opts:[['demo','Demo: show in outbox, send nothing'],['live','Live: send through the mail server']],val:m.mode,span:1})}
    ${F('endpoint','Mail server address',{val:m.endpoint,span:1})}${F('key','Access key (RECEIPT_API_KEY)',{val:m.key,type:'password',span:1,ph:'Same value as in Vercel'})}
    ${F('redirect','Test redirect (optional)',{val:m.redirect,type:'email',span:1,ph:'your@email.com'})}
    <p class="note span" style="margin:0">While you are demonstrating, put your own address in Test redirect: every live email then goes only to you, with the real recipient in the subject.</p>
    <button class="btn primary span">Save email settings</button></form>
-   <div class="actions" style="margin-top:12px"><button class="btn" data-act="mailPing">Check mail server</button><button class="btn" data-act="mailTestAsk">Send a test email</button></div><div id="mailPingOut" class="note" role="status"></div></div>`;
+   <div class="actions" style="margin-top:12px"><button class="btn" data-act="mailPing">Check mail server</button><button class="btn" data-act="mailTestAsk">Send a test email</button></div><div id="mailPingOut" class="note" role="status"></div>`);
 }
 FORM.saveMail=(f,d)=>{
   if(!can('settings.manage'))throw new Error('You do not have access to settings');

@@ -52,12 +52,11 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden||!cur())ret
 /* ---------- Settings: who is notified about what ---------- */
 function ntRulesPanel(){
   if(!cur()||cur().role!=='Super Admin')return'';
-  return`<div class="panel" style="margin-top:14px"><h2>Notification rules</h2>
-   <p class="note" style="margin:0 0 12px">Choose who is notified about each event. Everyone sees theirs under the bell at the top. The person who does something is never notified about their own action, and the people directly concerned (the one who asked for a concession, the owner of a login) are always told.</p>
+  return setCard('notify','bell','Notification rules','Choose who is notified about each event. Everyone sees theirs under the bell at the top. The person who does something is never notified about their own action, and the people directly concerned (the one who asked for a concession, the owner of a login) are always told.',`
    <div class="actions" style="margin-bottom:12px"><button class="btn" data-act="ntTest">Send me a test notification</button><button class="btn" data-act="ntRulesReset">Restore default rules</button></div>
    <div class="tablewrap"><table class="matrix"><thead><tr><th>Event</th>${NT_ROLES.map(r=>`<th>${E(r)}</th>`).join('')}</tr></thead><tbody>
    ${NT_CATS.map(c=>`<tr><td><div><b>${E(c.l)}</b><small style="display:block;color:var(--muted);font-weight:400;margin-top:2px">${E(c.d)}</small></div></td>${NT_ROLES.map(r=>`<td><input type="checkbox" aria-label="${E(r)}: ${E(c.l)}" ${ntOn(c.k,r)?'checked':''} data-change="ntRule" data-c="${c.k}" data-r="${E(r)}"></td>`).join('')}</tr>`).join('')}
-   </tbody></table></div></div>`;
+   </tbody></table></div>`,'wide');
 }
 CHG.ntRule=el=>{
   if(!cur()||cur().role!=='Super Admin')throw new Error('Only the Super Admin can change notification rules');

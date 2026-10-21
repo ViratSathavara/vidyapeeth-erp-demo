@@ -1229,6 +1229,29 @@ await T('App Shell','SH-account','Profile and Sign out are in the sidebar, not t
   ok((await p.$$('[data-act=logout]')).length===1&&(await p.$$('[data-act=profile]')).length===1,'duplicate controls');
   ok(/Rajiv|Super Admin/.test(await p.text('.me')),'account block');
 });
+await T('App Shell','SH-account-compact','Account row is just the avatar, name and a sign-out icon, with hover labels','admin',async p=>{
+  const t=await p.$eval('.rail-acct',e=>[...e.querySelectorAll('button')].map(b=>b.innerText.replace(/\s+/g,' ').trim()));
+  ok(!t.some(x=>/\bProfile\b|Sign out/i.test(x)),'label text shown: '+t.join('|'));
+  ok(await p.$eval('[data-act=logout]',e=>!e.innerText.trim()&&e.getAttribute('aria-label')==='Sign out'&&e.dataset.tip==='Sign out'),'sign out icon');
+  ok(await p.$eval('.me',e=>e.dataset.tip==='View profile'),'profile hover label');
+  await p.hover('.me');await p.waitForTimeout(250);ok(await p.$eval('.me',e=>+getComputedStyle(e,'::after').opacity)>0.9,'profile tooltip not shown on hover');
+  await p.hover('[data-act=logout]');await p.waitForTimeout(250);ok(await p.$eval('[data-act=logout]',e=>+getComputedStyle(e,'::after').opacity)>0.9,'sign out tooltip not shown');
+  await p.click('.me');await p.waitForTimeout(250);ok(await p.$('.drawer'),'avatar/name did not open profile');
+});
+await T('App Shell','SH-settings-cards','Settings is split into separate cards by function and the jump chips scroll to them','admin',async p=>{
+  await p.nav('Settings');
+  const ids=await p.$$eval('.scard',e=>e.map(x=>x.id));ok(ids.join()==='set-college,set-access,set-fees,set-mail,set-notify,set-data,set-reset',ids.join());
+  ok(await p.$$eval('.scard',e=>e.every(x=>x.querySelector('h2')&&x.querySelector('.sic'))),'card header');
+  ok(await p.$eval('#set-fees',e=>/Late fee per day/.test(e.innerText)&&/RC-/.test(e.innerText)),'fees card content');
+  await p.click('.sjump button:has-text("Data and backup")');await p.waitForTimeout(700);ok(await p.$eval('#set-data',e=>{const r=e.getBoundingClientRect();return r.top<innerHeight&&r.bottom>0}),'jump did not scroll');
+  await p.click('#set-college .btn.primary');await p.waitForTimeout(150);ok(/Saved/.test(await p.toast()),'college save');
+  await p.click('[data-act=alertGo][data-sub=setup]').catch(()=>{});await p.nav('Settings');
+  ok(await p.$('#set-fees [data-act=alertGo]'),'fee setup shortcut');await p.click('#set-fees [data-act=alertGo]');await p.waitForTimeout(250);ok(/Late fee and due dates/.test(await p.text()),'fee setup not opened');
+});
+await T('App Shell','SH-settings-principal','Settings cards hide what a role cannot use','principal',async p=>{
+  const can=await p.evaluate(()=>can('settings.manage'));if(!can){ok(!(await p.navs()).includes('Settings'),'settings menu visible');return}
+  ok(!(await p.$('#set-notify')),'notify card for non super admin');
+});
 await T('App Shell','SH-topbar','Top bar holds only notifications and the theme switch (menu button on phones)','principal',async p=>{
   const ids=await p.$$eval('.topbar button',b=>b.filter(x=>getComputedStyle(x).display!=='none').map(x=>x.dataset.act));
   ok(ids.join()==='bell,theme',ids.join());

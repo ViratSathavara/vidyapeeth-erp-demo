@@ -41,7 +41,7 @@ const AUDIT=()=>{
   const seenC=new Set();
   for(const e of all){const c=cs(e);if(e.scrollWidth<=e.clientWidth+1&&e.scrollHeight<=e.clientHeight+2)continue;
     const ox=c.overflowX,oy=c.overflowY;const hx=/hidden|clip/.test(ox)&&e.scrollWidth>e.clientWidth+1,hy=/hidden|clip/.test(oy)&&e.scrollHeight>e.clientHeight+2;if(!hx&&!hy)continue;
-    if(!(e.textContent||'').trim()||/^(HTML|BODY)$/.test(e.tagName)||e.closest('.scrim')||e.matches('.login-art'))continue;
+    if(!(e.textContent||'').trim()||/^(HTML|BODY)$/.test(e.tagName)||e.closest('.scrim')||e.matches('.login-art,.sr'))continue;
     const s=sig(e);if(seenC.has(s))continue;seenC.add(s);
     if(c.textOverflow==='ellipsis'&&e.scrollWidth>e.clientWidth+1)out.push(['ellipsis',`${e.scrollWidth}px of text in ${e.clientWidth}px`,s]);
     else out.push(['clipped',`content ${e.scrollWidth}x${e.scrollHeight} in box ${e.clientWidth}x${e.clientHeight}`,s]);if(seenC.size>14)break}

@@ -180,9 +180,9 @@ function renderApp(){
     <button class="rail-toggle" data-act="railToggle" type="button" aria-expanded="${!mini}" aria-label="${mini?'Expand sidebar':'Collapse sidebar'}" title="${mini?'Expand sidebar':'Collapse sidebar'}">${ICON_PANEL}</button>
     <button class="rail-close" data-act="railClose" type="button" aria-label="Close menu">${ICON_X}</button></div>
    <nav class="nav" id="nav" aria-label="Main menu"></nav>
-   <div class="rail-acct" role="group" aria-label="Your account"><div class="me" title="${E(u.name)}"><div class="av">${E(initials(u.name))}</div><div class="mt"><b>${E(u.name)}</b><small>${who}</small></div></div>
-    <button class="rb" data-act="profile" type="button" title="Profile">${ICON_USER}<span>Profile</span></button>
-    <button class="rb out" data-act="logout" type="button" title="Sign out">${ICON_OUT}<span>Sign out</span></button>
+   <div class="rail-acct" role="group" aria-label="Your account"><div class="acct-row">
+    <button class="me" data-act="profile" type="button" data-tip="View profile" aria-label="View profile, signed in as ${E(u.name)}"><span class="av">${E(initials(u.name))}</span><span class="mt"><b>${E(u.name)}</b><small>${who}</small></span></button>
+    <button class="out" data-act="logout" type="button" data-tip="Sign out" aria-label="Sign out">${ICON_OUT}</button></div>
     <div class="rail-foot">Demo data is saved in this browser only.</div></div></aside>
    <div class="rail-scrim" data-act="railClose"></div>
    <main><div class="topbar"><button class="iconbtn menu-btn" data-act="railOpen" type="button" aria-label="Open menu" aria-controls="rail" aria-expanded="false">${ICON_MENU}</button><div class="crumb" id="crumb"></div>
@@ -193,7 +193,7 @@ function renderNav(){
   const u=cur();
   $('#nav').innerHTML=navGroups(u).map(([g,items],i)=>`<div class="ng" role="group" aria-labelledby="gl${i}"><div class="gl" id="gl${i}">${E(g)}</div>${items.map(n=>`<button data-act="nav" data-id="${n[0]}" title="${E(n[1])}" ${ui.route===n[0]?'aria-current="page"':''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[n[0]]||ICONS.dashboard}</svg><span class="nl">${E(n[1])}</span>${badgeFor(n[0])}</button>`).join('')}</div>`).join('');
   const cr=$('#crumb');if(cr){const n=navFor(u).find(x=>x[0]===ui.route);cr.textContent=n?n[1]:''}
-  const pb=document.querySelector('[data-act=profile]');if(pb){if(ui.route==='sprofile')pb.setAttribute('aria-current','page');else pb.removeAttribute('aria-current')}
+  const pb=document.querySelector('.rail [data-act=profile]');if(pb){if(ui.route==='sprofile')pb.setAttribute('aria-current','page');else pb.removeAttribute('aria-current')}
 }
 function railSet(open){
   const a=$('.app');if(!a)return;a.classList.toggle('rail-open',open);document.body.classList.toggle('rail-lock',open);
