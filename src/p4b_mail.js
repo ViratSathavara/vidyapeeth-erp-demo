@@ -51,9 +51,10 @@ const rs=n=>'Rs. '+Math.round(n||0).toLocaleString('en-IN');
 /* one place that gathers everything a receipt shows, used by the PDF, the e-mail and the text version */
 function receiptData(p){
   const s=stu(p.studentId),c=course(s.course),b=batchOf(s.batch);
-  return{p,s,c,b,college:db.settings.college,city:db.settings.city,cancelled:p.status!=='ok',
+  const sn=p.snap||{};
+  return{p,s,c,b,college:sn.c||db.settings.college,city:sn.y||db.settings.city,cancelled:p.status!=='ok',
     rows:(p.alloc||[]).filter(a=>a.applied>0||a.amount>0).map(a=>({name:a.name,before:a.before,applied:a.applied,left:a.amount-a.after})),
-    cls:classLabel(s)};
+    cls:sn.k||classLabel(s)};
 }
 function receiptPdf(p){
   const d=receiptData(p),s=d.s;const ts=new Date(p.ts||Date.now());
@@ -127,7 +128,7 @@ function queueReceiptMail(p,o={}){
   const m=mailCfg(),s=stu(p.studentId);
   if(o.trigger==='auto'&&!m.enabled)return null;
   const to=o.to||mailTargets(s);
-  const rec={id:uid('o'),ts:Date.now(),paymentId:p.id,rc:p.rc,studentId:s.id,to:to.map(x=>x.email),names:to.map(x=>x.role),subject:`Fee receipt ${p.rc} - ${db.settings.college}`,filename:p.rc+'.pdf',bytes:0,
+  const rec={id:uid('o'),ts:Date.now(),paymentId:p.id,rc:p.rc,studentId:s.id,to:to.map(x=>x.email),names:to.map(x=>x.role),subject:`Fee receipt ${p.rc} - ${(p.snap&&p.snap.c)||db.settings.college}`,filename:p.rc+'.pdf',bytes:0,
     status:'Queued',mode:m.mode,attempts:0,error:'',trigger:o.trigger||'auto'};
   db.outbox.unshift(rec);if(db.outbox.length>300)db.outbox.length=300;
   if(!to.length){rec.status='Skipped';rec.error='No valid email address on file for this student or guardian';ev('Email','Receipt email skipped',`${p.rc}: ${rec.error}`,{status:'fail'});return rec}
@@ -189,7 +190,7 @@ ACT.mailRetry=el=>{
   if(o.status==='Failed'){o.status='Queued';o.error='';save();deliver(o.id);toast('Trying again')}
   else{const rec=queueReceiptMail(p,{trigger:'resend'});save();toast(rec.status==='Skipped'?'No email address on file':'Receipt is being sent again');refreshMailUi(rec);if(ui.route==='fees')renderPage()}
 };
-ACT.mailRetryAll=()=>{const f=db.outbox.filter(o=>o.status==='Failed');f.forEach(o=>{o.status='Queued';o.error='';deliver(o.id)});save();toast(f.length?`Retrying ${f.length} email${f.length>1?'s':''}`:'Nothing to retry');renderPage()};
+ACT.mailRetryAll=()=>{need('fees.view','the email outbox');const f=db.outbox.filter(o=>o.status==='Failed');f.forEach(o=>{o.status='Queued';o.error='';deliver(o.id)});save();toast(f.length?`Retrying ${f.length} email${f.length>1?'s':''}`:'Nothing to retry');renderPage()};
 ACT.dlPdf=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p||!mayMailReceipt(p))throw new Error('Receipt not found');savePdf(p).catch(()=>toast('Could not save the PDF',true))};
 async function savePdf(p){
   const bytes=pdfBytes(receiptPdf(p)),name=p.rc+'.pdf';
@@ -200,14 +201,14 @@ async function savePdf(p){
   toast('PDF downloaded');
 }
 ACT.mailPreview=el=>{
-  const o=db.outbox.find(x=>x.id===el.dataset.id);if(!o)throw new Error('Email not found');const p=db.payments.find(x=>x.id===o.paymentId);const m=mailCfg();
+  need('fees.view','the email outbox');const o=db.outbox.find(x=>x.id===el.dataset.id);if(!o)throw new Error('Email not found');const p=db.payments.find(x=>x.id===o.paymentId);const m=mailCfg();
   const mail=buildReceiptMail(p);
   drawer(`<button class="btn x" data-act="close">Close</button><h2>Email preview</h2>
    <div class="panel" style="padding:12px;margin:12px 0"><div class="rline"><span>From</span><span>${E(m.fromName||db.settings.college)}</span></div><div class="rline"><span>To</span><span style="text-align:right">${E(o.to.join(', ')||'-')}</span></div><div class="rline"><span>Subject</span><span style="text-align:right">${E(o.subject)}</span></div>
-   <div class="rline"><span>Status</span><span id="mailPrevStatus" data-id="${o.id}">${mailPill(o.status)}${o.error?` <span class="muted">${E(o.error)}</span>`:''}</span></div>
+   <div class="rline"><span>Status</span><span id="mailPrevStatus" data-id="${E(o.id)}">${mailPill(o.status)}${o.error?` <span class="muted">${E(o.error)}</span>`:''}</span></div>
    <div class="rline"><span>Attachment</span><span>${pill('PDF')} ${E(o.filename)} · ${fmtSize(mail.pdf.length)}</span></div></div>
    <div class="mailbody">${mail.fragment}</div>
-   <div class="actions" style="margin-top:14px"><button class="btn primary" data-act="mailRetry" data-id="${o.id}">${o.status==='Failed'?'Retry sending':'Send again'}</button><button class="btn" data-act="dlPdf" data-id="${p.id}">Download PDF</button><button class="btn" data-act="viewReceipt" data-id="${p.id}">Open receipt</button></div>
+   <div class="actions" style="margin-top:14px"><button class="btn primary" data-act="mailRetry" data-id="${E(o.id)}">${o.status==='Failed'?'Retry sending':'Send again'}</button><button class="btn" data-act="dlPdf" data-id="${E(p.id)}">Download PDF</button><button class="btn" data-act="viewReceipt" data-id="${E(p.id)}">Open receipt</button></div>
    <p class="note">${m.mode==='live'?'Live mode: this goes through your mail server.':'Demo mode: nothing is actually sent. Switch to live mode in Settings once the mail server is set up.'}</p>`);
 };
 
@@ -219,7 +220,7 @@ function feeOutbox(){
    <div class="actions">${failed?`<button class="btn sm" data-act="mailRetryAll">Retry ${failed} failed</button>`:''}${can('settings.manage')?'<button class="btn sm" data-act="go" data-to="settings">Email settings</button>':''}</div></div>
    <div class="tablewrap"><table><thead><tr><th>Time</th><th>Receipt</th><th>Student</th><th>To</th><th>Status</th><th></th></tr></thead><tbody>
    ${rows.map(o=>{const s=stu(o.studentId);return`<tr><td>${E(fmtT(o.ts))}</td><td class="mono">${E(o.rc)}</td><td>${E(s?s.name:'-')}</td><td>${E(shortList(o.to)||'-')}</td><td>${mailPill(o.status)}${o.error?`<br><small class="muted">${E(o.error)}</small>`:''}</td>
-    <td><button class="btn sm" data-act="mailPreview" data-id="${o.id}">Preview</button> <button class="btn sm" data-act="mailRetry" data-id="${o.id}">${o.status==='Failed'?'Retry':'Send again'}</button></td></tr>`}).join('')||'<tr><td colspan="6" class="empty">No emails yet. Collect a payment and its PDF receipt is emailed automatically.</td></tr>'}</tbody></table></div></div>`;
+    <td><button class="btn sm" data-act="mailPreview" data-id="${E(o.id)}">Preview</button> <button class="btn sm" data-act="mailRetry" data-id="${E(o.id)}">${o.status==='Failed'?'Retry':'Send again'}</button></td></tr>`}).join('')||'<tr><td colspan="6" class="empty">No emails yet. Collect a payment and its PDF receipt is emailed automatically.</td></tr>'}</tbody></table></div></div>`;
 }
 
 /* ---------- Settings: e-mail ---------- */
@@ -243,13 +244,13 @@ FORM.saveMail=(f,d)=>{
   log('Settings changed','Email receipts: '+(db.settings.mail.enabled?'on':'off')+', '+db.settings.mail.mode);save();toast('Email settings saved');renderPage();
 };
 ACT.mailPing=async()=>{
-  const m=mailCfg(),out=$('#mailPingOut');out.textContent='Checking...';
+  need('settings.manage','settings');const m=mailCfg(),out=$('#mailPingOut');out.textContent='Checking...';
   try{const r=await fetch(m.endpoint||'/api/send-receipt');const j=await r.json();
     out.textContent=j.configured?`Mail server is reachable and ready (sending as ${j.from||'configured address'}).`:'Mail server is reachable but not set up: add RESEND_API_KEY, MAIL_FROM and RECEIPT_API_KEY in Vercel, then redeploy.'}
   catch(e){out.textContent='Could not reach the mail server at '+(m.endpoint||'/api/send-receipt')+'. This is expected in the preview: the server exists only on the deployed site.'}
 };
 ACT.mailTestAsk=()=>{
-  if(!db.payments.some(p=>p.status==='ok'))throw new Error('Make a payment first. The test uses the latest receipt.');
+  need('settings.manage','settings');if(!db.payments.some(p=>p.status==='ok'))throw new Error('Make a payment first. The test uses the latest receipt.');
   dialog(`<h3>Send a test email</h3><form data-form="mailTest" class="grid" style="gap:12px"><p class="muted" style="margin:0">Sends the latest receipt with its PDF to this address.</p>${F('email','Send to',{type:'email',req:1,ph:'your@email.com'})}<div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Cancel</button><button class="btn primary">Send test</button></div></form>`);
 };
 FORM.mailTest=(f,d)=>{

@@ -8,6 +8,9 @@ const DEMO5=['admin','principal','accountant','parent','student'];
 const EXTRA=[['st4','clerk','clerk123','Clerk'],['st5','faculty','faculty123','Faculty'],['st6','hetal','faculty123','Faculty'],['st7','sunil','faculty123','Faculty'],['st8','nirali','faculty123','Faculty']];
 const results=[];let browser;
 const only=process.argv[3]?new RegExp(process.argv[3],'i'):null;
+/* Files that belong to the build under test (vercel.json, src/make-index.sh) are looked up next to it, then relative to this suite and the working folder. Override with VERCEL_JSON / MAKE_INDEX_SH. There is no absolute fallback: a missing file fails the test loudly instead of checking some other copy. */
+const BUILD_DIR=require('path').dirname(FILE.replace('file://',''));
+const locate=(rels,envName)=>{const P=require('path');const c=[process.env[envName],...rels.flatMap(r=>[P.join(BUILD_DIR,r),P.join(__dirname,'..',r),P.join(__dirname,r),P.join(process.cwd(),r)])].filter(Boolean);return c.find(x=>fs.existsSync(x))||null};
 
 async function mk(role,opts={}){
   const c=await browser.newContext({viewport:opts.vp||{width:1280,height:850},colorScheme:'light',reducedMotion:opts.motion?'no-preference':'reduce'});
@@ -101,7 +104,9 @@ for(const r of Object.keys(NAVS)){
   await T('Login and Roles','RB-'+r,`${r} sees exactly the permitted menus`,r,async p=>{const n=await p.navs();ok(JSON.stringify([...n].sort())===JSON.stringify([...NAVS[r]].sort()),'menus: '+n.join(', '))});
 }
 await T('Login and Roles','RB-guard','Route guard: restricted page cannot be opened by direct call','clerk',async p=>{
-  await p.evaluate(()=>go('settings'));await p.waitForTimeout(100);const t=await p.text();ok(!/College details/.test(t),'clerk reached Settings');
+  await p.evaluate(()=>go('settings'));await p.waitForTimeout(100);
+  ok(!(await p.$('#set-college'))&&!(await p.$('.scard'))&&!(await p.$('.sjump')),'clerk reached Settings (cards or jump bar rendered)');
+  ok((await p.evaluate(()=>ui.route))!=='settings','clerk route is settings');ok(!/College profile/.test(await p.text()),'clerk sees College profile text');
   await p.evaluate(()=>go('staff'));ok(!/Role permissions/.test(await p.text()),'clerk reached Staff');
 });
 await T('Login and Roles','RB-action','Action guard: clerk cannot cancel receipt or close day via forced call','clerk',async p=>{
@@ -897,7 +902,7 @@ await T('Notifications','NT-admission','Admission welcomes the new family and te
   ok(!(await nt(p,'clerk')).some(n=>n.k==='admission'),'clerk told about own admission');ok(!(await nt(p,'parent')).some(n=>/Notify Student/.test(n.t+n.x)),'other family notified');
 });
 await T('Notifications','NT-concession','Concession request goes to the Principal; the decision always reaches the requester','clerk',async p=>{
-  const id=await p.evaluate(()=>db.students.find(s=>s.fee.concession.status==='none'||!s.fee.concession.status||s.fee.concession.type==='none').id);
+  const id=await p.evaluate(()=>db.students.find(s=>s.fee.paid===0&&(s.fee.concession.status==='none'||!s.fee.concession.status||s.fee.concession.type==='none')).id); /* a student who has not paid yet: loop 4 refuses a concession that would leave money paid over the new fee */
   await p.evaluate(i=>{FORM.concRequest({},{sid:i,conc:CONC_OPTS.find(o=>o[0]!=='none')[0],why:'Merit'})},id);
   ok(ntHas(await nt(p,'principal'),'conc_req',/Clerk|clerk|Merit|requested/),'principal');ok(ntHas(await nt(p,'admin'),'conc_req'),'admin');
   await p.logout();await p.login('principal','principal123');await p.evaluate(i=>ACT.concDecide({dataset:{id:i,v:'approved'}}),id);
@@ -1263,7 +1268,7 @@ await T('App Shell','SH-groups','Sidebar menu is grouped with labels and the ope
 await T('App Shell','SH-collapse','Sidebar collapses to icons, keeps tooltips, and remembers the choice','admin',async p=>{
   const w0=await p.$eval('.rail',e=>e.getBoundingClientRect().width);ok(w0>=240,'width '+w0);
   await p.click('[data-act=railToggle]');await p.waitForTimeout(400);const w1=await p.$eval('.rail',e=>e.getBoundingClientRect().width);ok(w1<90,'collapsed width '+w1);
-  ok(await p.$eval('.rail-toggle',e=>e.getAttribute('aria-expanded'))==='false','aria-expanded');ok(await p.$eval('#nav button',e=>!!e.title),'tooltip');
+  ok(await p.$eval('.rail-toggle',e=>e.getAttribute('aria-expanded'))==='false','aria-expanded');ok(await p.$eval('#nav button',e=>!e.title&&!!e.dataset.tip&&e.dataset.tip===e.getAttribute('aria-label').split(',')[0]),'nav icon needs data-tip and aria-label, no native title');
   ok(!(await p.evaluate(()=>[...document.querySelectorAll('#nav .nl')].some(x=>x.getBoundingClientRect().width>0))),'labels still visible');
   await p.nav('Students');ok(/Students/.test(await p.text('#crumb')),'navigation works while collapsed');
   await p.reload();await p.waitForTimeout(300);ok((await p.$eval('.app',e=>e.dataset.rail))==='mini','not remembered');
@@ -1304,6 +1309,563 @@ await T('App Shell','SH-keyboard','Menu, Profile, Sign out, bell and theme are a
   const tabs=await p.evaluate(()=>[...document.querySelectorAll('button,a,input,select')].filter(e=>getComputedStyle(e).visibility!=='hidden'&&e.getBoundingClientRect().width>0&&e.tabIndex>=0).map(e=>e.dataset.act||''));
   for(const a of ['nav','profile','logout','bell','theme','railToggle'])ok(tabs.includes(a),a+' not focusable');
 });
+
+/* ---- keyboard, focus, skip link, title, contrast, tooltips (fix loop 1) ---- */
+const actInfo=p=>p.evaluate(()=>{const a=document.activeElement;return{tag:a.tagName,role:a.getAttribute('role'),act:a.dataset.act||'',id:a.dataset.id||'',f:a.dataset.f||'',lbl:a.getAttribute('aria-label')||'',sel:a.getAttribute('aria-selected'),inPage:!!a.closest('#page'),inNav:!!a.closest('#nav'),inRail:!!a.closest('#rail'),inLayer:!!a.closest('#layer'),inDlg:!!a.closest('#dlg'),skip:a.classList.contains('skip')}});
+const tabsStay=async(p,key,n,pred,what)=>{for(let i=0;i<n;i++){await p.keyboard.press(key);const a=await actInfo(p);ok(pred(a),`${what}: focus left after ${key} #${i+1} (${JSON.stringify(a)})`)}};
+await T('App Shell','SH-skip-title','Skip link is the first Tab stop and works; the browser title follows the page','admin',async p=>{
+  ok((await p.title())==='Dashboard · Vidyapeeth','title '+await p.title());
+  await p.reload();await p.waitForTimeout(300);
+  ok(await p.evaluate(()=>{const r=document.querySelector('.skip').getBoundingClientRect();return r.width<=1&&r.height<=1}),'skip link visible when not focused');
+  await p.keyboard.press('Tab');
+  const s=await p.evaluate(()=>{const a=document.activeElement,r=a.getBoundingClientRect();return{skip:a.classList.contains('skip'),txt:a.textContent,vis:r.width>40&&r.height>20&&r.top>=0&&r.left>=0&&r.right<=innerWidth,fg:getComputedStyle(a).color,bg:getComputedStyle(a).backgroundColor}});
+  ok(s.skip&&/Skip to content/.test(s.txt),'first Tab stop is not the skip link: '+JSON.stringify(s));ok(s.vis,'skip link not visible when focused');
+  await p.keyboard.press('Enter');await p.waitForTimeout(100);
+  const a=await actInfo(p);ok(a.tag==='H1'&&a.inPage,'skip link did not move focus to the page heading: '+JSON.stringify(a));
+  for(const[n,t]of[['Students','Students'],['Fee Collection','Fee Collection'],['Reports','Reports'],['Settings','Settings']]){await p.nav(n);ok((await p.title())===t+' · Vidyapeeth',`title on ${n}: ${await p.title()}`)}
+  await p.fill('#f_short','Vidya');await p.click('#set-college .btn.primary');await p.waitForTimeout(200);ok((await p.title())==='Settings · Vidya','title after short-name change: '+await p.title());
+  await p.click('[data-act=logout]');await p.waitForTimeout(150);ok(/^Sign in · /.test(await p.title()),'login title '+await p.title());
+});
+await T('App Shell','SH-focus-after-nav','Focus is never dropped to the page body after a menu, tab or filter action','admin',async p=>{
+  await p.focus('#nav [data-id=students]');await p.keyboard.press('Enter');await p.waitForTimeout(200);
+  let a=await actInfo(p);ok(a.tag==='H1'&&a.inPage,'after menu Enter focus is '+JSON.stringify(a));
+  ok(await p.$eval('#page h1',e=>e.getAttribute('tabindex')==='-1'),'h1 tabindex');
+  await p.keyboard.press('Shift+Tab');a=await actInfo(p);ok(a.tag!=='BODY','focus back to body after Shift+Tab');
+  await p.focus('#nav [data-id=students]');await p.keyboard.press('Enter');await p.waitForTimeout(100);a=await actInfo(p);ok(a.tag!=='BODY'&&a.id==='students','same page again: focus should stay on the menu item '+JSON.stringify(a));
+  await p.focus('[aria-label=Course]');await p.selectOption('[aria-label=Course]','med');await p.waitForTimeout(150);
+  a=await actInfo(p);ok(a.tag==='SELECT'&&a.lbl==='Course','after filter change focus is '+JSON.stringify(a));
+  await p.nav('Fee Collection');const tabs=await p.$$('#page [role=tab]');ok(tabs.length>2,'fee tabs');
+  const id=await tabs[2].getAttribute('data-id');await tabs[2].focus();await p.keyboard.press('Enter');await p.waitForTimeout(150);
+  a=await actInfo(p);ok(a.role==='tab'&&a.id===id&&a.sel==='true','after tab switch focus is '+JSON.stringify(a));
+  await p.focus('#nav [data-id=fees]');await p.keyboard.press('Enter');await p.waitForTimeout(100);ok((await actInfo(p)).tag!=='BODY','same route nav item lost focus');
+});
+await T('App Shell','SH-drawer-focus','Phone menu is modal: focus inside, Tab trapped, page behind inert, focus returns to the menu button','clerk',async p=>{
+  const st=()=>p.evaluate(()=>{const r=document.querySelector('#rail');return{role:r.getAttribute('role'),modal:r.getAttribute('aria-modal'),inert:document.querySelector('main').hasAttribute('inert')}});
+  let s=await st();ok(!s.role&&!s.modal&&!s.inert,'closed drawer already modal '+JSON.stringify(s));
+  await p.click('.menu-btn');await p.waitForTimeout(350);s=await st();ok(s.role==='dialog'&&s.modal==='true'&&s.inert,'open drawer not modal '+JSON.stringify(s));
+  ok((await actInfo(p)).inRail,'focus not moved into the drawer');
+  await tabsStay(p,'Tab',30,a=>a.inRail,'forward');await tabsStay(p,'Shift+Tab',30,a=>a.inRail,'backward');
+  await p.keyboard.press('Escape');await p.waitForTimeout(350);s=await st();ok(!s.role&&!s.modal&&!s.inert,'still modal after close '+JSON.stringify(s));
+  ok(await p.evaluate(()=>document.activeElement===document.querySelector('.menu-btn')),'focus not restored to the menu button');
+  await p.click('.menu-btn');await p.waitForTimeout(300);await p.click('.rail-close');await p.waitForTimeout(300);ok(await p.evaluate(()=>document.activeElement===document.querySelector('.menu-btn')&&!document.querySelector('main').hasAttribute('inert')),'close button: focus or inert');
+  await p.click('.menu-btn');await p.waitForTimeout(300);await p.click('#nav button:has-text("Reports")');await p.waitForTimeout(350);
+  const a=await actInfo(p);ok(a.tag==='H1'&&a.inPage&&!(await st()).inert,'after choosing a page from the drawer focus is '+JSON.stringify(a));
+},{vp:{width:390,height:844}});
+await T('App Shell','SH-touch-targets','Phone drawer close button and menu items are at least 44px','clerk',async p=>{
+  await p.click('.menu-btn');await p.waitForTimeout(350);
+  const r=await p.evaluate(()=>({close:(b=>[b.width,b.height])(document.querySelector('.rail-close').getBoundingClientRect()),nav:[...document.querySelectorAll('#nav button')].map(b=>b.getBoundingClientRect().height),out:(b=>[b.width,b.height])(document.querySelector('.out').getBoundingClientRect())}));
+  ok(r.close[0]>=44&&r.close[1]>=44,'close '+r.close);ok(r.nav.length>3&&r.nav.every(h=>h>=43.9),'nav heights '+r.nav);ok(r.out[0]>=44&&r.out[1]>=44,'sign out '+r.out);
+},{vp:{width:390,height:844}});
+await T('App Shell','SH-layer-focus','Side panels and dialogs: focus moves in, is labelled, Tab is trapped, page is inert, focus returns to the opener','admin',async p=>{
+  ok(await p.evaluate(()=>!document.querySelector('#rail').hasAttribute('role')&&!document.querySelector('main').hasAttribute('inert')),'desktop sidebar must not be a dialog');
+  const info=()=>p.evaluate(()=>{const d=document.querySelector('.drawer'),lb=d&&d.getAttribute('aria-labelledby');return{name:d&&(d.getAttribute('aria-label')||(document.getElementById(lb||'x')||{}).textContent||''),inside:!!d&&d.contains(document.activeElement),inert:document.getElementById('root').hasAttribute('inert')}});
+  await p.focus('.me');await p.keyboard.press('Enter');await p.waitForTimeout(250);
+  let i=await info();ok(i.inside&&i.name.trim()&&i.inert,'profile drawer '+JSON.stringify(i));
+  await tabsStay(p,'Tab',24,a=>a.inLayer,'drawer forward');await tabsStay(p,'Shift+Tab',24,a=>a.inLayer,'drawer backward');
+  await p.keyboard.press('Escape');await p.waitForTimeout(250);i=await info();ok(!i.inert&&!(await p.$('.drawer')),'drawer or inert left behind');
+  ok(await p.evaluate(()=>document.activeElement===document.querySelector('.me')),'focus not restored to Profile');
+  /* notifications panel: filter buttons re-render the panel but focus stays on the pressed button */
+  await p.click('#bell');await p.waitForTimeout(250);i=await info();ok(i.inside&&/Notifications/.test(i.name),'bell drawer '+JSON.stringify(i));
+  await p.focus('[data-act=ntF][data-f=unread]');await p.keyboard.press('Enter');await p.waitForTimeout(150);
+  const a=await actInfo(p);ok(a.f==='unread'&&a.inLayer,'filter lost focus '+JSON.stringify(a));
+  await p.keyboard.press('Escape');await p.waitForTimeout(250);ok(await p.evaluate(()=>document.activeElement===document.querySelector('#bell')),'focus not restored to the bell');
+  /* confirm dialog */
+  await p.nav('Settings');await p.focus('#set-reset [data-act=resetDemo]');await p.keyboard.press('Enter');await p.waitForTimeout(250);
+  const d=await p.evaluate(()=>{const g=document.querySelector('.dialog'),lb=g.getAttribute('aria-labelledby');return{name:(document.getElementById(lb||'x')||{}).textContent||g.getAttribute('aria-label'),inside:g.contains(document.activeElement),rootInert:document.getElementById('root').hasAttribute('inert')}});
+  ok(d.inside&&/Reset demo data/.test(d.name)&&d.rootInert,'dialog '+JSON.stringify(d));
+  await tabsStay(p,'Tab',10,a=>a.inDlg,'dialog forward');await tabsStay(p,'Shift+Tab',10,a=>a.inDlg,'dialog backward');
+  await p.keyboard.press('Escape');await p.waitForTimeout(250);ok(await p.evaluate(()=>document.activeElement===document.querySelector('#set-reset [data-act=resetDemo]')&&!document.getElementById('root').hasAttribute('inert')),'focus not restored to Reset button');
+});
+await T('App Shell','SH-layer-focus-motion','Closing a panel with animations on still restores focus and removes inert','admin',async p=>{
+  await p.click('#bell');await p.waitForTimeout(500);ok(await p.evaluate(()=>document.querySelector('.drawer').contains(document.activeElement)&&document.getElementById('root').hasAttribute('inert')),'not modal');
+  await p.keyboard.press('Escape');await p.waitForTimeout(40);ok(await p.evaluate(()=>!document.getElementById('root').hasAttribute('inert')),'inert kept during close animation');
+  await p.waitForTimeout(400);ok(await p.evaluate(()=>document.activeElement===document.querySelector('#bell')&&!document.querySelector('.drawer')),'focus or drawer');
+},{motion:true});
+await T('App Shell','SH-tooltips-collapsed','Collapsed rail: every menu icon gets the same instant label on hover and keyboard focus','admin',async p=>{
+  const tip=sel=>p.$eval(sel,e=>{const c=getComputedStyle(e,'::after'),r=e.getBoundingClientRect();return{o:+c.opacity,c:c.content.replace(/"/g,''),pos:c.position,left:parseFloat(c.left),top:parseFloat(c.top),right:r.right,mid:r.top+r.height/2,disp:c.display}});
+  const ex=await tip('#nav [data-id=students]');ok(ex.disp==='none','tooltip shown in expanded sidebar');
+  await p.click('[data-act=railToggle]');await p.waitForTimeout(400);
+  ok(await p.$$eval('#nav button',b=>b.every(x=>!x.hasAttribute('title')&&x.dataset.tip&&x.getAttribute('aria-label'))),'nav buttons need data-tip + aria-label and no title');
+  for(const id of['students','settings']){
+    await p.mouse.move(700,400);await p.waitForTimeout(150);ok((await tip(`#nav [data-id=${id}]`)).o<0.1,'tooltip visible without hover');
+    await p.hover(`#nav [data-id=${id}]`);await p.waitForTimeout(250);const t=await tip(`#nav [data-id=${id}]`);
+    ok(t.o>0.9,id+' tooltip not shown on hover '+JSON.stringify(t));ok(t.pos==='fixed'&&t.left>=t.right&&Math.abs(t.top-t.mid)<2&&t.top>0&&t.top<850,'tooltip position '+JSON.stringify(t));
+    ok(t.c===(await p.$eval(`#nav [data-id=${id}]`,e=>e.dataset.tip)),'tooltip text '+t.c);
+  }
+  await p.mouse.move(700,400);await p.focus('.rail-toggle');await p.keyboard.press('Tab');await p.waitForTimeout(250);
+  const a=await actInfo(p);ok(a.act==='nav','Tab from the toggle did not reach the first menu icon: '+JSON.stringify(a));
+  const t=await tip('#nav button:focus');ok(t.o>0.9&&t.c==='Dashboard','keyboard focus tooltip '+JSON.stringify(t));
+  await p.keyboard.press('Tab');await p.waitForTimeout(250);const t2=await tip('#nav button:focus');ok(t2.o>0.9&&t2.c!==t.c,'second icon tooltip '+JSON.stringify(t2));
+});
+await T('App Shell','SH-password-closes','Changing your password closes the panel and clears the typed passwords','accountant',async p=>{
+  await p.click('.me');await p.waitForTimeout(500);await p.fill('.drawer [name=cur]','account123');await p.fill('.drawer [name=next]','account456');
+  await p.click('.drawer form[data-form=myPassword] button');await p.waitForTimeout(40);
+  ok(await p.evaluate(()=>[...document.querySelectorAll('input[type=password]')].every(i=>i.value==='')),'passwords still typed in');
+  ok(/Password changed/.test(await p.toast()),'toast');await p.waitForTimeout(400);ok(!(await p.$('.drawer')),'drawer still open');
+  ok((await p.db()).users.find(u=>u.username==='accountant').password==='account456','password not saved');ok(await p.evaluate(()=>!document.getElementById('root').hasAttribute('inert')),'inert left');
+},{motion:true});
+await T('App Shell','SH-event-quiet','Sidebar toggles, theme switch and settings jumps do not flood the Event Log','admin',async p=>{
+  await p.nav('Settings');const cnt=()=>p.evaluate(()=>evAll().filter(e=>e.c==='Click'&&/rail|theme|jump/i.test(e.a)).length);const n0=await cnt();
+  await p.click('[data-act=railToggle]');await p.click('[data-act=railToggle]');await p.click('[data-act=theme]');await p.click('[data-act=theme]');await p.click('.sjump button:has-text("Data and backup")');await p.waitForTimeout(300);
+  ok((await cnt())===n0,'event log gained '+((await cnt())-n0)+' rows');
+  await p.click('.me');await p.waitForTimeout(250);ok(await p.evaluate(()=>evAll().some(e=>e.c==='Click'&&/profile/i.test(e.a))),'positive control: Profile click should still be logged');
+});
+await T('App Shell','SH-contrast','Bell badge, brand year line, form borders and placeholders meet WCAG contrast in both themes','admin',async p=>{
+  await p.nav('Settings');
+  const m=()=>p.evaluate(()=>{const P=s=>s.match(/[\d.]+/g).map(Number),L=c=>{const f=v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)};return .2126*f(c[0])+.7152*f(c[1])+.0722*f(c[2])};
+    const R=(a,b)=>{const x=L(P(a)),y=L(P(b));return (Math.max(x,y)+.05)/(Math.min(x,y)+.05)},cs=(e,q)=>getComputedStyle(e,q);
+    const bd=document.querySelector('.bell .bdg'),br=document.querySelector('.brand small'),rl=document.querySelector('.rail'),inp=document.querySelector('#f_college'),ph=document.querySelector('#f_fromName');
+    return{badge:R(cs(bd).color,cs(bd).backgroundColor),brand:R(cs(br).color,cs(rl).backgroundColor),border:R(cs(inp).borderTopColor,cs(inp).backgroundColor),borderPage:R(cs(inp).borderTopColor,cs(document.body).backgroundColor),ph:R(cs(ph,'::placeholder').color,cs(ph).backgroundColor)}});
+  for(const th of['light','dark']){
+    await p.evaluate(t=>document.documentElement.setAttribute('data-theme',t),th);await p.waitForTimeout(60);const r=await m();
+    ok(r.badge>=4.5,th+' badge '+r.badge.toFixed(2));ok(r.brand>=4.5,th+' brand line '+r.brand.toFixed(2));ok(r.border>=3,th+' field border '+r.border.toFixed(2));ok(r.borderPage>=3,th+' field border vs page '+r.borderPage.toFixed(2));ok(r.ph>=4.5,th+' placeholder '+r.ph.toFixed(2));
+  }
+});
+await T('App Shell','SH-settings-jump','Settings jump chips show the group label under the sticky bar; Fees and Email cards line up','admin',async p=>{
+  await p.nav('Settings');
+  for(const[chip,g]of[['College','org'],['Fees and receipts','fin'],['Notifications','notify'],['Data and backup','data']]){
+    await p.evaluate(()=>scrollTo(0,0));await p.click(`.sjump button:has-text("${chip}")`);await p.waitForTimeout(500);
+    const r=await p.evaluate(g=>{const l=document.querySelector(`#set-g-${g} .sglabel`).getBoundingClientRect(),t=document.querySelector('.topbar').getBoundingClientRect();return{lt:l.top,lb:l.bottom,tb:t.bottom,h:innerHeight}},g);
+    ok(r.lt>=r.tb-1&&r.lb<=r.h,`${chip}: group label hidden (label ${r.lt}-${r.lb}, bar bottom ${r.tb})`);
+  }
+  const w=await p.evaluate(()=>{const a=document.querySelector('#set-fees').getBoundingClientRect(),b=document.querySelector('#set-mail').getBoundingClientRect(),g=document.querySelector('#set-g-fin .sgrid').getBoundingClientRect();return{a:a.width,b:b.width,g:g.width,ay:a.top,by:b.top}});
+  ok(Math.abs(w.a-w.b)<3&&w.a>w.g*0.95&&w.by>w.ay,'fees/email cards not balanced '+JSON.stringify(w));
+});
+await T('App Shell','SH-settings-phone','Settings cards stack cleanly on a phone with no sideways scroll','admin',async p=>{
+  await p.nav('Settings');ok(!(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1)),'overflow');
+  const w=await p.evaluate(()=>[...document.querySelectorAll('.scard')].map(c=>Math.round(c.getBoundingClientRect().width)));ok(w.length>=6&&Math.max(...w)-Math.min(...w)<=2,'card widths '+w);
+},{vp:{width:320,height:640}});
+
+/* ================= SECURITY (fix loop 2) ================= */
+const SEC_NOPERM='do not have access';
+/* A signed-in role that lacks settings.manage cannot forge a restore, read the backup or reset the data */
+for(const r of ['principal','accountant','clerk','faculty','parent','student']){
+  await T('Security','SEC-restore-'+r,`${r} cannot forge restore, backup or reset; data and session unchanged`,r,async p=>{
+    const res=await p.evaluate(()=>{
+      const x=JSON.parse(JSON.stringify(db));
+      x.users.push({id:'u_evil',username:'evil',password:'evil123',name:'Evil',role:'Super Admin',staffId:null,active:true});
+      const before=JSON.stringify(db),out={};
+      try{FORM.restore(document.createElement('form'),{json:JSON.stringify(x)});out.restore='allowed'}catch(e){out.restore=e.message}
+      for(const n of ['backupOut','backupIn','resetDemo']){try{ACT[n]({dataset:{}},{});out[n]='allowed'}catch(e){out[n]=e.message}}
+      return{out,same:JSON.stringify(db)===before,signedIn:!!cur(),layer:!!document.querySelector('.drawer,#dlg .dialog')};
+    });
+    for(const[k,v]of Object.entries(res.out))ok(v.includes(SEC_NOPERM),`${k} not refused: ${v}`);
+    ok(res.same,'data changed');ok(res.signedIn,'session was dropped');ok(!res.layer,'a drawer or dialog opened');
+    ok(!(await p.db()).users.some(u=>u.username==='evil'),'forged Super Admin stored');
+  });
+}
+await T('Security','SEC-restore-forged-login','Student forges a restore with a new Super Admin; the login form does not accept it','student',async p=>{
+  await p.evaluate(()=>{const x=JSON.parse(JSON.stringify(db));x.users.push({id:'u_evil',username:'evil',password:'evil123',name:'Evil',role:'Super Admin',active:true});try{FORM.restore(document.createElement('form'),{json:JSON.stringify(x)})}catch(e){}});
+  await p.logout();ok(!(await p.login('evil','evil123')),'forged Super Admin could sign in');ok(await p.$('form[data-form=login]'),'not at the login screen');
+});
+await T('Security','SEC-backup-nopw','Backup text has no passwords and no mail key; restoring it keeps current passwords and the key','admin',async p=>{
+  await admit(p,{name:'Backup Probe',conc:'mgmt5000'});await p.keyboard.press('Escape');
+  await p.evaluate(()=>{db.settings.mail.key='SECRET-KEY-VALUE-123';const s=stu(db.students[0].id);const pay=recordPayment(s,{amount:100,mode:'Cash',channel:'counter',by:'t',force:true});cancelPayment(pay,'probe','Cash');save()});
+  await p.nav('Settings');await p.click('[data-act=backupOut]');await p.waitForTimeout(100);
+  const txt=await p.$eval('#csvText',e=>e.value),j=JSON.parse(txt);
+  ok(j.users.length>=5&&j.users.every(u=>!('password' in u)),'a login password is in the backup');
+  ok(!/admin123|principal123|account123|parent123|student123|"password"/.test(txt),'a known password is in the backup text');
+  ok(!/SECRET-KEY-VALUE-123/.test(txt)&&!('key' in j.settings.mail),'the mail access key is in the backup');
+  ok(/not included/i.test(await p.text('.drawer')),'the drawer does not say passwords are left out');
+  await p.keyboard.press('Escape');await p.waitForTimeout(250);
+  await p.evaluate(()=>{db.students=db.students.slice(0,5);save()});
+  await p.click('[data-act=backupIn]');await p.fill('form[data-form=restore] [name=json]',txt);await p.click('form[data-form=restore] button');await p.waitForTimeout(250);
+  const d=await p.db();ok(d.students.length===26,'restore failed: '+d.students.length);ok(await p.$('form[data-form=login]'),'not back at login');ok(!(await p.$('#dlg .dialog')),'a temporary-password dialog appeared although every login existed');
+  ok(d.users.every(u=>typeof u.password==='string'&&u.password),'a login lost its password');ok(d.settings.mail.key==='SECRET-KEY-VALUE-123','mail key not kept');
+  ok(await p.login('admin','admin123'),'admin password was not kept');await p.logout();ok(await p.login('parent','parent123'),'parent password was not kept');
+});
+await T('Security','SEC-restore-newlogin','Restore ignores passwords in the file; a login that is new here gets a temporary password it must change','admin',async p=>{
+  const json=await p.evaluate(()=>{const x=JSON.parse(JSON.stringify(db));x.users.find(u=>u.username==='admin').password='hacked';x.users.push({id:'u_new1',username:'newclerk',password:'hacked',name:'New Clerk',role:'Clerk',staffId:'st4',active:true});return JSON.stringify(x)});
+  await p.nav('Settings');await p.click('[data-act=backupIn]');await p.fill('form[data-form=restore] [name=json]',json);await p.click('form[data-form=restore] button');await p.waitForTimeout(250);
+  ok(await p.$('#dlg .dialog'),'no temporary-password dialog');const list=await p.$eval('#dlg textarea',e=>e.value);const m=list.match(/newclerk\s+(Tmp-\S+)/);ok(m,'temporary password not shown: '+list);
+  ok(!/admin\s/.test(list),'an existing login was given a temporary password');
+  await p.click('#dlg button[data-act=closeDialog]');await p.waitForTimeout(250);
+  ok(!(await p.login('newclerk','hacked')),'password from the file was accepted');
+  ok(await p.login('newclerk',m[1]),'temporary password does not work');await p.waitForTimeout(250);
+  ok(await p.$('.drawer form[data-form=myPassword]'),'no forced password change');
+  await p.fill('form[data-form=myPassword] [name=cur]',m[1]);await p.fill('form[data-form=myPassword] [name=next]','BrandNew-77');await p.click('form[data-form=myPassword] button');await p.waitForTimeout(250);
+  const u=(await p.db()).users.find(x=>x.username==='newclerk');ok(u.password==='BrandNew-77'&&!u.mustChange,'password change did not clear the flag');
+  await p.logout();ok(!(await p.login('admin','hacked')),'password from the file was accepted for admin');ok(await p.login('admin','admin123'),'admin lost the current password');
+});
+await T('Security','SEC-restore-validate','Restore refuses unknown roles, wrong types, broken links and partial files, and changes nothing','admin',async p=>{
+  const res=await p.evaluate(()=>{
+    const base=JSON.parse(JSON.stringify(db)),cases={};
+    const mut=(n,fn)=>{const x=JSON.parse(JSON.stringify(base));fn(x);cases[n]=JSON.stringify(x)};
+    mut('unknown role',x=>{x.users[0].role='God'});
+    mut('unknown role on staff',x=>{x.staff[0].role='Owner'});
+    mut('script in fee total',x=>{x.students[0].fee.total='<img src=x onerror=alert(1)>'});
+    mut('script in graceDays',x=>{x.settings.graceDays='<img src=x onerror=alert(1)>'});
+    mut('script in student id',x=>{x.students[0].id='"><img src=x onerror=alert(1)>'});
+    mut('script in a score',x=>{x.marks[0].scores[Object.keys(x.marks[0].scores)[0]]='<img src=x onerror=alert(1)>'});
+    mut('script in max marks',x=>{x.marks[0].max='<img src=x>'});
+    mut('script in a date',x=>{x.payments[0].date='2026-01-01"><img src=x>'});
+    mut('no settings',x=>{delete x.settings});
+    mut('no active Super Admin',x=>x.users.forEach(u=>{if(u.role==='Super Admin')u.active=false}));
+    mut('portal login without student',x=>{x.users.find(u=>u.role==='Parent').studentId='nope'});
+    mut('receipt for unknown student',x=>{x.payments[0].studentId='nope'});
+    mut('unknown permission',x=>{x.roles.Clerk.push('everything')});
+    mut('duplicate username',x=>{x.users[1].username=x.users[0].username});
+    cases['partial file']=JSON.stringify({ver:3,students:[],users:[]});
+    const out={},before=JSON.stringify(db);
+    for(const[n,j]of Object.entries(cases)){let m='ACCEPTED';try{FORM.restore(document.createElement('form'),{json:j})}catch(e){m=e.message}out[n]=m}
+    return{out,same:JSON.stringify(db)===before,signedIn:!!cur()};
+  });
+  for(const[k,v]of Object.entries(res.out))ok(/damaged/.test(v),`"${k}" was not refused: ${v}`);
+  ok(res.same,'data changed by a refused restore');ok(res.signedIn,'session dropped by a refused restore');
+});
+for(const r of ['student','parent']){
+  await T('Security','SEC-idor-'+r,`${r} cannot open another student's record, receipt, certificate or email preview; own record still opens`,r,async p=>{
+    const res=await p.evaluate(()=>{
+      const mine=cur().studentId,other=db.students.find(s=>s.id!==mine).id,oPay=db.payments.find(x=>x.studentId!==mine),mPay=db.payments.find(x=>x.studentId===mine);
+      db.outbox.unshift({id:'o_probe',ts:Date.now(),paymentId:oPay.id,rc:oPay.rc,studentId:oPay.studentId,to:['other.family@example.com'],names:['Parent'],subject:'S',filename:'f.pdf',bytes:1,status:'Sent (demo)',mode:'demo',attempts:1,error:'',trigger:'auto'});
+      const t=(n,ds,k)=>{closeLayer();closeDialog();let m='allowed';try{ACT[n]({dataset:ds},{})}catch(e){m=e.message}return{n,m,layer:!!document.querySelector('.drawer,#dlg .dialog'),text:(document.querySelector('.drawer,#dlg .dialog')||{}).innerText||''}};
+      const bad=[t('openStudent',{id:other}),t('viewReceipt',{id:oPay.id}),t('mailPreview',{id:'o_probe'}),t('certificate',{id:other}),t('certShow',{id:other,k:'bonafide'}),t('editStudent',{id:other}),t('copyReceipt',{id:oPay.id}),t('sendReceipt',{id:oPay.id}),t('exportStudents',{}),t('collectFor',{id:other}),t('importStudents',{})];
+      const own=[t('openStudent',{id:mine}),t('viewReceipt',{id:mPay.id})];
+      return{bad,own,otherName:db.students.find(s=>s.id===other).name,otherMobile:db.students.find(s=>s.id===other).phone};
+    });
+    for(const b of res.bad){ok(b.m!=='allowed',`${b.n} was allowed`);ok(!b.layer,`${b.n} opened a panel`);ok(!b.text.includes(res.otherName)&&!b.text.includes('other.family@example.com'),`${b.n} showed another family's data`)}
+    for(const o of res.own)ok(o.m==='allowed'&&o.layer,`own ${o.n} refused: ${o.m}`);
+  });
+}
+await T('Security','SEC-idor-staff-scope','Staff keep working: students.view opens a record, fees.view opens a receipt and the email preview','clerk',async p=>{
+  const res=await p.evaluate(()=>{const s=db.students[0],pay=db.payments[0];queueReceiptMail(pay,{trigger:'manual'});const o=db.outbox[0];const t=(n,ds)=>{closeLayer();let m='allowed';try{ACT[n]({dataset:ds},{})}catch(e){m=e.message}return m+'|'+!!document.querySelector('.drawer')};return[t('openStudent',{id:s.id}),t('viewReceipt',{id:pay.id}),t('mailPreview',{id:o.id}),t('certificate',{id:s.id})]});
+  for(const r of res)ok(r.startsWith('allowed|'),'staff call refused: '+r);ok(res[0].endsWith('true')&&res[1].endsWith('true')&&res[2].endsWith('true'),'panel did not open: '+res);
+});
+/* Role matrix: handlers that the UI hides for a role must also refuse a direct call from that role (the report's F-03 list) */
+const SEC_DENY={
+ accountant:['markLeft','docToggle','delBatch','delDivision','delSubject','divTeacher','subFaculty','delCourse','delSchool','delAllot','delNotice','pFail','exportReport','addStaff','editStaff'],
+ clerk:['notifyAtt','delSchool','delAllot','delNotice','delCourse','delBatch','delDivision','delSubject','divTeacher','subFaculty','pFail'],
+ faculty:['reqSim','reqFail','reqCancel','reqSend','sendReceipt','mailRetryAll','delNotice','delCourse','markLeft','docToggle','pFail','mailPreview','exportDues'],
+ principal:['reqSim','reqFail','reqCancel','reqSend','pFail','addStaff','editStaff'],
+ parent:['markLeft','docToggle','delCourse','delBatch','delDivision','delSubject','delNotice','reqSim','reqFail','reqCancel','reqSend','sendReceipt','mailRetryAll','notifyAtt','delSchool','delAllot','divTeacher','subFaculty','pFail','mailPreview','exportDues','exportReport','addStaff','cancelReceipt','waiveLate'],
+ student:['markLeft','docToggle','delCourse','delBatch','delDivision','delSubject','delNotice','reqSim','reqFail','reqCancel','reqSend','sendReceipt','mailRetryAll','notifyAtt','delSchool','delAllot','divTeacher','subFaculty','pFail','mailPreview','exportDues','exportReport','addStaff','cancelReceipt','waiveLate']};
+for(const[r,names]of Object.entries(SEC_DENY)){
+  await T('Security','SEC-guards-'+r,`${r}: ${names.length} handlers refuse a forged call and change nothing`,r,async p=>{
+    const res=await p.evaluate(names=>{
+      const st=db.students.find(s=>s.id!==(cur().studentId)),pay=db.payments.find(x=>x.studentId===st.id);
+      db.requests.push({id:'rq_probe',studentId:st.id,amount:100,mode:'Any UPI app',status:'waiting',created:Date.now(),by:'probe'});
+      const course=db.courses[0],batch=db.batches[0],dv=db.divisions[0],sb=db.subjects[0],sc=db.schools[0],al=db.practice[0],nt=db.notices[0];
+      const ds={markLeft:{id:st.id},docToggle:{id:st.id,k:'d0'},delBatch:{id:'zzz'},delDivision:{id:'zzz'},delSubject:{id:sb.id},divTeacher:{id:dv.id},subFaculty:{id:sb.id},delCourse:{id:'zzz'},delSchool:{id:sc.id},delAllot:{id:al.id},delNotice:{id:nt.id},
+        reqSim:{id:'rq_probe'},reqFail:{id:'rq_probe'},reqCancel:{id:'rq_probe'},reqSend:{id:'rq_probe'},sendReceipt:{id:pay.id},mailRetryAll:{},notifyAtt:{id:st.id},pFail:{id:'rq_probe'},mailPreview:{id:'zzz'},exportDues:{},exportReport:{},addStaff:{},editStaff:{id:db.staff[0].id},cancelReceipt:{id:pay.id},waiveLate:{id:st.id}};
+      ui.f.rep={id:'staff'};const out={};
+      for(const n of names){
+        closeLayer();closeDialog();const el={dataset:ds[n]||{},checked:true,value:db.staff[0].id};const before=JSON.stringify(db);let m='ALLOWED';
+        try{(['docToggle','divTeacher','subFaculty'].includes(n)?CHG:ACT)[n](el,{})}catch(e){m=e.message}
+        out[n]={m,same:JSON.stringify(db)===before,layer:!!document.querySelector('.drawer,#dlg .dialog')};
+      }
+      return out;
+    },names);
+    for(const[n,o]of Object.entries(res)){ok(o.m!=='ALLOWED',`${n} was allowed for ${r}`);ok(o.same,`${n} changed data for ${r}`);ok(!o.layer,`${n} opened a panel for ${r}`)}
+  });
+}
+await T('Security','SEC-guards-control','The same handlers still work for the roles that hold the permission','accountant',async p=>{
+  const res=await p.evaluate(()=>{
+    const s=db.students[3];db.requests.push({id:'rq_a',studentId:s.id,amount:100,mode:'Any UPI app',status:'waiting',created:Date.now(),by:'t'},{id:'rq_b',studentId:s.id,amount:100,mode:'Any UPI app',status:'waiting',created:Date.now(),by:'t'});
+    const n0=db.payments.length;ACT.reqSim({dataset:{id:'rq_a'}});let again='allowed';try{ACT.reqSim({dataset:{id:'rq_a'}})}catch(e){again=e.message}
+    ACT.reqFail({dataset:{id:'rq_b'}});return{paid:db.payments.length===n0+1,again,a:db.requests.find(x=>x.id==='rq_a').status,b:db.requests.find(x=>x.id==='rq_b').status};
+  });
+  ok(res.paid&&res.a==='paid'&&res.b==='failed','permitted calls broke: '+JSON.stringify(res));ok(/no longer valid/.test(res.again),'a paid request can be simulated twice: '+res.again);
+});
+await T('Security','SEC-guards-control-principal','Principal can still delete a notice and a practice school allotment','principal',async p=>{
+  const r=await p.evaluate(()=>{const n0=db.notices.length,a0=db.practice.length;ACT.delNotice({dataset:{id:db.notices[0].id}});ACT.delAllot({dataset:{id:db.practice[0].id}});return{n:n0-db.notices.length,a:a0-db.practice.length}});ok(r.n===1&&r.a===1,JSON.stringify(r));
+});
+await T('Security','SEC-pfail-owner','A parent cannot fail another family\'s pending payment, but can fail their own','parent',async p=>{
+  const r=await p.evaluate(()=>{const mine=cur().studentId,o=db.students.find(s=>s.id!==mine).id;db.requests.push({id:'rq_o',studentId:o,amount:100,mode:'Any UPI app',status:'waiting',created:Date.now(),by:'x'},{id:'rq_m',studentId:mine,amount:100,mode:'Any UPI app',status:'waiting',created:Date.now(),by:'x'});
+    let m1='allowed',m2='allowed';try{ACT.pFail({dataset:{id:'rq_o'}})}catch(e){m1=e.message}try{ACT.pFail({dataset:{id:'rq_m'}})}catch(e){m2=e.message}
+    return{m1,m2,o:db.requests.find(x=>x.id==='rq_o').status,m:db.requests.find(x=>x.id==='rq_m').status}});
+  ok(/no longer valid/.test(r.m1)&&r.o==='waiting','other family request failed: '+JSON.stringify(r));ok(r.m2==='allowed'&&r.m==='failed','own request not failed: '+JSON.stringify(r));
+});
+await T('Security','SEC-reset-guard','Reset needs settings.manage when signed in; the login-screen button still works','student',async p=>{
+  const m=await p.evaluate(()=>{try{ACT.resetDemo({dataset:{}},{});return'allowed'}catch(e){return e.message}});ok(m.includes(SEC_NOPERM),m);ok(!(await p.$('#dlg .dialog')),'confirm dialog opened');
+  await p.logout();await p.click('[data-act=resetDemo]');ok(await p.$('#dlg .dialog'),'login-screen reset blocked');
+});
+/* marks: the numeric check is on the server side of the form, not only in the input */
+await T('Security','SEC-marks-numeric','Faculty cannot save a non-numeric mark even if the input is switched to text','faculty',async p=>{
+  await p.nav('Internal Marks');const i=await p.$('form[data-form=saveMarks] input[name^=s_]:not([disabled])');ok(i,'inputs disabled');
+  const before=JSON.stringify((await p.db()).marks);
+  await i.evaluate(e=>{e.type='text'});await i.fill('<img src=x onerror=window.__xss=1>');await p.click('form[data-form=saveMarks] button.primary');await p.waitForTimeout(150);
+  ok(/must be a number/i.test(await p.toast()),'not refused: '+await p.toast());ok(JSON.stringify((await p.db()).marks)===before,'marks changed');
+  for(const v of ['1e3','-5','0x10','NaN']){const r=await p.evaluate(v=>{const m=ui.f.marks,dv=divOf(m.div),s=db.students.find(x=>x.div===dv.id&&x.status==='Active');let msg='allowed';try{FORM.saveMarks({}, {max:'20',['s_'+s.id]:v})}catch(e){msg=e.message}return msg},v);ok(/number/i.test(r),`"${v}" accepted: ${r}`)}
+  await i.fill('12.5');await p.click('form[data-form=saveMarks] button.primary');await p.waitForTimeout(150);ok(/saved/i.test(await p.toast()),'valid mark refused');
+});
+/* stored payloads render as text on every page and drawer, for staff and for both portals */
+for(const r of ['admin','parent','student']){
+  await T('Security','SEC-xss-stored-'+r,`${r}: script payloads stored in marks, names, notices, schools, receipts and settings stay inert`,r,async p=>{
+    const res=await p.evaluate(()=>{
+      window.__xss=0;const P='"\'><img src=x onerror="window.__xss=1">';
+      const portal=isPortal(cur()),s=portal?myChild():db.students[0];
+      const mk=db.marks.find(m=>m.divId===s.div&&m.scores[s.id]!==undefined);mk.scores[s.id]=P;mk.max=P;
+      s.name+=P;s.guardian.name+=P;s.guardian.email=P;s.address=P;s.city=P;s.email=P;s.academic.degree=P;
+      db.notices.forEach(n=>{n.title+=P;n.body+=P;n.by+=P});db.schools.forEach(x=>{x.name+=P;x.mentor+=P;x.city+=P});db.staff.forEach(x=>{x.name+=P;x.designation+=P});
+      db.payments.forEach(x=>{x.ref=P});db.messages.forEach(x=>{x.text+=P});db.audit.forEach(x=>{x.detail=P});db.courses.forEach(c=>{c.full+=P});
+      db.settings.college+=P;db.settings.short+=P;db.settings.year+=P;db.settings.receiptPrefix+=P;db.settings.graceDays=P;db.counters.rc=P;
+      db.students.forEach(x=>{x.fee.sem=P});db.divisions.forEach(d=>{d.capacity=P});db.courses.forEach(c=>{c.intake=P;c.semesters=3});
+      const TABS={fees:['collect','dues','receipts','outbox','approvals','dayclose','bank','setup'],students:['list','promo'],academic:['structure','subjects'],practice:['allot','schools'],staff:['staff','roles'],messages:['remind','notices','log'],attendance:['mark','register','low']};
+      let crashes=[];const T=(l,f)=>{try{f()}catch(e){crashes.push(l+': '+e.message.slice(0,60))}};
+      if(!portal){queueReceiptMail(db.payments[0],{trigger:'manual'})}
+      renderApp();
+      for(const nv of navFor(cur())){for(const t of (TABS[nv[0]]||[''])){ui.route=nv[0];if(t)ui.tab[nv[0]]=t;T(nv[0]+'/'+t,()=>renderPage())}}
+      const el=ds=>({dataset:ds});
+      if(portal){db.payments.filter(x=>x.studentId===s.id).forEach(x=>T('pReceipt',()=>ACT.pReceipt(el({id:x.id}))));T('parentPay',()=>ACT.parentPay());T('myContact',()=>ACT.myContact());T('profile',()=>ACT.profile());T('bell',()=>ACT.bell())}
+      else{T('openStudent',()=>openStudent(s.id));db.payments.slice(0,3).forEach(x=>{T('viewReceipt',()=>ACT.viewReceipt(el({id:x.id})));T('cancelReceipt',()=>ACT.cancelReceipt(el({id:x.id})))});T('mailPreview',()=>ACT.mailPreview(el({id:db.outbox[0].id})));T('editStudent',()=>ACT.editStudent(el({id:s.id})));T('certificate',()=>ACT.certificate(el({id:s.id})));T('certShow',()=>ACT.certShow(el({id:s.id,k:'bonafide'})));T('backupOut',()=>ACT.backupOut());T('profile',()=>ACT.profile());T('bell',()=>ACT.bell())}
+      return{imgs:document.querySelectorAll('img[src=x]').length,crashes};
+    });
+    await p.waitForTimeout(400);res.fired=await p.evaluate(()=>window.__xss);
+    ok(res.imgs===0,`${res.imgs} injected <img> elements were created`);ok(!res.fired,'injected script ran');ok(res.crashes.length===0,'render crashed: '+res.crashes.slice(0,3).join(' | '));
+  });
+}
+await T('Security','SEC-xss-marks-parent','The Parent home shows a stored marks payload as plain text','parent',async p=>{
+  const res=await p.evaluate(()=>{window.__xss=0;const s=myChild(),mk=db.marks.find(m=>m.divId===s.div&&m.scores[s.id]!==undefined);mk.scores[s.id]='<img src=x onerror="window.__xss=1">';go('phome');
+    return{imgs:document.querySelectorAll('#page img').length,fired:window.__xss,text:document.querySelector('#page').innerText}});
+  ok(res.imgs===0&&!res.fired,'payload became markup');ok(res.text.includes('<img src=x onerror='),'payload text not shown literally');
+});
+/* Content-Security-Policy: the hashes in vercel.json must match the inline script and style of the page being tested */
+await T('Security','SEC-csp','vercel.json CSP carries the sha256 of the inline script and style; no inline event handlers exist','admin',async p=>{
+  const f=locate(['vercel.json'],'VERCEL_JSON');ok(f,'vercel.json not found next to the build under test (set VERCEL_JSON=/path/to/vercel.json)');
+  const v=JSON.parse(fs.readFileSync(f,'utf8')),H=Object.fromEntries(v.headers[0].headers.map(h=>[h.key,h.value]));
+  for(const k of ['X-Content-Type-Options','Referrer-Policy','X-Frame-Options'])ok(H[k],'lost header '+k);
+  const csp=H['Content-Security-Policy'];ok(csp,'no CSP header');const dir=Object.fromEntries(csp.split(';').map(x=>x.trim()).filter(Boolean).map(x=>{const[a,...b]=x.split(/\s+/);return[a,b]}));
+  const hs=await p.evaluate(async()=>{const h=async t=>"'sha256-"+btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t)))))+"'";return{script:await h(document.querySelector('script:not([src])').textContent),style:await h(document.querySelector('style').textContent)}});
+  ok(dir['script-src'].length===1&&dir['script-src'][0]===hs.script,'script hash does not match the page: '+dir['script-src']+' vs '+hs.script);
+  ok(dir['style-src'].includes(hs.style)&&dir['style-src'].includes('https://fonts.googleapis.com'),'style-src wrong: '+dir['style-src']);
+  ok(!/unsafe-inline|unsafe-eval|\*/.test(dir['script-src'].join(' ')),'script-src is weakened');
+  ok(dir['font-src'].join()==='https://fonts.gstatic.com'&&dir['connect-src'].join()==="'self'"&&dir['img-src'].join()==="'self',data:",'font/connect/img wrong');
+  ok(dir['object-src'].join()==="'none'"&&dir['base-uri'].join()==="'none'"&&dir['frame-ancestors'].join()==="'none'",'object/base/frame wrong');
+  const inl=await p.evaluate(()=>{for(const nv of navFor(cur())){ui.route=nv[0];renderPage()}ACT.bell();return document.querySelectorAll('[onclick],[onload],[onerror],[onchange],[onsubmit],[oninput],[onkeydown],[onfocus]').length+document.querySelectorAll('a[href^="javascript:"]').length});
+  ok(inl===0,inl+' inline event handlers or javascript: links in the rendered pages');
+});
+
+/* ================= BREAKER FIXES, LOOP 4 (ids BRK-*) =================
+   Each test below was run against the build from before the fix and fails there (see 02-change-notes-fixloop4.md). */
+const MOTION={motion:true}; /* animations on: the closing dialog stays clickable for ~190 ms, which is how the double-submit bugs happen */
+const restoreVia=async(p,json)=>{await p.nav('Settings');await p.click('[data-act=backupIn]');await p.fill('form[data-form=restore] [name=json]',json);await p.click('form[data-form=restore] button');await p.waitForTimeout(300)};
+const fillStorage=p=>p.evaluate(()=>{let chunk='x'.repeat(1<<20);localStorage.setItem('filler','');while(chunk.length>16){try{localStorage.setItem('filler',localStorage.getItem('filler')+chunk)}catch(e){chunk=chunk.slice(chunk.length/2)}}return localStorage.getItem('filler').length});
+
+await T('Breaker fixes','BRK-FEE-002a','Double-clicking "Cancel receipt" in the dialog records one refund, not two','accountant',async p=>{
+  await collectCash(p);const pay=(await p.db()).payments.pop();
+  await p.evaluate(i=>ACT.viewReceipt({dataset:{id:i}}),pay.id);await p.click('[data-act=cancelReceipt]');
+  await p.fill('form[data-form=cancelReceipt] [name=reason]','wrong student');
+  await p.dblclick('form[data-form=cancelReceipt] button.danger');await p.waitForTimeout(500);
+  const d=await p.db();const refunds=d.refunds.filter(r=>r.rc===pay.rc);
+  ok(d.payments.find(x=>x.id===pay.id).status==='cancelled','receipt not cancelled');
+  ok(refunds.length===1,'refund rows for '+pay.rc+': '+refunds.length);
+  ok(await p.evaluate(()=>cashExpected(today()))===0,'cash expected is not 0: refunded more than once');
+  ok(d.audit.filter(a=>a.action==='Receipt cancelled').length===1,'audit rows: '+d.audit.filter(a=>a.action==='Receipt cancelled').length);
+},MOTION);
+await T('Breaker fixes','BRK-FEE-002b','A receipt that is not Active cannot be cancelled again, by dialog, form call or cancelPayment()','accountant',async p=>{
+  await collectCash(p);const pay=(await p.db()).payments.pop();
+  const r=await p.evaluate(id=>{const out=[];for(let i=0;i<3;i++){const f=document.createElement('form');f.dataset.id=id;try{FORM.cancelReceipt(f,{reason:'again '+i,refund:'Cash'});out.push('ok')}catch(e){out.push(e.message)}}
+    let direct;try{cancelPayment(db.payments.find(x=>x.id===id),'x','Cash');direct='allowed'}catch(e){direct=e.message}
+    let dlg;try{ACT.cancelReceipt({dataset:{id}});dlg='opened'}catch(e){dlg=e.message}
+    return{out,direct,dlg,refunds:db.refunds.filter(x=>x.paymentId===id).length,total:db.refunds.filter(x=>x.rc===db.payments.find(y=>y.id===id).rc).reduce((a,x)=>a+x.amount,0),amount:db.payments.find(y=>y.id===id).amount}},pay.id);
+  ok(r.out[0]==='ok'&&/already cancelled/.test(r.out[1])&&/already cancelled/.test(r.out[2]),'forged repeats: '+r.out.join(' | '));
+  ok(/already cancelled/.test(r.direct),'cancelPayment on a cancelled receipt: '+r.direct);ok(/already cancelled/.test(r.dlg),'dialog on a cancelled receipt: '+r.dlg);
+  ok(r.refunds===1&&r.total===r.amount,`refunds ${r.refunds}, total ${r.total} for a receipt of ${r.amount}`);
+});
+await T('Breaker fixes','BRK-FEE-003a','Double-clicking "Waive" waives the late fee once, only the amount typed','principal',async p=>{
+  const s=await p.evaluate(()=>{const x=db.students.find(s=>s.status==='Active'&&feeSum(s).lateDue>=200);return{id:x.id,due:feeSum(x).lateDue}});
+  const half=Math.floor(s.due/2);
+  await p.evaluate(id=>ACT.openStudent({dataset:{id}}),s.id);await p.waitForTimeout(150);await p.click('[data-act=waiveLate]');
+  await p.fill('form[data-form=waive] [name=amount]',String(half));await p.fill('form[data-form=waive] [name=reason]','hardship');
+  await p.dblclick('form[data-form=waive] button.primary');await p.waitForTimeout(500);
+  const d=await p.db();const st=d.students.find(x=>x.id===s.id);
+  ok(st.fee.lateWaived===half,`waived ${st.fee.lateWaived}, intended ${half} (late due was ${s.due})`);
+  ok(d.audit.filter(a=>a.action==='Late fee waived').length===1,'waiver audit rows: '+d.audit.filter(a=>a.action==='Late fee waived').length);
+},MOTION);
+await T('Breaker fixes','BRK-FEE-003b','Collect form: double-click issues one receipt and the button is disabled while it works','accountant',async p=>{
+  await p.nav('Fee Collection');await p.click('[data-act=feeMode][data-m=counter]');const n0=(await p.db()).payments.length;
+  await p.dblclick('form[data-form=collect] button.primary');await p.waitForTimeout(400);
+  ok((await p.db()).payments.length===n0+1,'receipts added: '+((await p.db()).payments.length-n0));
+  const r=await p.evaluate(()=>{const f=document.createElement('form');f.dataset.form='collect';f.innerHTML='<input name=sid><button class=primary>Go</button>';document.body.appendChild(f);let calls=0;const old=FORM.collect;FORM.collect=()=>{calls++};
+    f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));const dis1=f.querySelector('button').disabled;f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));FORM.collect=old;f.remove();return{calls,dis1}});
+  ok(r.calls===1&&r.dis1,`second submit ran (${r.calls} calls) or button not disabled (${r.dis1})`);
+});
+await T('Breaker fixes','BRK-FEE-003c','Concession dialog: double-click applies one concession, not two','principal',async p=>{
+  const sid=await p.evaluate(()=>db.students.find(s=>s.status==='Active'&&s.fee.paid===0&&s.fee.concession.status==='none').id);
+  await p.nav('Fee Collection');await p.tab('Concessions');await p.selectOption('form[data-form=concRequest] [name=sid]',sid);
+  await p.dblclick('form[data-form=concRequest] button.primary');await p.waitForTimeout(400);
+  const d=await p.db();const n=d.audit.filter(a=>/^Concession (applied|requested)$/.test(a.action)).length;
+  ok(n===1,'concession audit rows: '+n);
+},MOTION);
+await T('Breaker fixes','BRK-FEE-003d','Payment simulation (Demo: payment succeeds): double-click gives one receipt','accountant',async p=>{
+  await p.nav('Fee Collection');await p.click('form[data-form=collect] button.primary');await p.waitForTimeout(200);const n0=(await p.db()).payments.length;
+  await p.dblclick('[data-act=reqSim]');await p.waitForTimeout(400);
+  const d=await p.db();ok(d.payments.length===n0+1,'receipts added: '+(d.payments.length-n0));ok(d.requests.filter(r=>r.status==='paid').length===1,'paid requests: '+d.requests.filter(r=>r.status==='paid').length);
+},MOTION);
+await T('Breaker fixes','BRK-FEE-003e','Parent payment: double-click on Continue and on Payment succeeds creates one request and one receipt','parent',async p=>{
+  const n0=await p.evaluate(()=>({r:db.requests.length,p:db.payments.length}));
+  await p.nav('Fees and Receipts');await p.click('#page [data-act=parentPay]');await p.dblclick('form[data-form=parentPayGo] button.primary');await p.waitForTimeout(300);
+  ok((await p.evaluate(()=>db.requests.length))===n0.r+1,'requests added: '+((await p.evaluate(()=>db.requests.length))-n0.r));
+  await p.dblclick('[data-act=pOk]');await p.waitForTimeout(400);ok((await p.evaluate(()=>db.payments.length))===n0.p+1,'receipts added: '+((await p.evaluate(()=>db.payments.length))-n0.p));
+},MOTION);
+await T('Breaker fixes','BRK-FEE-003f','Day close: double-click closes the day once','accountant',async p=>{
+  await collectCash(p);await p.tab('Day close');const ex=await p.evaluate(()=>cashExpected(today()));
+  await p.fill('form[data-form=closeDay] [name=counted]',String(ex));await p.dblclick('form[data-form=closeDay] button.gold');await p.waitForTimeout(400);
+  const d=await p.db();ok(d.audit.filter(a=>a.action==='Day closed').length===1,'day-close audit rows: '+d.audit.filter(a=>a.action==='Day closed').length);ok(d.closures[(await p.evaluate(()=>today()))],'day not closed');
+},MOTION);
+
+await T('Breaker fixes','BRK-DATA-001','When the browser cannot store the data, a persistent warning shows and no success toast claims it was saved','accountant',async p=>{
+  const filled=await fillStorage(p);ok(filled>1e6,'could not fill storage: '+filled);
+  const n0=await p.evaluate(()=>db.payments.length);await collectCash(p);
+  ok((await p.evaluate(()=>db.payments.length))===n0+1,'app stopped working in memory');
+  const bar=await p.$eval('#savebar',e=>({t:e.textContent,vis:e.getClientRects().length>0,role:e.getAttribute('role')})).catch(()=>null);
+  ok(bar&&bar.vis&&bar.role==='alert'&&bar.t.startsWith('Could not save: changes will be lost on reload'),'no visible warning banner: '+JSON.stringify(bar));
+  const t=await p.toast();ok(/Could not save: changes will be lost on reload/.test(t),'toast: '+t);
+  await p.waitForTimeout(3500);ok(!!(await p.$('#savebar')),'banner went away by itself');
+  ok(await p.evaluate(()=>JSON.parse(localStorage.getItem('vp_erp_demo_v3')).payments.length)===n0,'the receipt was somehow stored');
+  await p.evaluate(()=>localStorage.removeItem('filler'));await p.evaluate(()=>save());ok(!(await p.$('#savebar')),'banner stays after a successful save');
+  ok(await p.evaluate(()=>JSON.parse(localStorage.getItem('vp_erp_demo_v3')).payments.length)===n0+1,'recovered save did not store the receipt');
+});
+await T('Breaker fixes','BRK-DATA-001b','Fits-in-memory restore that cannot be stored says so instead of reporting success','admin',async p=>{
+  const json=await p.evaluate(()=>backupText());await fillStorage(p);await restoreVia(p,json);
+  const dlg=await p.text('#dlg');ok(/Could not save: changes will be lost on reload/.test(dlg),'restore dialog: '+dlg.slice(0,200));
+  ok(!!(await p.$('#savebar')),'no banner after restore');ok(!/^Backup restored\. Sign in again\.$/.test(await p.toast()),'plain success toast shown');
+});
+
+await T('Breaker fixes','BRK-BKP-001a','Restoring a backup from another device keeps the signed-in Super Admin able to log in; temporary passwords are shown once, never logged','admin',async p=>{
+  const json=await p.evaluate(()=>{const x=JSON.parse(backupText());x.users.find(u=>u.username==='admin').username='rajiv';return JSON.stringify(x)});
+  await restoreVia(p,json);
+  const dlg=await p.text('#dlg');ok(/Temporary passwords were issued for 1 user/.test(dlg),'dialog text: '+dlg.slice(0,300));
+  const list=await p.$eval('#dlg textarea',e=>e.value);const m=list.match(/rajiv\s+(Tmp-\S+)/);ok(m,'rajiv temp password not listed: '+list);
+  ok(await p.$('#dlg [data-act=copyTemps]'),'no Copy button');await p.click('#dlg [data-act=copyTemps]');
+  await p.keyboard.press('Escape');await p.waitForTimeout(250);ok(await p.$('#dlg .dialog:not(.leaving)'),'Escape closed the one-time list');
+  await p.mouse.click(5,5);await p.waitForTimeout(250);ok(await p.$('#dlg .dialog:not(.leaving)'),'clicking outside closed the one-time list');
+  await p.click('#dlg button[data-act=closeDialog]');await p.waitForTimeout(300);ok(!(await p.$('#dlg .dialog')),'the button did not close it');
+  await p.evaluate(()=>evFlush());
+  const logged=await p.evaluate(()=>JSON.stringify(db.audit)+(localStorage.getItem('vp_erp_events_v1')||''));
+  ok(!/Tmp-/.test(logged),'a temporary password is in the audit or event log');ok(/temporary passwords issued for 1 users/.test(logged),'audit text missing');
+  ok(await p.login('admin','admin123'),'the Super Admin who restored cannot sign in with their own password');
+  await p.logout();ok(await p.login('rajiv',m[1]),'temporary password does not work');
+});
+await T('Breaker fixes','BRK-BKP-001b','Restore refuses duplicate student ids and receipt numbers, and raises counters above every id in use','admin',async p=>{
+  const bad=await p.evaluate(()=>{const mk=fn=>{const x=JSON.parse(backupText());fn(x);return JSON.stringify(x)};
+    return{dupStudent:mk(x=>{const s=JSON.parse(JSON.stringify(x.students[1]));s.id=x.students[0].id;s.name='DUPLICATE ID';x.students.push(s)}),
+           dupReceipt:mk(x=>{const q=JSON.parse(JSON.stringify(x.payments[0]));q.id='p_dup';x.payments.push(q)}),
+           counters:mk(x=>{x.counters.rc=2531;x.counters.req=0;x.counters.enrol={}})}});
+  const n0=(await p.db()).students.length;
+  await restoreVia(p,bad.dupStudent);ok(/damaged.*student/i.test(await p.toast()),'duplicate student id accepted: '+await p.toast());await p.keyboard.press('Escape');
+  await restoreVia(p,bad.dupReceipt);ok(/damaged.*receipt number/i.test(await p.toast()),'duplicate receipt number accepted: '+await p.toast());
+  ok((await p.db()).students.length===n0&&!(await p.db()).students.some(s=>s.name==='DUPLICATE ID'),'a refused restore changed the data');
+  await p.keyboard.press('Escape');await restoreVia(p,bad.counters);await p.waitForTimeout(200);
+  const c=await p.evaluate(()=>{const max=Math.max(...db.payments.map(p=>+p.rc.replace(/\D/g,'')));const en={};db.students.forEach(s=>{const m=/^(.+)-(\d+)$/.exec(s.id);en[m[1]]=Math.max(en[m[1]]||0,+m[2])});
+    return{rc:db.counters.rc,max,enrolOk:Object.keys(en).every(k=>db.counters.enrol[k]>=en[k]),audit:db.audit[0].detail}});
+  ok(c.rc>c.max,`receipt counter ${c.rc} is not above the highest receipt ${c.max}`);ok(c.enrolOk,'enrolment counters are below existing ids');ok(/counters raised/.test(c.audit),'audit: '+c.audit);
+  ok(await p.login('admin','admin123'),'same-device admin cannot sign in after restore');
+  const s=await admit(p,{name:'After Restore Kid'});const ids=(await p.db()).students.map(x=>x.id);ok(new Set(ids).size===ids.length,'admission reused an enrolment number: '+s.id);
+  await p.keyboard.press('Escape');await p.waitForTimeout(100);await collectCash(p);const rcs=(await p.db()).payments.map(x=>x.rc);ok(new Set(rcs).size===rcs.length,'a receipt number was reused');
+});
+
+await T('Breaker fixes','BRK-FEE-004','An issued receipt (screen, text, PDF, e-mail) does not change when fee rules, fee structure or college name change; old receipts get a snapshot on load','admin',async p=>{
+  const pid=await p.evaluate(()=>{const s=db.students.find(s=>s.status==='Active'&&feeSum(s).lateDue>0);const sm=feeSum(s);const x=recordPayment(s,{amount:sm.payable,mode:'Cash',channel:'counter',by:'Rajiv Bhatt',force:true});save();return x.id});
+  const grab=()=>p.evaluate(id=>{const x=db.payments.find(p=>p.id===id);return JSON.stringify({text:receiptText(x),html:receiptHtml(x),pdf:receiptPdf(x),mail:receiptMailText(x),frag:receiptMailFragment(x),late:x.late,feeAmt:x.feeAmt,bal:x.balAfter,credit:x.credit,snap:!!x.snap,pdfLate:/Late fee cleared/.test(receiptPdf(x))})},pid);
+  const before=JSON.parse(await grab());ok(before.snap,'no snapshot on the new receipt');ok(before.late>0&&before.pdfLate,'setup: receipt has no late fee part');
+  await p.nav('Fee Collection');await p.tab('Fee setup');await p.fill('#f_lateFeePerDay','0');await p.fill('#f_graceDays','30');await p.click('form[data-form=feeRules] button.primary');await p.waitForTimeout(250);
+  await p.evaluate(()=>{FORM.saveSettings({},{college:'Renamed College',short:'Renamed',city:'Surat',year:'2030-31'});const f=document.createElement('form');f.dataset.c='bed';const r=document.createElement('input');f.innerHTML='<input name=hname value="Tuition fee"><input name=hamt value="99999"><input name=hname value="Other"><input name=hamt value="1">';FORM.feeStruct(f)});
+  const after=JSON.parse(await grab());
+  for(const k of Object.keys(before))ok(JSON.stringify(before[k])===JSON.stringify(after[k]),`receipt ${k} changed after the rules changed`);
+  /* an old save without snapshots: the first load fills them in, and they then stay fixed */
+  await p.evaluate(()=>{db.payments.forEach(x=>delete x.snap);save()});await p.reload();await p.waitForTimeout(250);
+  ok(await p.evaluate(()=>db.payments.every(x=>x.snap&&x.snap.c)),'migrate() did not give every old receipt a snapshot');
+  const mid=JSON.parse(await grab());await p.evaluate(()=>{FORM.feeRules({},{lateFeePerDay:'500',lateCap:'9000',graceDays:'0',dueOffsets:'0, 10, 20',receiptPrefix:'RC-'})});
+  ok(JSON.stringify(mid)===JSON.stringify(JSON.parse(await grab())),'a migrated receipt changed after a rule change');
+});
+await T('Breaker fixes','BRK-FEE-007','Fee rules refuse negative late fee, cap and grace days','admin',async p=>{
+  const r=await p.evaluate(()=>{const before=JSON.stringify(db.settings);const out=[];for(const d of [{lateFeePerDay:'-50',lateCap:'1000',graceDays:'5'},{lateFeePerDay:'50',lateCap:'-1000',graceDays:'5'},{lateFeePerDay:'50',lateCap:'1000',graceDays:'-3'},{lateFeePerDay:'abc',lateCap:'1000',graceDays:'5'}]){try{FORM.feeRules({},{...d,dueOffsets:'0, 45, 90',receiptPrefix:'RC-'});out.push('allowed')}catch(e){out.push(e.message)}}return{out,same:before===JSON.stringify(db.settings)}});
+  ok(r.out.every(x=>/0 or more/.test(x))&&r.same,JSON.stringify(r));
+});
+
+await T('Breaker fixes','BRK-CONC-001','A concession that would leave money paid over the new fee is refused; only pending requests with approve/reject can be decided','principal',async p=>{
+  const r=await p.evaluate(()=>{const s=db.students.find(s=>s.status==='Active'&&feeSum(s).status==='Paid'&&s.fee.concession.status==='none');const out={};const before=JSON.stringify(s.fee.concession);
+    const f=document.createElement('form');try{FORM.concRequest(f,{sid:s.id,conc:'mgmt10000',why:'x'});out.req='allowed'}catch(e){out.req=e.message}
+    out.same=before===JSON.stringify(s.fee.concession);out.credit=db.payments.filter(p=>p.studentId===s.id).reduce((a,p)=>a+(p.credit||0),0);
+    s.fee.concession={type:'mgmt',amount:10000,status:'pending',requestedBy:'Clerk'};layoutFee(s.fee);recompute(s);
+    try{ACT.concDecide({dataset:{id:s.id,v:'approved'}});out.dec='allowed'}catch(e){out.dec=e.message}out.status=s.fee.concession.status;
+    ACT.concDecide({dataset:{id:s.id,v:'rejected'}});out.rejected=s.fee.concession.status;
+    const n=db.students.find(x=>x.fee.concession.status==='none'&&x.id!==s.id);
+    try{ACT.concDecide({dataset:{id:n.id,v:'approved'}});out.none='allowed'}catch(e){out.none=e.message}
+    const q=db.students.find(x=>x.fee.concession.status==='pending');try{ACT.concDecide({dataset:{id:q.id,v:'paid-in-full'}});out.word='allowed'}catch(e){out.word=e.message}out.qStatus=q.fee.concession.status;
+    return out});
+  ok(/already paid/.test(r.req)&&r.same&&r.credit===0,'request after full payment: '+JSON.stringify(r));ok(/already paid/.test(r.dec)&&r.status==='pending','approve after full payment: '+JSON.stringify(r));
+  ok(r.rejected==='rejected','reject should still work: '+r.rejected);ok(/no pending/.test(r.none),'decide on a student with no request: '+r.none);ok(/approve or reject/.test(r.word)&&r.qStatus==='pending','arbitrary status word: '+JSON.stringify(r));
+});
+
+await T('Breaker fixes','BRK-ADM-001','Enter in an admission step goes to the next step with validation; it never submits the wizard','clerk',async p=>{
+  const n0=(await p.db()).students.length;await p.nav('Students');await p.click('[data-act=newAdmission]');
+  await p.fill('#adm [name=name]','Enter Key Kid');await p.fill('#adm [name=dob]','2002-05-10');await p.fill('#adm [name=aadhaar]','123412341234');
+  await p.press('#adm [name=aadhaar]','Enter');await p.waitForTimeout(250);
+  ok((await p.db()).students.length===n0,'Enter created a student without steps 2-5');ok((await p.evaluate(()=>ui.admStep))===1,'did not move to step 2: '+(await p.evaluate(()=>ui.admStep)));
+  ok(await p.isVisible('#adm [name=phone]'),'step 2 fields not shown');
+  await p.press('#adm [name=phone]','Enter');await p.waitForTimeout(150);ok((await p.evaluate(()=>ui.admStep))===1&&(await p.db()).students.length===n0,'Enter with required fields empty moved on or created a student');
+  ok(await p.evaluate(()=>document.activeElement&&document.activeElement.name==='phone'||document.activeElement.name==='address'),'validation did not point at the empty field');
+  const r=await p.evaluate(()=>{const out=[];for(const d of [{name:'  ',dob:'2002-01-01',aadhaar:'1',phone:'9',address:'a',gname:'g',gphone:'9'},{name:'Only Name'}]){try{FORM.admit({},{div:'d3',...d});out.push('allowed')}catch(e){out.push(e.message)}}return out});
+  ok(r.every(x=>/^Enter /.test(x)),'forged partial admission: '+r.join(' | '));ok((await p.db()).students.length===n0,'forged partial admission created a student');
+});
+
+await T('Breaker fixes','BRK-ACAD-002','Marks cannot be saved or published to a division and semester that the subject does not belong to','faculty',async p=>{
+  const r=await p.evaluate(()=>{const me=cur().staffId;const sb=db.subjects.find(s=>s.faculty===me&&s.course==='bed'&&s.sem===1);const bad=db.divisions.find(d=>d.id==='d1');const good=db.divisions.find(d=>d.id==='d3');
+    const marks0=db.marks.length,n0=db.notifs?db.notifs.length:0;const sc=dv=>{const d={max:'20'};db.students.filter(s=>s.div===dv.id&&s.status==='Active').forEach(s=>d['s_'+s.id]='10');return d};
+    ui.f.marks={div:bad.id,sub:sb.id,exam:'Practical'};let e1;try{FORM.saveMarks({},sc(bad));e1='allowed'}catch(e){e1=e.message}
+    const afterBad={marks:db.marks.length-marks0,notifs:(db.notifs?db.notifs.length:0)-n0};
+    ui.f.marks={div:good.id,sub:sb.id,exam:'Practical'};let e2;try{FORM.saveMarks({},sc(good));e2='saved'}catch(e){e2=e.message}
+    ui.f.marks={div:good.id,sub:sb.id,exam:'Hacked exam'};let e3;try{FORM.saveMarks({},sc(good));e3='allowed'}catch(e){e3=e.message}
+    return{e1,afterBad,e2,e3,badSem:sb.sem+' vs '+(db.students.find(s=>s.div===bad.id)||{}).sem}});
+  ok(/does not belong/.test(r.e1),'mismatched division: '+JSON.stringify(r));ok(r.afterBad.marks===0&&r.afterBad.notifs===0,'marks or notifications were written: '+JSON.stringify(r.afterBad));
+  ok(r.e2==='saved','the correct division should save: '+r.e2);ok(/valid exam/.test(r.e3),'unknown exam accepted: '+r.e3);
+});
+
+await T('Breaker fixes','BRK-NAME-cap','Names longer than 80 characters are refused with a clear message; inputs carry maxlength; empty names are refused','admin',async p=>{
+  const L=n=>'A'.repeat(n);
+  const r=await p.evaluate(L_=>{const L=n=>'A'.repeat(n);const out={};const t=(k,fn)=>{try{fn();out[k]='allowed'}catch(e){out[k]=e.message}};
+    t('settings81',()=>FORM.saveSettings({},{college:L(81),short:'x',city:'c',year:'2026'}));const c0=db.settings.college;
+    t('settings80',()=>FORM.saveSettings({},{college:L(80),short:'x',city:'c',year:'2026'}));out.saved80=db.settings.college.length;
+    t('settingsEmpty',()=>FORM.saveSettings({},{college:'   ',short:'x',city:'c',year:'2026'}));
+    const sf=document.createElement('form');
+    t('staff81',()=>FORM.saveStaff(sf,{name:L(81),designation:'d',department:'',qualification:'',phone:'',email:'',joined:'2024-01-01',status:'Active',role:'None'}));
+    t('staffBlank',()=>FORM.saveStaff(sf,{name:'  ',designation:'d',department:'',qualification:'',phone:'',email:'',joined:'2024-01-01',status:'Active',role:'None'}));
+    const base={dob:'2002-01-01',aadhaar:'123412341234',phone:'9777700001',address:'a',gname:'g',gphone:'9777700002',div:'d3',course:'bed',batch:'b2',planName:db.plans[0].name,conc:'none'};
+    t('admit81',()=>FORM.admit({},{...base,name:L(81)}));t('admitGuardian81',()=>FORM.admit({},{...base,name:'Ok Name',gname:L(81)}));t('admitBlank',()=>FORM.admit({},{...base,name:'     '}));
+    const sid=db.students[0].id;const ef=document.createElement('form');ef.dataset.id=sid;t('edit81',()=>FORM.editStudent(ef,{name:L(81),phone:'1',gname:'g',gphone:'1'}));
+    t('school81',()=>FORM.addSchool({},{name:L(81),city:'c',mentor:'m'}));
+    return out},0);
+  for(const k of ['settings81','staff81','admit81','admitGuardian81','edit81','school81'])ok(/too long \(81 characters; the limit is 80\)/.test(r[k]),`${k}: ${r[k]}`);
+  ok(r.settings80==='allowed'&&r.saved80===80,'80 characters should be accepted: '+r.settings80);
+  for(const k of ['settingsEmpty','staffBlank','admitBlank'])ok(/^Enter /.test(r[k]),`${k}: ${r[k]}`);
+  await p.nav('Settings');ok((await p.getAttribute('form[data-form=saveSettings] [name=college]','maxlength'))==='80','college input has no maxlength');
+  await p.nav('Students');await p.click('[data-act=newAdmission]');ok((await p.getAttribute('#adm [name=name]','maxlength'))==='80'&&(await p.getAttribute('#adm [name=gname]','maxlength'))==='80','admission inputs have no maxlength');
+});
+
+await T('Breaker fixes','BRK-DEP-002','make-index.sh --check fails loudly when the CSP hash in vercel.json is stale, and prints the hash when it is not','admin',async p=>{
+  const path=require('path'),os=require('os'),cp=require('child_process');
+  const sh=locate(['src/make-index.sh','make-index.sh'],'MAKE_INDEX_SH'),vj=locate(['vercel.json'],'VERCEL_JSON');
+  ok(sh&&vj,'make-index.sh or vercel.json not found next to the build under test (set MAKE_INDEX_SH / VERCEL_JSON)');
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'cspchk-'));fs.mkdirSync(path.join(tmp,'src'));
+  fs.copyFileSync(sh,path.join(tmp,'src','make-index.sh'));fs.copyFileSync(vj,path.join(tmp,'vercel.json'));
+  const html0=fs.readFileSync(FILE.replace('file://',''),'utf8');const run=()=>cp.spawnSync('bash',[path.join(tmp,'src','make-index.sh'),'--check'],{encoding:'utf8'});
+  fs.writeFileSync(path.join(tmp,'index.html'),html0);let r=run();
+  ok(r.status===0&&/CSP check OK: script 'sha256-[A-Za-z0-9+\/=]+' style 'sha256-/.test(r.stdout),'clean check: status '+r.status+' '+r.stdout+r.stderr);
+  fs.writeFileSync(path.join(tmp,'index.html'),html0.replace('<script>','<script> '));r=run();
+  ok(r.status!==0&&/CSP CHECK FAILED: the script hash/.test(r.stderr)&&/make-index\.sh/.test(r.stderr),'edited script not caught: status '+r.status+' '+r.stderr.slice(0,200));
+  fs.writeFileSync(path.join(tmp,'index.html'),html0.replace('<style>','<style> '));r=run();ok(r.status!==0&&/the style hash/.test(r.stderr),'edited style not caught: status '+r.status);
+  fs.writeFileSync(path.join(tmp,'index.html'),html0);const v=JSON.parse(fs.readFileSync(path.join(tmp,'vercel.json'),'utf8'));v.headers[0].headers=v.headers[0].headers.filter(h=>h.key!=='Content-Security-Policy');fs.writeFileSync(path.join(tmp,'vercel.json'),JSON.stringify(v));r=run();
+  ok(r.status!==0&&/no Content-Security-Policy/.test(r.stderr),'missing CSP header not caught');
+  fs.rmSync(tmp,{recursive:true,force:true});
+});
+
+await T('Breaker fixes','DEF-003','The suite has no absolute /home path; build files are found next to the build under test or the run fails loudly','admin',async p=>{
+  const src=fs.readFileSync(__filename,'utf8');const hits=src.split('\n').map((l,i)=>[i+1,l]).filter(([,l])=>new RegExp('/ho'+'me/').test(l)&&!/new RegExp\('\/ho/.test(l));
+  ok(!hits.length,'absolute /home paths in the suite at lines '+hits.map(h=>h[0]).join(', '));
+  ok(locate(['vercel.json'],'VERCEL_JSON'),'vercel.json not found next to the build under test');
+  const keep=process.env.VERCEL_JSON;process.env.VERCEL_JSON='';ok(locate(['definitely-missing.json'],'VERCEL_JSON')===null,'locate() invented a path for a missing file');if(keep!==undefined)process.env.VERCEL_JSON=keep;else delete process.env.VERCEL_JSON;
+});
+await T('Breaker fixes','DEF-004','On a phone the toast does not block taps: it sits clear of the bottom controls, takes no pointer events, and can be dismissed','admin',async p=>{
+  await p.evaluate(()=>toast('Guardian notified (demo)'));await p.waitForTimeout(80);
+  const g=await p.evaluate(()=>{const t=document.querySelector('.toast'),cs=getComputedStyle(t),r=t.getBoundingClientRect(),x=t.querySelector('button.tx');
+    return{pe:cs.pointerEvents,top:r.top,bottom:r.bottom,h:innerHeight,btn:!!x,btnPe:x&&getComputedStyle(x).pointerEvents,label:x&&x.getAttribute('aria-label'),text:t.textContent}});
+  ok(g.pe==='none','toast takes pointer events: '+g.pe);ok(g.bottom<g.h*0.5,`toast is in the bottom half of the phone screen (top ${g.top}, bottom ${g.bottom} of ${g.h})`);
+  ok(g.btn&&g.btnPe==='auto'&&/Dismiss/.test(g.label),'no dismiss button');ok(g.text==='Guardian notified (demo)','dismiss button changed the text: '+g.text);
+  await p.click('.toast button.tx');await p.waitForTimeout(50);ok(!(await p.$('.toast')),'dismiss button did not remove the toast');
+  await p.evaluate(()=>toast('Second'));await p.keyboard.press('Escape');await p.waitForTimeout(50);ok(!(await p.$('.toast')),'Escape did not remove the toast');
+},{vp:{width:375,height:812}});
 
 await browser.close();
 fs.writeFileSync('results.json',JSON.stringify(results,null,1));

@@ -10,7 +10,7 @@ function attBreakdown(s){
   return Object.entries(m).sort((a,b)=>b[0].localeCompare(a[0])).map(([k,v])=>({k,label:MON[+k.slice(5)-1]+' '+k.slice(0,4),...v,pct:Math.round(v.p/v.t*100)}));
 }
 function marksOf(s){return db.marks.filter(m=>m.divId===s.div&&m.scores[s.id]!==undefined).map(m=>{const sb=db.subjects.find(x=>x.id===m.subjectId);const sc=+m.scores[s.id];return{subject:sb?sb.name:'-',exam:m.exam,sem:m.sem,score:sc,max:m.max,pct:Math.round(sc/m.max*100)}})}
-const attStrip=s=>{const d=attDays(s).slice(-14);return d.length?`<div class="attstrip" role="img" aria-label="Last ${d.length} marked days">${d.map(x=>`<span class="${x.v==='P'?'p':'a'}" title="${fmtD(x.date)}: ${x.v==='P'?'Present':'Absent'}"><i>${x.date.slice(8)}</i></span>`).join('')}</div><p class="note" style="margin:6px 0 0">Last ${d.length} marked days. Green is present, red is absent.</p>`:'<p class="note">Attendance has not been marked yet.</p>'};
+const attStrip=s=>{const d=attDays(s).slice(-14);return d.length?`<div class="attstrip" role="img" aria-label="Last ${d.length} marked days">${d.map(x=>`<span class="${x.v==='P'?'p':'a'}" title="${fmtD(x.date)}: ${x.v==='P'?'Present':'Absent'}"><i>${E(x.date.slice(8))}</i></span>`).join('')}</div><p class="note" style="margin:6px 0 0">Last ${d.length} marked days. Green is present, red is absent.</p>`:'<p class="note">Attendance has not been marked yet.</p>'};
 
 function viewStudentHome(){
   const s=myChild(),sm=feeSum(s),a=attPct(s),dv=divOf(s.div),ct=db.staff.find(x=>x.id===dv?.teacher);
@@ -20,7 +20,7 @@ function viewStudentHome(){
    <div class="kpi"><span class="label">Fee payable now</span><div class="v" ${sm.payable>0?'style="color:var(--warn)"':''}>${inr(sm.payable)}</div><div class="s">${sm.payable>0?feePillText(sm):'All clear'}</div></div>
    <div class="kpi"><span class="label">Next installment</span><div class="v" style="font-size:20px">${nx?fmtD(nx.due):'None'}</div><div class="s">${nx?E(nx.label)+' · '+inr(nx.remaining)+(nx.overdue?' (overdue)':''):'Fee fully paid'}</div></div>
    <div class="kpi"><span class="label">Internal marks</span><div class="v">${avg===null?'-':avg+'%'}</div><div class="s">${mk.length?'Average of '+mk.length+' exam'+(mk.length>1?'s':''):'No marks yet'}</div></div></div>
-  <div class="grid even"><div class="panel"><h2>Fees ${feePill(sm)}</h2><div class="rline"><span>Semester ${s.fee.sem} fee</span><b>${inr(sm.total)}</b></div><div class="rline"><span>Paid</span><b>${inr(sm.paid)}</b></div><div class="rline"><span>Balance</span><b>${inr(sm.balance)}</b></div>${sm.lateDue>0?`<div class="rline"><span>Late fee</span><b style="color:var(--bad)">${inr(sm.lateDue)}</b></div>`:''}
+  <div class="grid even"><div class="panel"><h2>Fees ${feePill(sm)}</h2><div class="rline"><span>Semester ${E(s.fee.sem)} fee</span><b>${inr(sm.total)}</b></div><div class="rline"><span>Paid</span><b>${inr(sm.paid)}</b></div><div class="rline"><span>Balance</span><b>${inr(sm.balance)}</b></div>${sm.lateDue>0?`<div class="rline"><span>Late fee</span><b style="color:var(--bad)">${inr(sm.lateDue)}</b></div>`:''}
     <div class="actions" style="margin-top:12px">${sm.payable>0?`<button class="btn primary" data-act="parentPay">Pay now</button>`:pill('Nothing due','good')}<button class="btn" data-act="go" data-to="pfees">Receipts</button></div>
     <p class="note">A PDF receipt is emailed to you after every payment.</p></div>
    <div class="panel"><h2>Attendance</h2>${attStrip(s)}<div class="actions" style="margin-top:10px"><button class="btn sm" data-act="go" data-to="sacademic">Full attendance and marks</button></div></div>
@@ -34,7 +34,7 @@ function viewStudentAcademic(){
   return head('My Academics',`${classLabel(s)} · Semester ${s.sem}`)+
   `<div class="grid even"><div class="panel"><h2>Attendance ${a===null?'':a<75?pill(a+'% low','bad'):pill(a+'%','good')}</h2>
     ${days.length?`<div class="rline"><span>Days present</span><b>${pres} of ${days.length}</b></div>${attStrip(s)}<div class="list" style="margin-top:12px">${attBreakdown(s).map(m=>`<div class="li"><span>${E(m.label)}<small>${m.p} of ${m.t} days</small></span><div style="display:flex;gap:10px;align-items:center;min-width:120px"><div class="bar ${m.pct<75?'warn':''}" style="flex:1"><i style="width:${m.pct}%"></i></div><b>${m.pct}%</b></div></div>`).join('')}</div>`:'<p class="note">Attendance has not been marked yet.</p>'}</div>
-   <div class="panel"><h2>Internal marks ${pill(String(mk.length))}</h2>${mk.length?`<div class="tablewrap"><table><thead><tr><th>Subject</th><th>Exam</th><th class="num">Marks</th><th class="num">%</th></tr></thead><tbody>${mk.map(m=>`<tr><td>${E(m.subject)}</td><td>${E(m.exam)}</td><td class="num">${m.score}/${m.max}</td><td class="num">${m.pct}%</td></tr>`).join('')}</tbody></table></div>`:'<p class="note">No marks have been entered yet.</p>'}</div>
+   <div class="panel"><h2>Internal marks ${pill(String(mk.length))}</h2>${mk.length?`<div class="tablewrap"><table><thead><tr><th>Subject</th><th>Exam</th><th class="num">Marks</th><th class="num">%</th></tr></thead><tbody>${mk.map(m=>`<tr><td>${E(m.subject)}</td><td>${E(m.exam)}</td><td class="num">${E(m.score)}/${E(m.max)}</td><td class="num">${m.pct}%</td></tr>`).join('')}</tbody></table></div>`:'<p class="note">No marks have been entered yet.</p>'}</div>
    <div class="panel"><h2>Subjects this semester</h2><div class="list">${subs.map(x=>`<div class="li"><span>${E(x.name)}<small>${E((db.staff.find(t=>t.id===x.faculty)||{}).name||'Faculty not set')}</small></span></div>`).join('')||'<p class="note">No subjects set for this semester.</p>'}</div></div>
    ${pt?`<div class="panel"><h2>Practice teaching ${pill(pt.phase)}</h2><div class="rline"><span>School</span><span>${E(sc?sc.name:'-')}</span></div><div class="rline"><span>Mentor</span><span>${E(sc?sc.mentor:'-')}</span></div><div class="rline"><span>Dates</span><span>${fmtD(pt.start)} to ${fmtD(pt.end)}</span></div><div class="rline"><span>Score</span><span>${pt.score?E(pt.score):'Not graded yet'}</span></div></div>`:''}</div>`;
 }
@@ -63,7 +63,7 @@ function accountPanel(){
 }
 FORM.myPassword=(f,d)=>{
   const u=cur();if(d.cur!==u.password)throw new Error('Current password is not correct');if(String(d.next).length<6)throw new Error('New password must be at least 6 characters');if(d.next===d.cur)throw new Error('Choose a different password');
-  u.password=d.next;log('Password changed',u.role+' portal');notify('account',`Password changed · ${u.name}`,`${u.role} login ${u.username} changed its password.`,{tone:'info'});save();toast('Password changed');renderPage();
+  u.password=d.next;delete u.mustChange;log('Password changed',u.role+' portal');notify('account',`Password changed · ${u.name}`,`${u.role} login ${u.username} changed its password.`,{tone:'info'});save();f.reset();toast('Password changed');if(f.closest('.drawer'))closeLayer();renderPage();
 };
 function viewStudentProfile(){
   const s=myChild(),c=course(s.course),b=batchOf(s.batch);

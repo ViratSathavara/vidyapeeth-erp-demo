@@ -23,14 +23,29 @@ let _seed=11;const rnd=()=>{_seed=(_seed*16807)%2147483647;return _seed/21474836
 /* ---------- storage with fallback ---------- */
 const memStore={};
 const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return memStore[k]??null}};
-const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){memStore[k]=v}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,v);return true}catch(e){memStore[k]=v;return false}};
 const lsDel=k=>{try{localStorage.removeItem(k)}catch(e){delete memStore[k]}};
 /* The signed-in user lives in sessionStorage, so two browser tabs can hold two different logins at once. Data lives in localStorage and is synced between tabs. */
 const sesGet=()=>{try{return sessionStorage.getItem(SES_KEY)}catch(e){return memStore[SES_KEY]??null}};
 const sesSet=v=>{try{sessionStorage.setItem(SES_KEY,v)}catch(e){memStore[SES_KEY]=v}};
 const sesDel=()=>{try{sessionStorage.removeItem(SES_KEY)}catch(e){delete memStore[SES_KEY]}};
 let db=null;
-function save(){lsSet(LS_KEY,JSON.stringify(db))}
+/* save() reports whether the browser really stored the data. When it did not (storage full, blocked or switched off) the app keeps working in memory, a banner stays on screen until a later save succeeds, and toast() refuses to say "saved". */
+const SAVE_FAIL_MSG='Could not save: changes will be lost on reload';
+let saveBad=false,saveTick=false;
+function saveBanner(on){
+  if(typeof document==='undefined'||!document.body)return;
+  let b=document.getElementById('savebar');
+  if(!on){if(b)b.remove();document.body.classList.remove('save-bad');document.body.style.removeProperty('--sbh');return}
+  if(!b){b=document.createElement('div');b.id='savebar';b.setAttribute('role','alert');b.textContent=SAVE_FAIL_MSG+'. Free up space in this browser, or copy a backup now (Settings, Data and backup).';document.body.insertBefore(b,document.body.firstChild)}
+  document.body.classList.add('save-bad');document.body.style.setProperty('--sbh',b.offsetHeight+'px');
+}
+addEventListener('resize',()=>{if(saveBad)saveBanner(true)});
+function save(){
+  const ok=lsSet(LS_KEY,JSON.stringify(db));
+  saveBad=!ok;if(!ok){saveTick=true;Promise.resolve().then(()=>{saveTick=false})}
+  saveBanner(!ok);return ok;
+}
 function load(){const raw=lsGet(LS_KEY);if(raw){try{db=JSON.parse(raw);if(db&&db.ver===3){migrate();return}}catch(e){}}seed();save()}
 /* Adds anything newer builds expect, so data saved by an older build keeps working. Safe to run any number of times. */
 const MAIL_DEFAULTS=()=>({enabled:true,to:'both',mode:'demo',endpoint:'/api/send-receipt',key:'',fromName:'',replyTo:'',redirect:''});
@@ -43,11 +58,30 @@ function ensureUsers(s,alias){
 function migrate(){
   if(typeof ntInit==='function')ntInit();
   db.settings.mail=Object.assign(MAIL_DEFAULTS(),db.settings.mail||{});if(!db.outbox)db.outbox=[];
+  (db.payments||[]).forEach(p=>{if(!p.snap){try{const s=stu(p.studentId);if(s)p.snap=snapOf(p,s)}catch(e){}}});fixCounters(db);
   db.students.forEach(s=>{if(!s.guardian)s.guardian={};if(s.guardian.email===undefined)s.guardian.email=slugMail(s.guardian.name)?slugMail(s.guardian.name)+'@example.com':'';ensureUsers(s)});
   const r=db.students.find(s=>s.name==='Riya Joshi');
   if(r){if(!db.users.some(u=>u.username==='parent'))db.users.push({id:'u_parent',username:'parent',password:PAR_PW,name:r.guardian.name,role:'Parent',studentId:r.id,active:true});
     if(!db.users.some(u=>u.username==='student'))db.users.push({id:'u_student',username:'student',password:STU_PW,name:r.name,role:'Student',studentId:r.id,active:true})}
 }
+
+/* An issued receipt never changes. At issue time the amounts stay on the payment record (recompute() no longer rewrites them once p.snap exists) and p.snap keeps the fee heads, the rules, the college name and the class as they were. Old data without a snapshot gets one from the current data the first time it is loaded. */
+function snapOf(p,s){
+  const own=!!s&&!!s.fee&&s.fee.id===p.feeId,st=db.settings;
+  return{at:Date.now(),h:own?s.fee.heads.map(h=>[h.name,h.amount]):null,t:own?s.fee.total:null,r:[st.lateFeePerDay,st.lateCap,st.graceDays],c:st.college,y:st.city,k:s?classLabel(s):''};
+}
+/* counters must stay above every id already in use, whatever a file or an old save says (they are only ever raised, never lowered) */
+function fixCounters(d){
+  const c=d.counters,fix=[];if(!c||typeof c!=='object')return fix;
+  let m=0;(d.payments||[]).forEach(p=>{const x=/(\d+)$/.exec(String(p.rc));if(x)m=Math.max(m,+x[1])});if(!(c.rc>=m+1)){fix.push('receipt counter '+c.rc+' to '+(m+1));c.rc=m+1}
+  m=0;(d.requests||[]).forEach(r=>{const x=/^rq(\d+)$/.exec(String(r.id));if(x)m=Math.max(m,+x[1])});if(!(c.req>=m+1)){fix.push('request counter '+c.req+' to '+(m+1));c.req=m+1}
+  if(!c.enrol||typeof c.enrol!=='object')c.enrol={};
+  (d.students||[]).forEach(s=>{const x=/^(.+)-(\d+)$/.exec(String(s.id));if(x&&(c.enrol[x[1]]||0)<+x[2]){fix.push('enrolment counter '+x[1]+' to '+(+x[2]));c.enrol[x[1]]=+x[2]}});
+  return fix;
+}
+const NAME_MAX=80;
+/* trims and refuses text longer than the limit, with a message that says what to do */
+const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)throw new Error(`${label} is too long (${v.length} characters; the limit is ${max}). Shorten it and try again.`);return v};
 
 /* ---------- permissions ---------- */
 const PERMS=[
@@ -70,6 +104,11 @@ const DEFAULT_ROLES={
 const cur=()=>db.users.find(u=>u.id===sesGet()&&u.active);
 const can=p=>{const u=cur();if(!u)return false;if(u.role==='Super Admin')return true;return (db.roles[u.role]||[]).includes(p)};
 const canAny=(...p)=>p.some(can);
+/* Guards used at the top of handlers. They mirror what the server must enforce; in this demo they stop the UI and console calls of a signed-in role that lacks the permission. */
+const need=(p,what)=>{if(!can(p))throw new Error('You do not have access'+(what?' to '+what:''))};
+const needAny=(p,what)=>{if(!canAny(...p))throw new Error('You do not have access'+(what?' to '+what:''))};
+/* Parent and Student logins may open only their own student's record; staff need students.view */
+const mayStudent=id=>{const u=cur();if(!u)return false;if(u.role==='Parent'||u.role==='Student')return !!id&&u.studentId===id;return can('students.view')};
 
 /* ---------- lookups ---------- */
 const stu=id=>db.students.find(s=>s.id===id);
@@ -129,7 +168,8 @@ function lateAt(f,onDate,paid,cleared){
   f.plan.forEach((p,i)=>{cum+=p.amt;if(p.amt<=0)return;const end=cleared[i]||onDate;const days=diffDays(end,p.due)-g;if(days>0)tot+=Math.min(cap,days*pd)});
   return tot;
 }
-function recompute(s){
+/* refresh=true is used only when a receipt is cancelled: the later receipts of that student are re-applied without the cancelled money (an existing rule). Every other caller (rule changes, waivers, concessions, issuing) leaves issued receipts exactly as they were. */
+function recompute(s,refresh){
   const f=s.fee;const pays=db.payments.filter(p=>p.studentId===s.id&&p.feeId===f.id&&p.status==='ok').sort((a,b)=>a.ts-b.ts);
   let paid=0,paidLate=0;const cleared=f.plan.map(()=>null);
   for(const p of pays){
@@ -137,7 +177,8 @@ function recompute(s){
     const la=Math.min(p.amount,lateDue);const fa=Math.min(p.amount-la,Math.max(0,f.total-paid));
     const alloc=[];let skip=paid,left=fa;
     f.heads.forEach(h=>{const before=Math.min(h.amount,skip);skip-=before;const take=Math.min(h.amount-before,left);left-=take;alloc.push({name:h.name,amount:h.amount,before,applied:take,after:before+take})});
-    paid+=fa;paidLate+=la;p.balAfter=Math.max(0,f.total-paid);p.paidAfter=paid;p.late=la;p.feeAmt=fa;p.credit=p.amount-la-fa;p.alloc=alloc;
+    paid+=fa;paidLate+=la;
+    if(!p.snap||refresh){p.balAfter=Math.max(0,f.total-paid);p.paidAfter=paid;p.late=la;p.feeAmt=fa;p.credit=p.amount-la-fa;p.alloc=alloc}
     let cum=0;f.plan.forEach((pl,i)=>{cum+=pl.amt;if(!cleared[i]&&pl.amt>0&&paid>=cum)cleared[i]=p.date});
   }
   f.paid=paid;f.paidLate=paidLate;f.cleared=cleared;
@@ -158,12 +199,16 @@ function recordPayment(s,o){
   if(o.channel==='counter'&&db.closures[date]&&!o.force)throw new Error('Today is closed. Ask the Principal to reopen the day.');
   const p={id:uid('p'),rc:db.settings.receiptPrefix+(db.counters.rc++),studentId:s.id,feeId:s.fee.id,sem:s.fee.sem,date,ts:o.ts||Date.now(),
     amount:o.amount,mode:o.mode,channel:o.channel,ref:o.ref||'',by:o.by||'System',status:'ok',settle:o.channel==='online'?{status:o.settle||'pending'}:null};
-  db.payments.push(p);recompute(s);return p;
+  db.payments.push(p);recompute(s);p.snap=snapOf(p,s);return p;
 }
 function cancelPayment(p,reason,refundMode){
+  if(!p)throw new Error('Receipt not found');
+  /* server-style guard: only a valid (Active) receipt can be cancelled, and never twice, so one receipt can never be refunded twice */
+  if(p.status!=='ok')throw new Error(`Receipt ${p.rc} is already ${p.status}. A receipt can be cancelled only once.`);
+  if(db.refunds.some(r=>r.paymentId===p.id))throw new Error(`Receipt ${p.rc} has already been refunded.`);
   const s=stu(p.studentId);if(p.feeId!==s.fee.id)throw new Error('Only this semester\'s receipts can be cancelled');
-  p.status='cancelled';p.cancel={reason,by:cur().name,ts:Date.now(),refundMode};recompute(s);
-  db.refunds.push({id:uid('r'),rc:p.rc,studentId:p.studentId,amount:p.amount,mode:refundMode,date:today(),reason,by:cur().name});
+  p.status='cancelled';p.cancel={reason,by:cur().name,ts:Date.now(),refundMode};recompute(s,true);
+  db.refunds.push({id:uid('r'),paymentId:p.id,rc:p.rc,studentId:p.studentId,amount:p.amount,mode:refundMode,date:today(),reason,by:cur().name});
 }
 const paysOf=(s,okOnly=true)=>db.payments.filter(p=>p.studentId===s.id&&(!okOnly||p.status==='ok')).sort((a,b)=>b.ts-a.ts);
 function cashExpected(date){

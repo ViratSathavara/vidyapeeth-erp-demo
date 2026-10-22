@@ -16,7 +16,7 @@ function evFilter(list,f){
 const evWhere=e=>{const n=NAV.concat(PNAV,SNAV).find(x=>x[0]===e.p);return (n?n[1]:e.p||'Login')+' · '+e.v};
 const evRow=e=>`<tr class="click" data-act="evOpen" data-id="${E(e.id)}"><td class="mono evt">${E(fmtTs(e.ts))}</td>
   <td><div class="who"><div class="av">${E(initials(e.n))}</div><div>${E(e.n)}<br><small class="muted">${E(e.r==='-'?'':e.r)}${e.un?(e.r==='-'?'':' · ')+E(e.un):''}</small></div></div></td>
-  <td>${pill(e.c,evTone[e.c]||'')}</td><td><b>${E(e.a)}</b>${e.x>1?` <small class="muted">×${e.x}</small>`:''}</td><td style="white-space:normal;min-width:150px">${E(e.d)}</td>
+  <td>${pill(e.c,evTone[e.c]||'')}</td><td><b>${E(e.a)}</b>${e.x>1?` <small class="muted">×${E(e.x)}</small>`:''}</td><td style="white-space:normal;min-width:150px">${E(e.d)}</td>
   <td>${e.s==='fail'?pill('Failed','bad'):pill('OK','good')}</td><td>${E(evWhere(e))}</td></tr>`;
 function evRowsHtml(){
   const f=evF(),all=evAll(),m=evFilter(all,f),shown=m.slice(0,f.limit);
@@ -41,7 +41,7 @@ function viewEventLog(){
 function evTimeline(all){
   const f=evF(),r=evRowsHtml();
   const users=[];const seen=new Set();all.forEach(e=>{const k=e.uid||'_none';if(!seen.has(k)){seen.add(k);users.push([k,e.uid?e.n+' ('+e.r+')':'Not signed in / unknown'])}});users.sort((a,b)=>a[1].localeCompare(b[1]));
-  const sel=(k,label,opts,val)=>`<div class="field"><label class="label" for="ev_${k}">${label}</label><select id="ev_${k}" data-change="evF" data-k="${k}">${opts.map(o=>{const[v,l]=Array.isArray(o)?o:[o,o];return`<option value="${E(v)}" ${String(v)===String(val)?'selected':''}>${E(l)}</option>`}).join('')}</select></div>`;
+  const sel=(k,label,opts,val)=>`<div class="field"><label class="label" for="ev_${k}">${label}</label><select id="ev_${k}" data-change="evF" data-k="${E(k)}">${opts.map(o=>{const[v,l]=Array.isArray(o)?o:[o,o];return`<option value="${E(v)}" ${String(v)===String(val)?'selected':''}>${E(l)}</option>`}).join('')}</select></div>`;
   return`<div class="panel"><div class="filters"><input type="search" id="evQ" placeholder="Search name, username, action or details" value="${E(f.q)}" data-live="evQ" aria-label="Search the event log">
    ${sel('role','Role',[['','All roles'],...['Super Admin','Principal','Accountant','Clerk','Faculty','Parent','Student'].map(x=>[x,x])],f.role)}
    ${sel('user','Person',[['','Everyone'],...users],f.user)}

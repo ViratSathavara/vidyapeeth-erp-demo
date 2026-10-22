@@ -7,6 +7,7 @@
   --good:#15803d; --good-soft:#dcfce7; --warn:#b45309; --warn-soft:#fef3c7; --bad:#b91c1c; --bad-soft:#fee2e2;
   --rail:#ffffff; --rail-fg:#475569; --rail-hover:#f1f5f9; --rail-active:#e8f0fe; --rail-active-fg:#1d4ed8; --rail-line:#e2e5ea; --rail-strong:#0f172a;
   --art:#172554; --art-fg:#c7d2fe; --art-strong:#ffffff;
+  --badge-bg:#b91c1c; --badge-fg:#ffffff; --field-line:#7f8a9d;
   --shadow:0 1px 2px rgba(15,23,42,.06),0 1px 3px rgba(15,23,42,.08);
   --display:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif; --body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
 }
@@ -16,6 +17,7 @@
   --good:#4ade80; --good-soft:#12301f; --warn:#fbbf24; --warn-soft:#3a2c0c; --bad:#f87171; --bad-soft:#3b1717;
   --rail:#0f1520; --rail-fg:#9aa6ba; --rail-hover:#182131; --rail-active:#172a4d; --rail-active-fg:#93c5fd; --rail-line:#263043; --rail-strong:#e6eaf2;
   --art:#0a1020; --art-fg:#9aa6ba; --art-strong:#e6eaf2;
+  --badge-bg:#d32020; --badge-fg:#ffffff; --field-line:#66748f;
   --shadow:0 1px 2px rgba(0,0,0,.4); color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0b0f17; --surface:#131a26; --sunk:#1a2231; --line:#263043; --fg:#e6eaf2; --muted:#94a0b4;
@@ -23,6 +25,7 @@
   --good:#4ade80; --good-soft:#12301f; --warn:#fbbf24; --warn-soft:#3a2c0c; --bad:#f87171; --bad-soft:#3b1717;
   --rail:#0f1520; --rail-fg:#9aa6ba; --rail-hover:#182131; --rail-active:#172a4d; --rail-active-fg:#93c5fd; --rail-line:#263043; --rail-strong:#e6eaf2;
   --art:#0a1020; --art-fg:#9aa6ba; --art-strong:#e6eaf2;
+  --badge-bg:#d32020; --badge-fg:#ffffff; --field-line:#66748f;
   --shadow:0 1px 2px rgba(0,0,0,.4); color-scheme:dark}
 
 *{box-sizing:border-box}
@@ -94,7 +97,8 @@ td.num,th.num{text-align:right}
 .bar i{display:block;height:100%;background:var(--accent);border-radius:99px}
 .bar.warn i{background:var(--warn)}
 .filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
-input,select,textarea{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0}
+input,select,textarea{background:var(--surface);border:1px solid var(--field-line);border-radius:8px;padding:8px 10px;min-width:0}
+::placeholder{color:var(--muted);opacity:1}
 textarea{width:100%;resize:vertical}
 .filters input[type=search]{flex:1;min-width:180px}
 .field{display:flex;flex-direction:column;gap:5px;min-width:0}
@@ -171,7 +175,7 @@ textarea{width:100%;resize:vertical}
 .kpi,.acct{position:relative;overflow:hidden}
 .kpi::after,.acct::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;background:radial-gradient(240px circle at var(--mx,50%) var(--my,50%),color-mix(in srgb,var(--accent) 14%,transparent),transparent 70%)}
 .kpi:hover::after,.acct:hover::after{opacity:1}
-.chip .av,.seal{box-shadow:0 0 0 0 transparent}
+.seal{box-shadow:0 0 0 0 transparent}
 .receipt .tick{display:flex;align-items:center;gap:10px;margin:0 0 10px;color:var(--good);font-weight:700}
 .receipt .tick svg{width:30px;height:30px;flex:none}
 .receipt .tick circle{fill:var(--good-soft);stroke:var(--good);stroke-width:2}
@@ -245,7 +249,6 @@ textarea{width:100%;resize:vertical}
   @keyframes pop{from{opacity:.4;transform:scale(.92)}to{opacity:1;transform:none}}
   @keyframes slideIn{from{transform:translateX(48px);opacity:0}to{transform:none;opacity:1}}
   @keyframes slideOut{to{transform:translateX(48px);opacity:0}}
-  @keyframes slideRight{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
   @keyframes dialogIn{from{opacity:0;transform:translate(-50%,-46%) scale(.95)}to{opacity:1;transform:translate(-50%,-50%)}}
   @keyframes dialogOut{to{opacity:0;transform:translate(-50%,-48%) scale(.97)}}
   @keyframes toastIn{from{opacity:0;transform:translate(-50%,16px) scale(.96)}to{opacity:1;transform:translate(-50%,0)}}
@@ -299,7 +302,7 @@ textarea{width:100%;resize:vertical}
 
 /* notifications */
 .bell{position:relative;display:inline-flex;align-items:center;justify-content:center;padding:7px 10px;color:var(--fg)}
-.bell .bdg{position:absolute;top:-6px;right:-4px;min-width:19px;height:19px;padding:0 5px;border-radius:99px;background:var(--bad);color:#fff;font-weight:700;font-size:11px;line-height:19px;text-align:center;box-shadow:0 0 0 2px var(--bg)}
+.bell .bdg{position:absolute;top:-6px;right:-4px;min-width:19px;height:19px;padding:0 5px;border-radius:99px;background:var(--badge-bg);color:var(--badge-fg);font-weight:700;font-size:11px;line-height:19px;text-align:center;box-shadow:0 0 0 2px var(--bg)}
 .bell .bdg[hidden]{display:none}
 .ntlist{display:grid;gap:8px}
 .nt{display:flex;gap:12px;align-items:flex-start;width:100%;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;color:var(--fg);font:inherit}
@@ -365,7 +368,7 @@ textarea{width:100%;resize:vertical}
   td,tr:hover td,tr.click:hover td{background:transparent!important}
   tr.click:hover{background:var(--surface)}
   .filters .btn{white-space:normal;line-height:1.25}
-  .filters .pill,.filters .chip,.filters .muted{grid-column:1/-1;white-space:normal;text-align:left}
+  .filters .pill,.filters .muted{grid-column:1/-1;white-space:normal;text-align:left}
   .filters select{text-overflow:ellipsis}
 }
 
@@ -398,6 +401,8 @@ textarea{width:100%;resize:vertical}
 @media (min-width:821px) and (max-width:1500px){.repsel{display:block;max-width:440px;margin-bottom:12px}.repnav{display:none}.repgrid{grid-template-columns:minmax(0,1fr)}}
 /* desktop and tablet tables: let ordinary text wrap before the table grows sideways */
 @media (min-width:901px){.tablewrap td:not(.num):not(.mono):not(.nw){white-space:normal}}
+/* column headings may wrap to two lines on laptops (long subject names in the marks sheet); they only wrap when the table would otherwise scroll sideways */
+@media (min-width:901px) and (max-width:1500px){.tablewrap th{white-space:normal;vertical-align:bottom}}
 /* ---- Laptop polish: slim scrollbars everywhere, rail fits short screens ---- */
 html,body{margin:0}
 html{scrollbar-gutter:stable;-webkit-text-size-adjust:100%}
@@ -422,20 +427,20 @@ html{scrollbar-gutter:stable;-webkit-text-size-adjust:100%}
 .brand .seal{width:34px;height:34px;font-size:16px;flex:none}
 .brand .bt{min-width:0}
 .brand b{color:var(--rail-strong);font-weight:700;font-size:13.5px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.brand small{display:block;font-size:11px;opacity:.75}
+.brand small{display:block;font-size:11px;color:var(--muted)}
 .rail-toggle,.rail-close{all:unset;box-sizing:border-box;cursor:pointer;width:32px;height:32px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--rail-fg);flex:none}
 .rail-toggle:hover,.rail-close:hover{background:var(--rail-hover);color:var(--rail-strong)}
-.rail-toggle:focus-visible,.rail-close:focus-visible,.rb:focus-visible,.menu-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.rail-toggle:focus-visible,.rail-close:focus-visible,.menu-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .rail-close{display:none}
 .nav{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;display:flex;flex-direction:column;gap:12px;padding:4px 10px 10px}
 .ng{display:flex;flex-direction:column;gap:2px}
 .gl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:0 10px 4px}
-.nav button,.rb{all:unset;box-sizing:border-box;cursor:pointer;position:relative;display:flex;align-items:center;gap:11px;width:100%;min-width:0;padding:7px 10px;border-radius:var(--r-sm);font-weight:500;line-height:1.25;color:var(--rail-fg)}
-.nav button:hover,.rb:hover{background:var(--rail-hover);color:var(--rail-strong);transform:none}
-.nav button[aria-current="page"],.rb[aria-current="page"]{background:var(--rail-active);color:var(--rail-active-fg);font-weight:600}
+.nav button{all:unset;box-sizing:border-box;cursor:pointer;position:relative;display:flex;align-items:center;gap:11px;width:100%;min-width:0;padding:7px 10px;border-radius:var(--r-sm);font-weight:500;line-height:1.25;color:var(--rail-fg)}
+.nav button:hover{background:var(--rail-hover);color:var(--rail-strong);transform:none}
+.nav button[aria-current="page"]{background:var(--rail-active);color:var(--rail-active-fg);font-weight:600}
 .nav button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-.nav svg,.rb .ic{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.nav .nl,.rb span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav svg{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.nav .nl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nav .badge{margin-left:auto;background:var(--accent);color:var(--accent-fg);border-radius:99px;font-size:11px;font-weight:700;padding:0 7px;line-height:18px}
 .rail-acct{border-top:1px solid var(--rail-line);padding:10px 10px 12px;display:flex;flex-direction:column;gap:4px}
 .acct-row{display:flex;align-items:center;gap:4px}
@@ -457,19 +462,25 @@ html{scrollbar-gutter:stable;-webkit-text-size-adjust:100%}
 .me[data-tip]::after{left:44px;transform:translate(0,4px)}
 @media (hover:hover){.me:hover::after,.out:hover::after{opacity:1}.me:hover::after{transform:translate(0,0)}.out:hover::after{transform:translate(-50%,0)}}
 .me:focus-visible::after,.out:focus-visible::after{opacity:1}
-.rb.out:hover{background:var(--bad-soft);color:var(--bad)}
-.rail-foot{grid-column:1/-1;font-size:11px;line-height:1.35;color:var(--muted);padding:6px 10px 0}
-.rb{gap:8px;padding-inline:8px}
+/* collapsed rail: the same instant label on every menu icon (position is set from script, fixed so the scrolling menu cannot clip it) */
+.nav button[data-tip]::after{display:none}
+@media (min-width:821px){
+  .app[data-rail=mini] .nav button[data-tip]::after{display:block;content:attr(data-tip);position:fixed;left:var(--tipx,84px);top:var(--tipy,0);transform:translate(-4px,-50%);padding:4px 9px;border-radius:6px;background:var(--fg);color:var(--bg);font-size:12px;font-weight:500;line-height:1.3;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .12s,transform .12s;z-index:60}
+  .app[data-rail=mini] .nav button[data-tip]:active{transform:none}
+}
+@media (min-width:821px) and (hover:hover){.app[data-rail=mini] .nav button[data-tip]:hover::after{opacity:1;transform:translate(0,-50%)}}
+.app[data-rail=mini] .nav button[data-tip]:focus-visible::after{opacity:1;transform:translate(0,-50%)}
+.rail-foot{font-size:11px;line-height:1.35;color:var(--muted);padding:6px 10px 0}
 
 /* collapsed icon rail (desktop and tablet) */
 @media (min-width:821px){
   .app[data-rail=mini]{--rail-w:72px}
-  .app[data-rail=mini] :is(.bt,.nl,.gl,.me .mt,.rb span,.rail-foot){display:none}
+  .app[data-rail=mini] :is(.bt,.nl,.gl,.me .mt,.rail-foot){display:none}
   .app[data-rail=mini] .rail-head{flex-direction:column;justify-content:center;padding:10px 0 4px;gap:4px;min-height:0}
   .app[data-rail=mini] .brand{flex:none}
   .app[data-rail=mini] .nav{gap:4px;padding:4px 12px 8px}
   .app[data-rail=mini] .ng+.ng{border-top:1px solid var(--rail-line);padding-top:4px}
-  .app[data-rail=mini] :is(.nav button,.rb){justify-content:center;padding:8px 0}
+  .app[data-rail=mini] .nav button{justify-content:center;padding:8px 0}
   .app[data-rail=mini] .rail-acct{padding:8px 12px 10px}
   .app[data-rail=mini] .acct-row{flex-direction:column;gap:4px}
   .app[data-rail=mini] .me{flex:none;justify-content:center;padding:4px;width:100%}
@@ -489,6 +500,9 @@ html{scrollbar-gutter:stable;-webkit-text-size-adjust:100%}
 .menu-btn,.rail-scrim{display:none}
 .bell{padding:0}
 body.rail-lock{overflow:hidden}
+.skip{position:fixed;left:12px;top:12px;z-index:100;padding:10px 16px;border-radius:var(--r-sm);background:var(--accent);color:var(--accent-fg);font-weight:600;text-decoration:none;box-shadow:var(--shadow-md)}
+.skip:not(:focus){position:absolute;left:0;top:0;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;box-shadow:none}
+.drawer:focus,.dialog:focus,#page h1:focus,#page:focus{outline:none}
 
 /* phones and small tablets: the sidebar becomes a slide-in drawer */
 @media (max-width:820px){
@@ -499,19 +513,20 @@ body.rail-lock{overflow:hidden}
   .rail-scrim{display:block;position:fixed;inset:0;z-index:29;background:rgba(8,12,20,.5);opacity:0;pointer-events:none;transition:opacity .2s}
   .app.rail-open .rail-scrim{opacity:1;pointer-events:auto}
   .menu-btn{display:inline-grid}
-  .nav button,.rb{padding:10px 12px;min-height:42px}
+  .nav button{padding:10px 12px;min-height:44px}
   .me{min-height:48px}.out{width:44px;height:44px}
   .me[data-tip]::after,.out[data-tip]::after{display:none}
   .rail-foot{display:none}
   .topbar{margin-inline:calc(-1*max(16px,env(safe-area-inset-left,0px)));padding-inline:max(16px,env(safe-area-inset-left,0px));padding-top:max(8px,env(safe-area-inset-top,0px))}
-  .iconbtn{width:42px;height:42px}
+  .iconbtn{width:44px;height:44px}
+  .rail-close{width:44px;height:44px}
 }
 @media (prefers-reduced-motion:reduce){.app,.rail,.rail-scrim{transition:none}}
 
 /* short laptop screens: tighter sidebar so the whole menu stays visible */
 @media (min-width:821px) and (max-height:820px){
   .app:not([data-rail=mini]) .rail-head{min-height:52px;padding-block:8px 4px}
-  .nav{gap:8px}.nav button,.rb{padding-block:6px}
+  .nav{gap:8px}.nav button{padding-block:6px}
   .rail-acct{padding-block:8px}
 }
 @media (min-width:821px) and (max-height:760px){
@@ -532,10 +547,11 @@ body.rail-lock{overflow:hidden}
 .sjump button{all:unset;box-sizing:border-box;cursor:pointer;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font-size:12.5px;font-weight:600}
 .sjump button:hover{color:var(--fg);border-color:var(--accent)}
 .sjump button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.sgroup{margin-bottom:22px}
+.sgroup{margin-bottom:22px;scroll-margin-top:calc(var(--topbar-h,56px) + 12px)}
 .sglabel{margin:0 0 10px;font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .sgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
 .sgrid.one{grid-template-columns:minmax(0,1fr)}
+@media (min-width:981px){#set-fees .list{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));column-gap:28px}}
 .scard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r,12px);padding:18px;min-width:0;scroll-margin-top:calc(var(--topbar-h,56px) + 12px)}
 .scard.flash{animation:sflash 1.2s var(--ease-soft,ease)}
 @keyframes sflash{0%{box-shadow:0 0 0 3px var(--accent-soft);border-color:var(--accent)}100%{box-shadow:none}}
@@ -548,3 +564,17 @@ body.rail-lock{overflow:hidden}
 @media (max-width:980px){.sgrid{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:820px){.scard{padding:14px}.sjump{flex-wrap:nowrap;overflow-x:auto;margin-inline:-2px;padding-bottom:4px}.sjump button{flex:none;padding:9px 14px}}
 @media (prefers-reduced-motion:reduce){.scard.flash{animation:none}}
+
+/* save-failure banner: stays until a later save works; sits in the page flow so it never hides a button */
+#savebar{position:sticky;top:0;z-index:35;background:var(--bad);color:#fff;padding:10px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));font-weight:600;text-align:center;line-height:1.4;overflow-wrap:anywhere}
+body.save-bad .rail{top:var(--sbh,0px);height:calc(100vh - var(--sbh,0px));height:calc(100dvh - var(--sbh,0px))}
+/* a closing dialog, drawer or backdrop takes no more clicks while it fades out (blocks double-submits during the animation) */
+.dialog.leaving,.drawer.leaving,.scrim.leaving{pointer-events:none}
+/* very long names wrap instead of widening the page */
+.top h1,.top p,.drawer h2,.login-art h1{overflow-wrap:anywhere}
+
+/* toast: never takes taps (only its own small close button does); on phones it sits under the top bar instead of over the bottom action rows */
+.toast{pointer-events:none;display:flex;align-items:center;gap:10px}
+.toast .tx{pointer-events:auto;flex:none;width:24px;height:24px;border:0;border-radius:50%;background:rgba(255,255,255,.22);color:inherit;cursor:pointer;padding:0;line-height:1;font:inherit}
+.toast .tx::before{content:"\00d7";font-size:16px}
+@media (max-width:820px){.toast{bottom:auto;top:calc(64px + env(safe-area-inset-top,0px))}}

@@ -28,8 +28,10 @@ Every student also has a parent login (the enrolment number, e.g. `bed25-001` / 
 2. In Vercel open the project > **Settings > Environment Variables** and add (for Production):
    - `RESEND_API_KEY` = the key from Resend
    - `MAIL_FROM` = for example `accounts@yourcollege.edu` (use `onboarding@resend.dev` while testing)
-   - `RECEIPT_API_KEY` = a long random password you invent (20+ characters)
-   - `MAIL_ALLOWED_DOMAINS` = optional, e.g. `gmail.com,yourcollege.edu`
+   - `RECEIPT_API_KEY` = a long random password you invent (at least 24 characters; shorter keys make the function refuse to send)
+   - `MAIL_ALLOWED_DOMAINS` = required, the recipient domains you accept, e.g. `gmail.com,yourcollege.edu` (without it the function refuses to send; `MAIL_ALLOW_ANY_DOMAIN=1` overrides, not advised)
+   - `ALLOWED_ORIGIN` = your deployed site, e.g. `https://erp.yourcollege.edu` (one origin, no `*`). Leave unset to allow same-site calls only.
+   - `RECEIPT_DEMO_MODE` = optional `1` for local/preview tests: needs no key, validates requests, sends nothing. Ignored on production.
 3. **Deployments > latest > Redeploy** so the variables take effect.
 4. Open the site, sign in as `admin`, go to **Settings > Email receipts**:
    - Sending mode: **Live**
@@ -57,7 +59,8 @@ This is an in-app inbox. WhatsApp, SMS and push messages are not sent from this 
 **Event Log** in the menu records every sign-in (and failed sign-in), page opened, button tap, form saved or refused, change, email and script error, for every role, with the person, role, time, device and result. Passwords are never stored. Filter by role, person, type, result, date or any word; open an event for details; see per-person activity on the **People** tab; export CSV; or clear the log (the clearing itself is recorded). The newest 3,000 events are kept in the browser. The older **Audit Log** keeps only business actions (payments, admissions, edits).
 
 ## Security notes
-- The function refuses every request without the correct `x-api-key`, validates recipients, only accepts a real PDF, limits size and request rate, and can be limited to chosen domains.
+- The function refuses every request without the correct `x-api-key` (timing-safe check; if `RECEIPT_API_KEY` is not set it refuses everything), accepts POST only from `ALLOWED_ORIGIN`, validates every field (at most 4 recipients, domain allow-list, no CR/LF in headers, unknown fields such as cc/bcc rejected), accepts only a real PDF up to 1 MB, limits request size, and rate-limits per IP, per key and per recipient.
+- Rate limits are kept in memory, so on Vercel each warm instance counts separately and counters reset on cold start. They slow abuse but are not a hard cap. For production use a shared store (Upstash Redis or Vercel KV) or a Vercel Firewall rate-limit rule.
 - In this demo the key is typed into the app by the administrator and kept in that browser. For the real product, send the email from the server that records the payment (after the payment gateway confirms it) so the key never reaches a browser, and keep the receipts in a database.
 - PDF text uses the built-in Helvetica font, so Gujarati/Hindi names print as `?` in the PDF. The production build should embed a Unicode font (for example Noto Sans Gujarati) on the server.
 

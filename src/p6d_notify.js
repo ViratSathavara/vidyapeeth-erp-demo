@@ -25,7 +25,7 @@ function ntHtml(){
    <div class="ntlist">${shown.length?shown.map(ntItem).join(''):`<p class="note">${all.length?'Nothing matches this filter.':'No notifications yet. Payments, notices, dues and approvals for your role will show up here.'}</p>`}</div>
    ${list.length>shown.length?`<div class="actions" style="justify-content:center;margin-top:12px"><button class="btn" data-act="ntMore">Show ${Math.min(25,list.length-shown.length)} older</button></div>`:''}`;
 }
-const ntRedraw=()=>{const d=$('.drawer');if(!d||!/^Notifications/.test(d.querySelector('h2')?.textContent||''))return;const sc=d.scrollTop;d.innerHTML=ntHtml();d.scrollTop=sc};
+const ntRedraw=()=>{const d=$('.drawer');if(!d||!/^Notifications/.test(d.querySelector('h2')?.textContent||''))return;const sc=d.scrollTop;keepFocus(d,()=>{d.innerHTML=ntHtml()});d.scrollTop=sc};
 ACT.bell=()=>{ui.nt={f:'all',cat:'',n:25};drawer(ntHtml());updateBell()};
 ACT.ntF=el=>{ui.nt.f=el.dataset.f;ui.nt.n=25;ntRedraw()};
 CHG.ntCat=el=>{ui.nt.cat=el.value;ui.nt.n=25;ntRedraw()};
@@ -55,7 +55,7 @@ function ntRulesPanel(){
   return setCard('notify','bell','Notification rules','Choose who is notified about each event. Everyone sees theirs under the bell at the top. The person who does something is never notified about their own action, and the people directly concerned (the one who asked for a concession, the owner of a login) are always told.',`
    <div class="actions" style="margin-bottom:12px"><button class="btn" data-act="ntTest">Send me a test notification</button><button class="btn" data-act="ntRulesReset">Restore default rules</button></div>
    <div class="tablewrap"><table class="matrix"><thead><tr><th>Event</th>${NT_ROLES.map(r=>`<th>${E(r)}</th>`).join('')}</tr></thead><tbody>
-   ${NT_CATS.map(c=>`<tr><td><div><b>${E(c.l)}</b><small style="display:block;color:var(--muted);font-weight:400;margin-top:2px">${E(c.d)}</small></div></td>${NT_ROLES.map(r=>`<td><input type="checkbox" aria-label="${E(r)}: ${E(c.l)}" ${ntOn(c.k,r)?'checked':''} data-change="ntRule" data-c="${c.k}" data-r="${E(r)}"></td>`).join('')}</tr>`).join('')}
+   ${NT_CATS.map(c=>`<tr><td><div><b>${E(c.l)}</b><small style="display:block;color:var(--muted);font-weight:400;margin-top:2px">${E(c.d)}</small></div></td>${NT_ROLES.map(r=>`<td><input type="checkbox" aria-label="${E(r)}: ${E(c.l)}" ${ntOn(c.k,r)?'checked':''} data-change="ntRule" data-c="${E(c.k)}" data-r="${E(r)}"></td>`).join('')}</tr>`).join('')}
    </tbody></table></div>`,'wide');
 }
 CHG.ntRule=el=>{

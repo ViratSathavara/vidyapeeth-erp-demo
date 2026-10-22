@@ -3,28 +3,115 @@
    ===================================================================== */
 const ui={route:'dashboard',tab:{},f:{}};
 const ACT={},FORM={},LIVE={},CHG={};
-function toast(msg,bad){$('.toast')?.remove();const t=document.createElement('div');t.className='toast'+(bad?' bad':'');t.setAttribute('role','status');t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),bad?4200:2600)}
-function drawer(html,wide){$('#layer').innerHTML=`<div class="scrim" data-act="close"></div><aside class="drawer ${wide?'wide':''}" role="dialog" aria-modal="true">${html}</aside>`}
+function toast(msg,bad){
+  /* a success message that arrives right after a failed save is replaced by the warning: the work is only in memory */
+  if(saveTick&&!bad){msg=SAVE_FAIL_MSG+'. ('+msg+')';bad=true}
+  $('.toast')?.remove();const t=document.createElement('div');t.className='toast'+(bad?' bad':'');t.setAttribute('role','status');t.textContent=msg;const x=document.createElement('button');x.type='button';x.className='tx';x.setAttribute('aria-label','Dismiss message');x.addEventListener('click',()=>t.remove());t.appendChild(x);document.body.appendChild(t);setTimeout(()=>t.remove(),bad?(saveBad?9000:4200):2600)}
+/* ---------- focus management for side panels, dialogs and the phone menu ----------
+   Opening one moves focus into it, Tab stays inside it, the page behind is inert, and closing puts focus back where it came from. */
+const FOCUSABLE='a[href],button,input:not([type=hidden]),select,textarea,summary,[tabindex]';
+const SIG_ATTRS=['id','name','type','role','data-act','data-key','data-id','data-f','data-k','data-change','data-to','data-sub','data-role','data-p','data-live','aria-label'];
+const shown=e=>e.getClientRects().length>0&&getComputedStyle(e).visibility!=='hidden';
+const tabbables=root=>[...root.querySelectorAll(FOCUSABLE)].filter(e=>!e.disabled&&e.tabIndex>=0&&!e.closest('[inert],[hidden]')&&shown(e));
+const phoneWidth=()=>matchMedia('(max-width:820px)').matches;
+const phoneMenuOpen=()=>{const a=$('.app');return !!a&&a.classList.contains('rail-open')&&phoneWidth()};
+/* a small description of a control so it can be found again after its container is re-rendered */
+function sigOf(el){
+  if(!el||!el.getAttribute||el===document.body||el===document.documentElement)return null;
+  const s={tag:el.tagName,a:{}};SIG_ATTRS.forEach(k=>{const v=el.getAttribute(k);if(v!==null)s.a[k]=v});
+  const fm=el.closest('form[data-form]');if(fm)s.form=fm.dataset.form;
+  if(el.tagName==='BUTTON')s.text=el.textContent.trim().slice(0,40);
+  return Object.keys(s.a).length||s.text?s:null;
+}
+function findSig(sig,root){
+  if(!sig||!root)return null;
+  return [...root.querySelectorAll(sig.tag)].find(c=>{
+    for(const k in sig.a)if(c.getAttribute(k)!==sig.a[k])return false;
+    if(sig.form&&c.closest('form[data-form]')?.dataset.form!==sig.form)return false;
+    if(sig.text!==undefined&&c.textContent.trim().slice(0,40)!==sig.text)return false;
+    return true})||null;
+}
+const softFocus=(t,o)=>{if(!t||!t.isConnected)return false;try{t.focus(o||{preventScroll:true})}catch(e){}return document.activeElement===t};
+/* run fn (which re-renders root) and keep keyboard focus on the same control if it still exists afterwards */
+function keepFocus(root,fn){
+  const ae=document.activeElement,sig=root&&ae&&ae!==root&&root.contains(ae)?sigOf(ae):null;
+  const r=fn();
+  if(sig){const t=findSig(sig,root);if(t&&t!==document.activeElement)softFocus(t)}
+  return r;
+}
+function focusH1(){const h=$('#page h1');if(!h)return false;h.tabIndex=-1;return softFocus(h)}
+let userDriven=false;
+['pointerdown','keydown'].forEach(t=>document.addEventListener(t,()=>{userDriven=true},{capture:true,once:true}));
+const ZONES=['#dlg','#layer','#nav','.rail-acct','.topbar','#page'];
+function openerNow(){
+  const a=document.activeElement;if(!a||a===document.body||!a.isConnected||a.closest('.leaving'))return null;
+  const zone=ZONES.find(z=>a.closest(z));return{el:a,sig:sigOf(a),zone};
+}
+function restoreFocus(op){
+  if(op){if(softFocus(op.el))return;const z=op.zone&&$(op.zone);if(z&&softFocus(findSig(op.sig,z)))return}
+  const m=$('.menu-btn');if(m&&shown(m)&&softFocus(m))return;
+  focusH1();
+}
+const layerOp={drawer:null,dlg:null};let lblN=0;
+function labelLayer(el,fallback){
+  if(!el)return;const cur=el.getAttribute('aria-labelledby');if((cur&&document.getElementById(cur))||el.getAttribute('aria-label'))return;
+  const h=el.querySelector('h1,h2,h3');
+  if(h){if(!h.id)h.id='lyr'+(++lblN);el.setAttribute('aria-labelledby',h.id)}else el.setAttribute('aria-label',fallback)
+}
+const setInert=(el,on)=>{if(!el)return;if(on)el.setAttribute('inert','');else el.removeAttribute('inert')};
+function syncInert(){
+  const dlg=!!$('#dlg .dialog:not(.leaving)'),dr=!!$('#layer .drawer:not(.leaving)');
+  setInert($('#root'),dlg||dr);setInert($('#layer'),dlg);setInert($('.app>main'),phoneMenuOpen());
+}
+const trapRoot=()=>$('#dlg .dialog:not(.leaving)')||$('#layer .drawer:not(.leaving)')||(phoneMenuOpen()?$('#rail'):null);
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Tab'||e.defaultPrevented)return;const r=trapRoot();if(!r)return;
+  const f=tabbables(r),a=document.activeElement;
+  if(!f.length){e.preventDefault();r.focus();return}
+  const first=f[0],last=f[f.length-1];
+  if(!r.contains(a)||(a===r&&e.shiftKey)){e.preventDefault();(e.shiftKey?last:first).focus()}
+  else if(e.shiftKey&&a===first){e.preventDefault();last.focus()}
+  else if(!e.shiftKey&&a===last){e.preventDefault();first.focus()}
+});
+/* if a panel's content is rebuilt while it is open, keep its label valid and keep focus inside it */
+const layerWatch=new MutationObserver(()=>{
+  const d=$('#layer .drawer:not(.leaving)'),g=$('#dlg .dialog:not(.leaving)');
+  labelLayer(d,'Details');labelLayer(g,'Dialog');
+  const top=g||d,a=document.activeElement;
+  if(top&&(!a||a===document.body||!a.isConnected))softFocus(top);
+});
+['#layer','#dlg'].forEach(q=>layerWatch.observe($(q),{childList:true,subtree:true,attributes:true,attributeFilter:['class']}));
+
+function drawer(html,wide,label){
+  const lay=$('#layer');if(!lay.querySelector('.drawer:not(.leaving)'))layerOp.drawer=openerNow();
+  lay.innerHTML=`<div class="scrim" data-act="close"></div><aside class="drawer ${wide?'wide':''}" role="dialog" aria-modal="true" tabindex="-1" ${label?`aria-label="${E(label)}"`:''}>${html}</aside>`;
+  const d=lay.querySelector('.drawer');labelLayer(d,'Details');syncInert();softFocus(d);
+}
 function leave(el){const c=el.firstElementChild;if(!c)return;if(matchMedia('(prefers-reduced-motion:reduce)').matches){el.innerHTML='';return}
   el.querySelectorAll('.scrim,.drawer,.dialog').forEach(x=>x.classList.add('leaving'));setTimeout(()=>{if(el.querySelector('.leaving'))el.innerHTML=''},190)}
-function closeLayer(){leave($('#layer'))}
-function dialog(html){$('#dlg').innerHTML=`<div class="scrim" style="z-index:54" data-act="closeDialog"></div><div class="dialog" role="dialog" aria-modal="true">${html}</div>`}
-function closeDialog(){leave($('#dlg'))}
+function closeLayer(){const op=layerOp.drawer;layerOp.drawer=null;leave($('#layer'));syncInert();if(op)restoreFocus(op)}
+/* hold=true: a result that is shown only once (for example temporary passwords). Escape and a click outside do not close it; only its own button does. */
+function dialog(html,label,hold){
+  const el=$('#dlg');if(!el.querySelector('.dialog:not(.leaving)'))layerOp.dlg=openerNow();
+  el.innerHTML=`<div class="scrim" style="z-index:54" data-act="closeDialog"></div><div class="dialog" role="dialog" aria-modal="true" tabindex="-1" ${hold?'data-hold="1"':''} ${label?`aria-label="${E(label)}"`:''}>${html}</div>`;
+  const d=el.querySelector('.dialog');labelLayer(d,'Dialog');syncInert();softFocus(d);
+}
+function closeDialog(){const op=layerOp.dlg;layerOp.dlg=null;leave($('#dlg'));syncInert();if(op)restoreFocus(op)}
 function confirmBox(title,msg,okLabel,onYes,danger){
   dialog(`<h3>${E(title)}</h3><p class="muted" style="margin:0 0 16px">${E(msg)}</p><div class="actions" style="justify-content:flex-end"><button class="btn" data-act="closeDialog">Cancel</button><button class="btn ${danger?'danger':'primary'}" id="dlgOk">${E(okLabel)}</button></div>`);
   $('#dlgOk').onclick=()=>{closeDialog();onYes()};$('#dlgOk').focus();
 }
 function F(name,label,o={}){
   const{type='text',val='',opts,span,req,ph='',attrs='',id=name,rows=3}=o;let inner;
-  if(opts)inner=`<select name="${name}" id="f_${id}" ${req?'required':''} ${attrs}>${opts.map(x=>{const[v,l]=Array.isArray(x)?x:[x,x];return`<option value="${E(v)}" ${String(v)===String(val)?'selected':''}>${E(l)}</option>`}).join('')}</select>`;
-  else if(type==='textarea')inner=`<textarea name="${name}" id="f_${id}" rows="${rows}" placeholder="${E(ph)}" ${req?'required':''} ${attrs}>${E(val)}</textarea>`;
-  else inner=`<input name="${name}" id="f_${id}" type="${type}" value="${E(val)}" placeholder="${E(ph)}" ${req?'required':''} ${attrs}>`;
-  return`<div class="field ${span?'span':''}"><label class="label" for="f_${id}">${E(label)}${req?' *':''}</label>${inner}</div>`;
+  if(opts)inner=`<select name="${E(name)}" id="f_${E(id)}" ${req?'required':''} ${attrs}>${opts.map(x=>{const[v,l]=Array.isArray(x)?x:[x,x];return`<option value="${E(v)}" ${String(v)===String(val)?'selected':''}>${E(l)}</option>`}).join('')}</select>`;
+  else if(type==='textarea')inner=`<textarea name="${E(name)}" id="f_${E(id)}" rows="${rows}" placeholder="${E(ph)}" ${req?'required':''} ${attrs}>${E(val)}</textarea>`;
+  else inner=`<input name="${E(name)}" id="f_${E(id)}" type="${type}" value="${E(val)}" placeholder="${E(ph)}" ${req?'required':''} ${attrs}>`;
+  return`<div class="field ${span?'span':''}"><label class="label" for="f_${E(id)}">${E(label)}${req?' *':''}</label>${inner}</div>`;
 }
 const pill=(t,tone='')=>`<span class="pill ${tone}">${E(t)}</span>`;
 function feePill(sm){return (sm.status==='Paid'?pill('Paid','good'):sm.status==='Partial'?pill('Partial','warn'):pill('Not paid','bad'))+(sm.overdue&&sm.status!=='Paid'?' '+pill('Overdue','bad'):'')}
 function head(title,sub,actions=''){return`<div class="top"><div><h1>${E(title)}</h1>${sub?`<p>${E(sub)}</p>`:''}</div><div class="actions">${actions}</div></div>`}
-function tabsBar(key,items,cur){return`<div class="tabs" role="tablist">${items.map(([id,l])=>`<button role="tab" aria-selected="${cur===id}" data-act="tab" data-key="${key}" data-id="${id}">${E(l)}</button>`).join('')}</div>`}
+function tabsBar(key,items,cur){return`<div class="tabs" role="tablist">${items.map(([id,l])=>`<button role="tab" aria-selected="${cur===id}" data-act="tab" data-key="${E(key)}" data-id="${E(id)}">${E(l)}</button>`).join('')}</div>`}
 function qrSvg(seed){let h=0;for(const ch of seed)h=(h*31+ch.charCodeAt(0))>>>0;h=h||1;
   const r=()=>{h^=h<<13;h>>>=0;h^=h>>>17;h^=h<<5;h>>>=0;return h/4294967296};
   const fz=(x,y)=>`<rect x="${x}" y="${y}" width="7" height="7" fill="#000"/><rect x="${x+1}" y="${y+1}" width="5" height="5" fill="#fff"/><rect x="${x+2}" y="${y+2}" width="3" height="3" fill="#000"/>`;
@@ -41,19 +128,47 @@ ACT.copyCsv=()=>{const t=$('#csvText');t.select();try{navigator.clipboard.writeT
 
 /* ---------- events ---------- */
 const safe=(fn,...a)=>{try{return fn(...a)}catch(err){toast(err.message||String(err),true);(err instanceof TypeError||err instanceof ReferenceError||err instanceof RangeError?console.error:console.warn)(err)}};
-const EV_QUIET=new Set(['close','closeDialog','fillLogin','copyCsv','nav','tab','go','evOpen','evMore']);
+const EV_QUIET=new Set(['close','closeDialog','fillLogin','copyCsv','nav','tab','go','evOpen','evMore','railToggle','railOpen','railClose','setJump','theme','skip']);
 const evDetail=el=>{if(el.tagName==='TR'||el.tagName==='LI')return el.dataset.id||'';const t=(el.getAttribute('aria-label')||el.textContent||'').replace(/\s+/g,' ').trim().slice(0,60);return t+(el.dataset.id&&!/\d/.test(t)?' · '+el.dataset.id:'')};
 /* run a handler, show errors as a toast, and record the outcome in the event log */
 function run(cat,label,detail,fn,...a){
   try{const r=fn(...a);if(r&&typeof r.catch==='function')r.catch(err=>{toast(err.message||String(err),true);ev(cat==='Form'?'Form':'Error',label,err.message||String(err),{status:'fail'})});return true}
   catch(err){toast(err.message||String(err),true);(err instanceof TypeError||err instanceof ReferenceError||err instanceof RangeError?console.error:console.warn)(err);ev(cat==='Form'?'Form':'Error',label,err.message||String(err),{status:'fail'});return false}
 }
-document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const name=el.dataset.act,f=ACT[name];if(f){e.preventDefault();const quiet=EV_QUIET.has(name);if(!quiet)ev('Click',humanize(name),evDetail(el));run('Click',humanize(name),evDetail(el),f,el,e)}});
-document.addEventListener('submit',e=>{const f=e.target.closest('form[data-form]');if(!f)return;e.preventDefault();const name=f.dataset.form,h=FORM[name];if(h){const ok=run('Form',humanize(name)+' form',name,h,f,Object.fromEntries(new FormData(f)));if(ok&&name!=='login')ev('Form',humanize(name)+' form','Saved')}});
+/* Submit-once guard for everything that moves money or cannot be undone. The first submit disables the buttons and any repeat (double-click, Enter held down, a click during the closing animation) is ignored until the action has finished. If the action is refused the buttons come back so the person can fix the form. The server must still enforce this itself (an Active-receipt check in cancelPayment, a "waiting" check on requests). */
+const ONCE_FORMS=new Set(['collect','cancelReceipt','waive','concRequest','closeDay','parentPayGo','admit','promote','restore','feeRules','feeStruct','sendRemind']);
+const ONCE_ACTS=new Set(['reqSim','reqFail','reqCancel','pOk','pFail','concDecide','bankImport','bankMatch','reopenDay']);
+function lockOnce(root,on){
+  const bs=root.matches&&root.matches('button')?[root]:$$('button:not([type=button])',root);
+  bs.forEach(b=>{if(on){b.disabled=true;b.setAttribute('aria-busy','true')}else{b.disabled=false;b.removeAttribute('aria-busy')}});
+  if(on)root.dataset.busy='1';else delete root.dataset.busy;
+}
+function onceRun(root,fn){
+  if(root.dataset.busy==='1')return false;
+  const ae=document.activeElement;lockOnce(root,true);let ok=false;
+  try{ok=fn()}finally{
+    if(!ok){lockOnce(root,false);if(ae&&ae.isConnected&&document.activeElement!==ae)softFocus(ae)}
+    else setTimeout(()=>{if(root.isConnected&&!root.closest('.leaving'))lockOnce(root,false)},700);
+  }
+  return ok;
+}
+/* the 2nd click of a double-click (e.detail>1) is thrown away on every money button, even if the screen was redrawn under the pointer between the two clicks; holding Enter in a money form repeats the key, and the repeats are dropped too */
+document.addEventListener('click',e=>{if(e.detail<2)return;const b=e.target.closest&&e.target.closest('button:not([type=button]),input[type=submit]'),f=b&&b.closest('form[data-form]');if(f&&ONCE_FORMS.has(f.dataset.form)){e.preventDefault();e.stopPropagation()}},true);
+document.addEventListener('keydown',e=>{if(e.key!=='Enter'||!e.repeat)return;const f=e.target.closest&&e.target.closest('form[data-form]');if(f&&ONCE_FORMS.has(f.dataset.form))e.preventDefault()},true);
+document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const name=el.dataset.act,f=ACT[name];if(f){e.preventDefault();const quiet=EV_QUIET.has(name);
+  if(ONCE_ACTS.has(name)){if(el.dataset.busy==='1'||e.detail>1)return;if(!quiet)ev('Click',humanize(name),evDetail(el));onceRun(el,()=>run('Click',humanize(name),evDetail(el),f,el,e));return}
+  if(!quiet)ev('Click',humanize(name),evDetail(el));run('Click',humanize(name),evDetail(el),f,el,e)}});
+document.addEventListener('submit',e=>{const f=e.target.closest('form[data-form]');if(!f)return;e.preventDefault();const name=f.dataset.form,h=FORM[name];if(h){
+  /* the admission wizard has five steps: submit (Enter in a field, a script) before the last step moves to the next step, with validation */
+  if(name==='admit'&&f.id==='adm'&&ui.admStep<STEPS.length-1){safe(ACT.admNext);return}
+  const data=Object.fromEntries(new FormData(f));
+  const go=()=>{const ok=run('Form',humanize(name)+' form',name,h,f,data);if(ok&&name!=='login')ev('Form',humanize(name)+' form','Saved');return ok};
+  if(ONCE_FORMS.has(name))onceRun(f,go);else go()}});
 document.addEventListener('input',e=>{const el=e.target.closest('[data-live]');if(el&&LIVE[el.dataset.live])safe(LIVE[el.dataset.live],el,e)});
 document.addEventListener('change',e=>{const el=e.target.closest('[data-change]');if(el&&CHG[el.dataset.change]){if(!/^ev/.test(el.dataset.change))ev('Change',humanize(el.dataset.change),((el.name||el.id||'').replace(/^f_/,'')+' = '+(el.type==='checkbox'?(el.checked?'on':'off'):String(el.value).slice(0,60))).trim());run('Change',humanize(el.dataset.change),'',CHG[el.dataset.change],el,e)}});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('#dlg').innerHTML)closeDialog();else if($('#layer').innerHTML)closeLayer();else railClose()}});
-ACT.close=closeLayer;ACT.closeDialog=closeDialog;
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('.toast')?.remove();if($('#dlg').innerHTML){if($('#dlg .dialog[data-hold]:not(.leaving)'))return;closeDialog()}else if($('#layer').innerHTML)closeLayer();else railClose()}});
+ACT.close=closeLayer;
+ACT.closeDialog=el=>{const d=$('#dlg .dialog[data-hold]:not(.leaving)');if(d&&el&&el.classList&&el.classList.contains('scrim'))return;closeDialog()};
 ACT.tab=el=>{ui.tab[el.dataset.key]=el.dataset.id;ev('Page','Opened tab',humanize(el.dataset.key)+' › '+el.textContent.trim().slice(0,40));renderPage();playEnter('swap')};
 ACT.go=el=>{closeLayer();go(el.dataset.to)};
 
@@ -110,7 +225,7 @@ ACT.theme=()=>{const dark=document.documentElement.getAttribute('data-theme')===
 /* ---------- login ---------- */
 const DEMO_ACCTS=[['admin','admin123','Super Admin','College owner or IT admin'],['principal','principal123','Principal','Approves, reviews, reports'],['accountant','account123','Accountant','Fees, day close, bank match'],['parent','parent123','Parent','Fee portal for one student'],['student','student123','Student','Own fees, marks, attendance']];
 function renderLogin(msg){
-  document.body.classList.remove('rail-lock');
+  document.body.classList.remove('rail-lock');document.title='Sign in · '+(db.settings.short||db.settings.college);
   $('#root').innerHTML=`<div class="login"><section class="login-art"><div><div class="seal">V</div><h1>${E(db.settings.college)}</h1><p>Admissions, student records, fee collection and staff in one place. This is a working demo: everything you add is saved in this browser.</p></div>
    <div class="points"><span>Online (Google Pay / UPI) and cash fees in one ledger</span><span>Fees applied to heads and installments automatically</span><span>Each role sees only what it is allowed to</span></div></section>
    <section class="login-form"><div><h2>Sign in</h2><p class="muted" style="margin:4px 0 0">Pick a demo account or type a username. The admin can add Clerk and Faculty logins later.</p></div>
@@ -118,7 +233,7 @@ function renderLogin(msg){
     <div class="field"><label class="label" for="lu">Username</label><input id="lu" name="u" autocomplete="username" required autocapitalize="off"></div>
     <div class="field"><label class="label" for="lp">Password</label><input id="lp" name="p" type="password" autocomplete="current-password" required></div>
     <button class="btn primary" style="padding:11px">Sign in</button></form>
-   <div><span class="label">Demo accounts</span><div class="demo-accts" style="margin-top:8px">${DEMO_ACCTS.map(a=>`<button class="acct" type="button" data-act="fillLogin" data-u="${a[0]}" data-p="${a[1]}"><b>${a[2]}</b><small>${a[0]} / ${a[1]}</small><small>${a[3]}</small></button>`).join('')}</div></div>
+   <div><span class="label">Demo accounts</span><div class="demo-accts" style="margin-top:8px">${DEMO_ACCTS.map(a=>`<button class="acct" type="button" data-act="fillLogin" data-u="${E(a[0])}" data-p="${E(a[1])}"><b>${a[2]}</b><small>${a[0]} / ${a[1]}</small><small>${a[3]}</small></button>`).join('')}</div></div>
    <div class="actions"><button class="btn sm" data-act="theme" type="button">Dark mode</button><button class="btn sm danger" data-act="resetDemo" type="button">Reset demo data</button></div></section></div>`;
 }
 ACT.fillLogin=el=>{$('#lu').value=el.dataset.u;$('#lp').value=el.dataset.p;$('#lp').focus()};
@@ -126,9 +241,10 @@ FORM.login=(f,d)=>{
   const u=db.users.find(x=>x.username.toLowerCase()===d.u.trim().toLowerCase()&&x.password===d.p&&x.active);
   if(!u){const ex=db.users.find(x=>x.username.toLowerCase()===d.u.trim().toLowerCase());ev('Auth','Sign-in failed',`Username tried: ${d.u.trim().slice(0,40)} (${!ex?'no such user':ex.active?'wrong password':'account switched off'})`,{user:null,name:ex?ex.name:'Unknown user',un:d.u.trim().slice(0,40),status:'fail'});ntFailed(d.u.trim(),!!ex);renderLogin(ex&&!ex.active?'This account is switched off. Ask the administrator.':'Wrong username or password.');return}
   sesSet(u.id);ui.route=u.role==='Parent'?'phome':u.role==='Student'?'shome':'dashboard';ui.tab={};ui.f={};ui.pre=null;ui.req=null;ui.last=null;ui.feeMode='online';log('Signed in','Role: '+u.role);ev('Auth','Signed in',`${u.role} · username ${u.username}`);ntSync();save();renderApp();
+  if(u.mustChange){ACT.profile();toast('This is a temporary password. Choose a new one now.')}
 };
-ACT.logout=()=>{log('Signed out','');ev('Auth','Signed out','');evFlush();save();sesDel();closeLayer();renderLogin()};
-ACT.resetDemo=()=>confirmBox('Reset demo data','All students, payments and changes in this browser will be replaced by fresh sample data.','Reset',()=>{evBuf=[];lsDel(EV_KEY);seed();ev('Audit','Demo data reset','Sample data restored',{user:null,name:'System'});save();sesDel();closeLayer();renderLogin();toast('Demo data reset')},true);
+ACT.logout=()=>{log('Signed out','');ev('Auth','Signed out','');evFlush();save();sesDel();closeLayer();renderLogin();const h=$('.login-form h2');if(h){h.tabIndex=-1;softFocus(h)}};
+ACT.resetDemo=()=>{if(cur())need('settings.manage','reset the data');confirmBox('Reset demo data','All students, payments and changes in this browser will be replaced by fresh sample data.','Reset',()=>{evBuf=[];lsDel(EV_KEY);seed();ev('Audit','Demo data reset','Sample data restored',{user:null,name:'System'});save();sesDel();closeLayer();renderLogin();toast('Demo data reset')},true)};
 
 /* ---------- shell ---------- */
 const ICONS={dashboard:'<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 9h8V3h-8z"/>',students:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.8.7 3 2.4 3.5 5.2"/>',
@@ -155,15 +271,13 @@ const PNAV=[['phome','Home',()=>true,()=>viewParentHome()],['pfees','Fees and Re
 const SNAV=[['shome','Home',()=>true,()=>viewStudentHome()],['sacademic','My Academics',()=>true,()=>viewStudentAcademic()],['pfees','Fees and Receipts',()=>true,()=>viewParentFees()],['pnotices','Notices',()=>true,()=>viewParentNotices()],['sprofile','My Profile',()=>true,()=>viewStudentProfile()]];
 const isPortal=u=>!!u&&(u.role==='Parent'||u.role==='Student');
 const navFor=u=>u.role==='Parent'?PNAV:u.role==='Student'?SNAV:NAV.filter(n=>n[2]());
-function badgeFor(id){
-  if(id==='fees'&&can('fees.concession.approve')){const n=db.students.filter(s=>s.fee.concession.status==='pending').length;return n?`<span class="badge" title="Concessions waiting for approval">${n}</span>`:''}
-  return'';
-}
+const badgeCount=id=>id==='fees'&&can('fees.concession.approve')?db.students.filter(s=>s.fee.concession.status==='pending').length:0;
+function badgeFor(id){const n=badgeCount(id);return n?`<span class="badge" title="Concessions waiting for approval">${n}</span>`:''}
 /* ---------- shell: grouped sidebar (collapsible, drawer on phones), Profile and Sign out live at the bottom of it ---------- */
 const RAIL_KEY='vp_erp_rail';
 const NAV_HIDDEN=new Set(['sprofile']);
 const NAV_GROUP={dashboard:'Overview',students:'People',staff:'People',fees:'Finance',academic:'Academics',attendance:'Academics',marks:'Academics',practice:'Academics',messages:'Communication',reports:'Insights',audit:'Insights',eventlog:'Insights',settings:'System'};
-const ICON_MENU=IC('<path d="M4 6h16M4 12h16M4 18h16"/>'),ICON_PANEL=IC('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>'),ICON_X=IC('<path d="M6 6l12 12M18 6 6 18"/>'),ICON_USER=IC('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>');
+const ICON_MENU=IC('<path d="M4 6h16M4 12h16M4 18h16"/>'),ICON_PANEL=IC('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>'),ICON_X=IC('<path d="M6 6l12 12M18 6 6 18"/>');
 const railMini=()=>{const p=lsGet(RAIL_KEY);return p?p==='mini':innerWidth<1100};
 function navGroups(u){
   const items=navFor(u).filter(n=>!NAV_HIDDEN.has(n[0])),fixed=u.role==='Parent'?'Parent portal':u.role==='Student'?'Student portal':'',map=new Map();
@@ -175,9 +289,9 @@ function renderApp(){
   const nav=navFor(u);if(!nav.find(n=>n[0]===ui.route))ui.route=nav[0][0];
   const mini=railMini(),who=E(u.role)+(u.role==='Parent'?' of '+E(stu(u.studentId).name):'')+(u.role==='Student'?' · '+E(u.studentId):'');
   document.body.classList.remove('rail-lock');
-  $('#root').innerHTML=`<div class="app" data-rail="${mini?'mini':'open'}"><aside class="rail" id="rail" aria-label="Sidebar">
+  $('#root').innerHTML=`<a class="skip" href="#page" data-act="skip">Skip to content</a><div class="app" data-rail="${E(mini?'mini':'open')}"><aside class="rail" id="rail" aria-label="Sidebar">
    <div class="rail-head"><div class="brand"><div class="seal">V</div><div class="bt"><b>${E(db.settings.college)}</b><small>${E(db.settings.year)}</small></div></div>
-    <button class="rail-toggle" data-act="railToggle" type="button" aria-expanded="${!mini}" aria-label="${mini?'Expand sidebar':'Collapse sidebar'}" title="${mini?'Expand sidebar':'Collapse sidebar'}">${ICON_PANEL}</button>
+    <button class="rail-toggle" data-act="railToggle" type="button" aria-expanded="${!mini}" aria-label="${mini?'Expand sidebar':'Collapse sidebar'}" title="${E(mini?'Expand sidebar':'Collapse sidebar')}">${ICON_PANEL}</button>
     <button class="rail-close" data-act="railClose" type="button" aria-label="Close menu">${ICON_X}</button></div>
    <nav class="nav" id="nav" aria-label="Main menu"></nav>
    <div class="rail-acct" role="group" aria-label="Your account"><div class="acct-row">
@@ -188,16 +302,27 @@ function renderApp(){
    <main><div class="topbar"><button class="iconbtn menu-btn" data-act="railOpen" type="button" aria-label="Open menu" aria-controls="rail" aria-expanded="false">${ICON_MENU}</button><div class="crumb" id="crumb"></div>
     <div class="tb-end">${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button></div></div><div id="page"></div></main></div>`;
   renderNav();renderPage();playEnter('enter');
+  if(userDriven&&(!document.activeElement||document.activeElement===document.body))focusH1();
 }
 function renderNav(){
-  const u=cur();
-  $('#nav').innerHTML=navGroups(u).map(([g,items],i)=>`<div class="ng" role="group" aria-labelledby="gl${i}"><div class="gl" id="gl${i}">${E(g)}</div>${items.map(n=>`<button data-act="nav" data-id="${n[0]}" title="${E(n[1])}" ${ui.route===n[0]?'aria-current="page"':''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[n[0]]||ICONS.dashboard}</svg><span class="nl">${E(n[1])}</span>${badgeFor(n[0])}</button>`).join('')}</div>`).join('');
-  const cr=$('#crumb');if(cr){const n=navFor(u).find(x=>x[0]===ui.route);cr.textContent=n?n[1]:''}
+  const u=cur(),nv=$('#nav');
+  keepFocus(nv,()=>{nv.innerHTML=navGroups(u).map(([g,items],i)=>`<div class="ng" role="group" aria-labelledby="gl${i}"><div class="gl" id="gl${i}">${E(g)}</div>${items.map(n=>{const bc=badgeCount(n[0]);return`<button data-act="nav" data-id="${E(n[0])}" data-tip="${E(n[1])}" aria-label="${E(n[1])}${bc?', '+bc+' pending':''}" ${ui.route===n[0]?'aria-current="page"':''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[n[0]]||ICONS.dashboard}</svg><span class="nl">${E(n[1])}</span>${badgeFor(n[0])}</button>`}).join('')}</div>`).join('')});
+  const cur_=navFor(u).find(x=>x[0]===ui.route);
+  const cr=$('#crumb');if(cr)cr.textContent=cur_?cur_[1]:'';
+  if(cur_)document.title=cur_[1]+' · '+(db.settings.short||db.settings.college);
   const pb=document.querySelector('.rail [data-act=profile]');if(pb){if(ui.route==='sprofile')pb.setAttribute('aria-current','page');else pb.removeAttribute('aria-current')}
 }
+/* collapsed rail: place the instant label next to the icon (fixed, so the scrolling menu cannot clip it) */
+function placeTip(e){
+  const b=e.target.closest&&e.target.closest('.app[data-rail=mini] .nav button[data-tip]');if(!b)return;
+  const r=b.getBoundingClientRect();b.style.setProperty('--tipx',(r.right+10)+'px');b.style.setProperty('--tipy',(r.top+r.height/2)+'px');
+}
+document.addEventListener('pointerover',placeTip);document.addEventListener('focusin',placeTip);
 function railSet(open){
   const a=$('.app');if(!a)return;a.classList.toggle('rail-open',open);document.body.classList.toggle('rail-lock',open);
-  const m=$('.menu-btn');if(m)m.setAttribute('aria-expanded',String(open));
+  const m=$('.menu-btn'),r=$('#rail');if(m)m.setAttribute('aria-expanded',String(open));
+  if(r){if(open&&phoneWidth()){r.setAttribute('role','dialog');r.setAttribute('aria-modal','true')}else{r.removeAttribute('role');r.removeAttribute('aria-modal')}}
+  syncInert();
   if(open){const f=$('#nav [aria-current]')||$('#nav button');if(f)f.focus({preventScroll:true})}else if(m&&a._viaMenu){a._viaMenu=false;try{m.focus({preventScroll:true})}catch(e){}}
 }
 function railClose(){railSet(false)}
@@ -218,9 +343,10 @@ function profileHtml(){
    <div class="panel" style="margin-top:12px"><h2>What you can open</h2><div class="actions">${mods.map(m=>`<span class="pill">${E(m)}</span>`).join('')}</div></div>
    <div style="margin-top:12px">${accountPanel()}</div>`;
 }
-ACT.profile=()=>{const u=cur();railClose();if(u.role==='Student'){go('sprofile');return}drawer(profileHtml())};
-function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();pg.innerHTML=n?n[3]():'';renderNav()}
-function go(route){ui.route=route;{const n=navFor(cur()).find(x=>x[0]===route);if(n)ev('Page','Opened '+n[1],route)}renderPage();window.scrollTo(0,0);playEnter('enter')}
+ACT.profile=()=>{const u=cur();railClose();if(u.role==='Student'){go('sprofile');return}drawer(profileHtml(),false,'Your profile')};
+ACT.skip=()=>{if(!focusH1()){const pg=$('#page');if(pg){pg.tabIndex=-1;softFocus(pg)}}};
+function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();keepFocus(pg,()=>{pg.innerHTML=n?n[3]():''});renderNav()}
+function go(route){const prev=ui.route;ui.route=route;{const n=navFor(cur()).find(x=>x[0]===route);if(n)ev('Page','Opened '+n[1],route)}renderPage();window.scrollTo(0,0);playEnter('enter');const a=document.activeElement;if(route!==prev||!a||a===document.body)focusH1()}
 ACT.nav=el=>{closeLayer();railClose();go(el.dataset.id)};
 function refresh(){save();renderPage()}
 
@@ -266,7 +392,7 @@ function viewDashboard(){
     ${dl.slice(0,6).map(x=>`<tr class="click" data-act="openStudent" data-id="${E(x.s.id)}"><td><div class="who"><div class="av">${E(initials(x.s.name))}</div>${E(x.s.name)}</div></td><td>${E(classLabel(x.s))}</td><td class="num amt">${inr(x.sm.payable)}</td><td>${feePill(x.sm)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No dues. Every student is paid up.</td></tr>'}</tbody></table></div></div>`:''}
    ${u.role==='Faculty'?`<div class="panel"><h2>My divisions</h2><div class="list">${myDivisions().map(d=>`<div class="li"><div><b>${E(course(d.course).name)} ${E(batchOf(d.batch).name)} · Division ${E(d.name)}</b><small>${db.students.filter(s=>s.div===d.id).length} students · Class teacher: ${E(staffOf(d.teacher)?.name||'-')}</small></div>${db.attendance[T]?.[d.id]?pill('Marked today','good'):pill('Not marked','warn')}</div>`).join('')}</div></div>`:''}
   </div><div class="grid" style="align-content:start">
-   <div class="panel"><h2>Needs attention</h2><div class="list">${al.map(a=>`<div class="li"><div><b>${E(a[1])}</b><small>${E(a[2])}</small></div><button class="btn sm" data-act="alertGo" data-to="${a[3]}" data-sub="${a[4]}">Open</button></div>`).join('')||'<p class="note">Nothing needs attention right now.</p>'}</div></div>
+   <div class="panel"><h2>Needs attention</h2><div class="list">${al.map(a=>`<div class="li"><div><b>${E(a[1])}</b><small>${E(a[2])}</small></div><button class="btn sm" data-act="alertGo" data-to="${E(a[3])}" data-sub="${E(a[4])}">Open</button></div>`).join('')||'<p class="note">Nothing needs attention right now.</p>'}</div></div>
    ${showFees?`<div class="panel"><h2>Recent payments</h2><div class="list">${db.payments.filter(p=>p.status==='ok').sort((a,b)=>b.ts-a.ts).slice(0,6).map(p=>`<div class="li"><div><b>${E(stu(p.studentId).name)}</b><small>${E(p.rc)} · ${E(p.mode)} · ${fmtD(p.date)}</small></div><span class="amt">${inr(p.amount)}</span></div>`).join('')}</div></div>`:''}
    <div class="panel"><h2>Notices</h2><div class="list">${db.notices.slice(0,3).map(n=>`<div class="li" style="align-items:flex-start"><div><b>${E(n.title)}</b><small>${fmtD(n.date)} · ${E(n.by)}</small></div></div>`).join('')||'<p class="note">No notices yet.</p>'}</div></div>
   </div></div>`;

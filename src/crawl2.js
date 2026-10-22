@@ -20,7 +20,7 @@ const AUDIT=()=>{
   const dlgOpen=!!document.querySelector('#dlg *'),layerOpen=!!document.querySelector('#layer .drawer');
   const awayClip=e=>{const er=e.getBoundingClientRect();for(let a=e.parentElement;a&&a!==document.body&&a!==document.documentElement;a=a.parentElement){const o=cs(a);if(o.overflowX==='visible'&&o.overflowY==='visible')continue;const r=a.getBoundingClientRect();if(er.bottom<=r.top+1||er.top>=r.bottom-1||er.right<=r.left+1||er.left>=r.right-1)return true}return false};
   const root=[...document.querySelectorAll(dlgOpen?'#dlg':layerOpen?'#layer':'#root')];
-  const all=root.flatMap(r=>[...r.querySelectorAll('*')]).filter(e=>!/^(SCRIPT|STYLE|PATH|CIRCLE|RECT|LINE|POLYLINE|G|SVG|DEFS)$/i.test(e.tagName)&&shown(e)&&!awayClip(e));
+  const all=root.flatMap(r=>[...r.querySelectorAll('*')]).filter(e=>!/^(SCRIPT|STYLE|PATH|CIRCLE|RECT|LINE|POLYLINE|G|SVG|DEFS)$/i.test(e.tagName)&&shown(e)&&!awayClip(e)&&!(e.matches('.skip')&&document.activeElement!==e));
   // page scroll
   const sw=document.documentElement.scrollWidth;if(sw>iw+1)out.push(['pageScroll','scrollWidth '+sw+' > viewport '+iw,'html']);
   // elements off the right/left edge
@@ -41,7 +41,7 @@ const AUDIT=()=>{
   const seenC=new Set();
   for(const e of all){const c=cs(e);if(e.scrollWidth<=e.clientWidth+1&&e.scrollHeight<=e.clientHeight+2)continue;
     const ox=c.overflowX,oy=c.overflowY;const hx=/hidden|clip/.test(ox)&&e.scrollWidth>e.clientWidth+1,hy=/hidden|clip/.test(oy)&&e.scrollHeight>e.clientHeight+2;if(!hx&&!hy)continue;
-    if(!(e.textContent||'').trim()||/^(HTML|BODY)$/.test(e.tagName)||e.closest('.scrim')||e.matches('.login-art,.sr'))continue;
+    if(!(e.textContent||'').trim()||/^(HTML|BODY)$/.test(e.tagName)||e.closest('.scrim')||e.matches('.login-art,.sr,.skip'))continue;
     const s=sig(e);if(seenC.has(s))continue;seenC.add(s);
     if(c.textOverflow==='ellipsis'&&e.scrollWidth>e.clientWidth+1)out.push(['ellipsis',`${e.scrollWidth}px of text in ${e.clientWidth}px`,s]);
     else out.push(['clipped',`content ${e.scrollWidth}x${e.scrollHeight} in box ${e.clientWidth}x${e.clientHeight}`,s]);if(seenC.size>14)break}
@@ -57,7 +57,7 @@ const AUDIT=()=>{
   if(iw<=900){for(const t of document.querySelectorAll('table')){if(!shown(t))continue;const th=t.querySelector('thead');if(th&&cs(th).display!=='none'&&!t.closest('.tablewrap.keep'))out.push(['tableOnPhone','table header still visible',sig(t)])}}
   if(iw>720){for(const w of document.querySelectorAll('.tablewrap')){if(shown(w)&&!awayClip(w)&&w.scrollWidth>w.clientWidth+2)out.push(['tableScrolls',`table is ${w.scrollWidth}px wide in ${w.clientWidth}px, so columns are hidden`,sig(w.querySelector('table')||w)+' in '+(w.closest('.panel')?.querySelector('h2')?.textContent||'').slice(0,30)])}}
   // tiny text
-  const tiny=new Set();for(const e of leaves){const f=parseFloat(cs(e).fontSize);if(f<10.5){const s=sig(e);if(!tiny.has(s)&&tiny.size<5){tiny.add(s);out.push(['tinyText',f+'px',s])}}}
+  const tiny=new Set();for(const e of leaves){const f=parseFloat(cs(e).fontSize);if(f<10.5&&!(f===0&&e.closest('[data-rail=mini]'))&&!e.closest('.skip')){const s=sig(e);if(!tiny.has(s)&&tiny.size<5){tiny.add(s);out.push(['tinyText',f+'px',s])}}}
   return out;
 };
 /* content hidden under the fixed bottom nav when scrolled to the end */
