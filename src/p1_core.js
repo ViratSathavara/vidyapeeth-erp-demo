@@ -1,329 +1,241 @@
 'use strict';
 /* =====================================================================
-   Vidyapeeth College ERP - demo. All data lives in localStorage.
+   NPCTE College ERP - Phase 1 demo (browser only, data in localStorage).
+   Spec: docs/NPCTE-ERP-Phase1-Spec.md. Money is stored as integer paise.
+   Dates are kept as ISO yyyy-mm-dd (Asia/Kolkata) and shown as DD-MM-YYYY.
    ===================================================================== */
-const LS_KEY='vp_erp_demo_v3', SES_KEY='vp_erp_session_v3', THEME_KEY='vp_erp_theme';
+const LS_KEY='npcte_erp_v1', SES_KEY='npcte_erp_session_v1', THEME_KEY='npcte_erp_theme', DB_VER=1;
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const inr=n=>(n<0?'-':'')+'₹'+Math.round(Math.abs(n||0)).toLocaleString('en-IN');
+/* inr takes PAISE */
+const inr=p=>{const n=Math.round(p||0)/100;return (n<0?'-':'')+'₹'+Math.abs(n).toLocaleString('en-IN',{maximumFractionDigits:2})};
+const toPaise=v=>{const n=Number(String(v??'').replace(/[₹,\s]/g,''));if(!isFinite(n))return NaN;return Math.round(n*100)};
 const pad=(n,l=2)=>String(n).padStart(l,'0');
+const TZ='Asia/Kolkata';
+/* calendar date in India for a timestamp */
+const istDate=ts=>{const p=new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(ts));const g=t=>p.find(x=>x.type===t).value;return`${g('year')}-${g('month')}-${g('day')}`};
+const istTime=ts=>new Date(ts).toLocaleTimeString('en-IN',{timeZone:TZ,hour:'2-digit',minute:'2-digit',hour12:true});
 const isoOf=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-const today=()=>isoOf(new Date());
-const parseD=iso=>{const [y,m,d]=iso.slice(0,10).split('-').map(Number);return new Date(y,m-1,d)};
+const today=()=>istDate(Date.now());
+const parseD=iso=>{const [y,m,d]=String(iso).slice(0,10).split('-').map(Number);return new Date(y,m-1,d)};
 const addDays=(iso,n)=>{const d=parseD(iso);d.setDate(d.getDate()+n);return isoOf(d)};
 const diffDays=(a,b)=>Math.round((parseD(a)-parseD(b))/864e5);
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const fmtD=iso=>{if(!iso)return '—';const d=parseD(iso);return `${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`};
-const fmtT=ts=>{const d=new Date(ts);return fmtD(isoOf(d))+', '+d.toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit'})};
+const fmtD=iso=>{if(!iso)return '—';const [y,m,d]=String(iso).slice(0,10).split('-');return`${d}-${m}-${y}`};
+const fmtT=ts=>ts?fmtD(istDate(ts))+', '+istTime(ts):'—';
+const validIso=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'')&&isoOf(parseD(v))===v;
 const uid=p=>p+Math.random().toString(36).slice(2,9);
-const sum=(a,f=x=>x)=>a.reduce((s,x)=>s+f(x),0);
-const initials=n=>String(n).replace(/^(Dr\.|Prof\.|Shri|Smt\.)\s+/,'').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+const sum=(a,f=x=>x)=>a.reduce((s,x)=>s+(f(x)||0),0);
+const initials=n=>String(n).replace(/^(Dr\.|Prof\.|Shri|Smt\.)\s+/,'').split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
 let _seed=11;const rnd=()=>{_seed=(_seed*16807)%2147483647;return _seed/2147483647};
 
-/* ---------- storage with fallback ---------- */
+/* ---------- storage ---------- */
 const memStore={};
 const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return memStore[k]??null}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,v);return true}catch(e){memStore[k]=v;return false}};
 const lsDel=k=>{try{localStorage.removeItem(k)}catch(e){delete memStore[k]}};
-/* The signed-in user lives in sessionStorage, so two browser tabs can hold two different logins at once. Data lives in localStorage and is synced between tabs. */
+/* the signed-in user lives in sessionStorage, so two tabs can hold two logins (for example Clerk + Student) and watch live updates */
 const sesGet=()=>{try{return sessionStorage.getItem(SES_KEY)}catch(e){return memStore[SES_KEY]??null}};
 const sesSet=v=>{try{sessionStorage.setItem(SES_KEY,v)}catch(e){memStore[SES_KEY]=v}};
 const sesDel=()=>{try{sessionStorage.removeItem(SES_KEY)}catch(e){delete memStore[SES_KEY]}};
 let db=null;
-/* save() reports whether the browser really stored the data. When it did not (storage full, blocked or switched off) the app keeps working in memory, a banner stays on screen until a later save succeeds, and toast() refuses to say "saved". */
 const SAVE_FAIL_MSG='Could not save: changes will be lost on reload';
 let saveBad=false,saveTick=false;
 function saveBanner(on){
   if(typeof document==='undefined'||!document.body)return;
   let b=document.getElementById('savebar');
-  if(!on){if(b)b.remove();document.body.classList.remove('save-bad');document.body.style.removeProperty('--sbh');return}
-  if(!b){b=document.createElement('div');b.id='savebar';b.setAttribute('role','alert');b.textContent=SAVE_FAIL_MSG+'. Free up space in this browser, or copy a backup now (Settings, Data and backup).';document.body.insertBefore(b,document.body.firstChild)}
-  document.body.classList.add('save-bad');document.body.style.setProperty('--sbh',b.offsetHeight+'px');
+  if(!on){if(b)b.remove();document.body.classList.remove('save-bad');return}
+  if(!b){b=document.createElement('div');b.id='savebar';b.setAttribute('role','alert');b.textContent=SAVE_FAIL_MSG+'. Browser storage is full or blocked.';document.body.insertBefore(b,document.body.firstChild)}
+  document.body.classList.add('save-bad');
 }
-addEventListener('resize',()=>{if(saveBad)saveBanner(true)});
-function save(){
-  const ok=lsSet(LS_KEY,JSON.stringify(db));
-  saveBad=!ok;if(!ok){saveTick=true;Promise.resolve().then(()=>{saveTick=false})}
-  saveBanner(!ok);return ok;
-}
-function load(){const raw=lsGet(LS_KEY);if(raw){try{db=JSON.parse(raw);if(db&&db.ver===3){migrate();return}}catch(e){}}seed();save()}
-/* Adds anything newer builds expect, so data saved by an older build keeps working. Safe to run any number of times. */
-const MAIL_DEFAULTS=()=>({enabled:true,to:'both',mode:'demo',endpoint:'/api/send-receipt',key:'',fromName:'',replyTo:'',redirect:''});
-const slugMail=n=>String(n||'').replace(/^(Dr\.|Prof\.|Shri|Smt\.)\s+/,'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'.').replace(/^\.|\.$/g,'');
-const STU_PW='student123',PAR_PW='parent123';
-function ensureUsers(s,alias){
-  if(!db.users.some(u=>u.role==='Parent'&&u.studentId===s.id))db.users.push({id:uid('u'),username:s.id.toLowerCase(),password:PAR_PW,name:s.guardian.name,role:'Parent',studentId:s.id,active:true});
-  if(!db.users.some(u=>u.role==='Student'&&u.studentId===s.id))db.users.push({id:uid('u'),username:'stu-'+s.id.toLowerCase(),password:STU_PW,name:s.name,role:'Student',studentId:s.id,active:true});
-}
+function save(){const ok=lsSet(LS_KEY,JSON.stringify(db));saveBad=!ok;if(!ok){saveTick=true;Promise.resolve().then(()=>{saveTick=false})}saveBanner(!ok);return ok}
+function load(){const raw=lsGet(LS_KEY);if(raw){try{db=JSON.parse(raw);if(db&&db.ver===DB_VER){migrate();return}}catch(e){}}seed();save()}
 function migrate(){
-  if(typeof ntInit==='function')ntInit();
-  db.settings.mail=Object.assign(MAIL_DEFAULTS(),db.settings.mail||{});if(!db.outbox)db.outbox=[];
-  (db.payments||[]).forEach(p=>{if(!p.snap){try{const s=stu(p.studentId);if(s)p.snap=snapOf(p,s)}catch(e){}}});fixCounters(db);
-  db.students.forEach(s=>{if(!s.guardian)s.guardian={};if(s.guardian.email===undefined)s.guardian.email=slugMail(s.guardian.name)?slugMail(s.guardian.name)+'@example.com':'';ensureUsers(s)});
-  const r=db.students.find(s=>s.name==='Riya Joshi');
-  if(r){if(!db.users.some(u=>u.username==='parent'))db.users.push({id:'u_parent',username:'parent',password:PAR_PW,name:r.guardian.name,role:'Parent',studentId:r.id,active:true});
-    if(!db.users.some(u=>u.username==='student'))db.users.push({id:'u_student',username:'student',password:STU_PW,name:r.name,role:'Student',studentId:r.id,active:true})}
-}
-
-/* An issued receipt never changes. At issue time the amounts stay on the payment record (recompute() no longer rewrites them once p.snap exists) and p.snap keeps the fee heads, the rules, the college name and the class as they were. Old data without a snapshot gets one from the current data the first time it is loaded. */
-function snapOf(p,s){
-  const own=!!s&&!!s.fee&&s.fee.id===p.feeId,st=db.settings;
-  return{at:Date.now(),h:own?s.fee.heads.map(h=>[h.name,h.amount]):null,t:own?s.fee.total:null,r:[st.lateFeePerDay,st.lateCap,st.graceDays],c:st.college,y:st.city,k:s?classLabel(s):''};
-}
-/* counters must stay above every id already in use, whatever a file or an old save says (they are only ever raised, never lowered) */
-function fixCounters(d){
-  const c=d.counters,fix=[];if(!c||typeof c!=='object')return fix;
-  let m=0;(d.payments||[]).forEach(p=>{const x=/(\d+)$/.exec(String(p.rc));if(x)m=Math.max(m,+x[1])});if(!(c.rc>=m+1)){fix.push('receipt counter '+c.rc+' to '+(m+1));c.rc=m+1}
-  m=0;(d.requests||[]).forEach(r=>{const x=/^rq(\d+)$/.exec(String(r.id));if(x)m=Math.max(m,+x[1])});if(!(c.req>=m+1)){fix.push('request counter '+c.req+' to '+(m+1));c.req=m+1}
-  if(!c.enrol||typeof c.enrol!=='object')c.enrol={};
-  (d.students||[]).forEach(s=>{const x=/^(.+)-(\d+)$/.exec(String(s.id));if(x&&(c.enrol[x[1]]||0)<+x[2]){fix.push('enrolment counter '+x[1]+' to '+(+x[2]));c.enrol[x[1]]=+x[2]}});
-  return fix;
+  const s=db.settings;s.flags=Object.assign({expenseReducesDue:false,fundingAllCategories:false,lateFee:false},s.flags||{});
+  if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];if(!db.expenses)db.expenses=[];
+  if(!db.enquiries)db.enquiries=[];
 }
 const NAME_MAX=80;
-/* trims and refuses text longer than the limit, with a message that says what to do */
-const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)throw new Error(`${label} is too long (${v.length} characters; the limit is ${max}). Shorten it and try again.`);return v};
+const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)throw new Error(`${label} is too long (${v.length} characters; the limit is ${max}).`);return v};
 
-/* ---------- permissions ---------- */
+/* ---------- roles and permissions (checked in every handler; the real server must check the same) ---------- */
 const PERMS=[
- ['dashboard.view','See the dashboard'],['students.view','View students'],['students.edit','Admit and edit students'],['students.promote','Promote students to next semester'],
- ['fees.view','Open fee collection screens'],['fees.collect','Collect fees and issue receipts'],['fees.reverse','Cancel receipts and refund'],
- ['fees.concession.request','Request a concession'],['fees.concession.approve','Approve concessions and waive late fee'],['fees.dayclose','Close the day (cash count)'],
- ['fees.bankmatch','Match bank settlements'],['fees.setup','Change fee structure and late fee rules'],
- ['academic.manage','Set up courses, batches, divisions, subjects'],['attendance.view','View attendance'],['attendance.mark','Mark attendance'],
- ['marks.view','View internal marks'],['marks.enter','Enter internal marks'],['practice.manage','Manage practice teaching'],
- ['staff.view','View staff'],['staff.manage','Add and edit staff and logins'],['roles.manage','Change role permissions'],
- ['messages.send','Send reminders and messages'],['notices.post','Post notices'],
- ['reports.fees','Fee reports'],['reports.students','Student reports'],['reports.academic','Academic reports'],['reports.staff','Staff reports'],
- ['audit.view','View audit log'],['settings.manage','Change college settings and data']];
-const ROLE_NAMES=['Super Admin','Principal','Accountant','Clerk','Faculty'];
-const DEFAULT_ROLES={
- 'Principal':['dashboard.view','students.view','students.edit','students.promote','fees.view','fees.reverse','fees.dayclose','fees.bankmatch','fees.concession.approve','academic.manage','attendance.view','marks.view','practice.manage','staff.view','messages.send','notices.post','reports.fees','reports.students','reports.academic','reports.staff','audit.view'],
- 'Accountant':['dashboard.view','students.view','fees.view','fees.collect','fees.reverse','fees.dayclose','fees.bankmatch','messages.send','reports.fees'],
- 'Clerk':['dashboard.view','students.view','students.edit','fees.view','fees.collect','fees.concession.request','reports.students'],
- 'Faculty':['dashboard.view','students.view','attendance.view','attendance.mark','marks.view','marks.enter','practice.manage','reports.academic']};
-const cur=()=>db.users.find(u=>u.id===sesGet()&&u.active);
-const can=p=>{const u=cur();if(!u)return false;if(u.role==='Super Admin')return true;return (db.roles[u.role]||[]).includes(p)};
+ ['dashboard.view','See the dashboard'],
+ ['students.view','View students'],['students.edit','Add and edit students, resend logins'],
+ ['fees.view','Open Fee Collection'],['fees.collect','Collect payments (Cash, Cheque, UPI)'],['fees.cancel','Cancel a receipt (with reason)'],
+ ['fees.editdate','Edit invoice date of Cash / Cheque / Expense'],['expenses.manage','Add expenses'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
+ ['audit.view','Transactions audit and exports'],['audit.deposit','Mark cash / cheque as deposited'],['activity.view','Activity log (every action)'],
+ ['notices.post','Post notices and fee reminders'],['enquiries.view','Admission enquiries'],
+ ['settings.manage','College settings'],['roles.manage','Roles and permissions']];
+const ROLE_NAMES=['Super Admin','Principal','Clerk','Student'];
+const STAFF_ROLES=['Principal','Clerk'];
+const ALL_STAFF_PERMS=PERMS.map(p=>p[0]);
+const DEFAULT_ROLES=()=>({
+ 'Principal':ALL_STAFF_PERMS.slice(),
+ 'Clerk':['dashboard.view','students.view','students.edit','fees.view','fees.collect','fees.cancel','fees.editdate','expenses.manage','audit.view','audit.deposit','notices.post','enquiries.view']});
+const cur=()=>db&&db.users.find(u=>u.id===sesGet()&&u.active);
+const can=p=>{const u=cur();if(!u)return false;if(u.role==='Super Admin')return true;if(u.role==='Student')return false;return (db.roles[u.role]||[]).includes(p)};
 const canAny=(...p)=>p.some(can);
-/* Guards used at the top of handlers. They mirror what the server must enforce; in this demo they stop the UI and console calls of a signed-in role that lacks the permission. */
 const need=(p,what)=>{if(!can(p))throw new Error('You do not have access'+(what?' to '+what:''))};
-const needAny=(p,what)=>{if(!canAny(...p))throw new Error('You do not have access'+(what?' to '+what:''))};
-/* Parent and Student logins may open only their own student's record; staff need students.view */
-const mayStudent=id=>{const u=cur();if(!u)return false;if(u.role==='Parent'||u.role==='Student')return !!id&&u.studentId===id;return can('students.view')};
+const isStudentUser=u=>!!u&&u.role==='Student';
+/* a student login may open only its own record (spec §14: another student's id -> 403) */
+const mayStudent=id=>{const u=cur();if(!u)return false;if(u.role==='Student')return !!id&&u.studentId===id;return can('students.view')};
+function guardStudent(id){if(!mayStudent(id))throw new Error('403 · You can only open your own record')}
 
 /* ---------- lookups ---------- */
 const stu=id=>db.students.find(s=>s.id===id);
 const course=id=>db.courses.find(c=>c.id===id);
-const batchOf=id=>db.batches.find(b=>b.id===id);
-const divOf=id=>db.divisions.find(d=>d.id===id);
-const staffOf=id=>db.staff.find(s=>s.id===id);
-const classLabel=s=>`${course(s.course).name} Sem ${s.sem} · ${divOf(s.div)?.name||'-'}`;
-const DOCS=[['d0','Graduation marksheets (all years)',1],['d1','Leaving / transfer certificate',1],['d2','Aadhaar card',1],['d3','Passport photos (4)',1],['d4','Entrance / merit letter',1],['d5','Caste certificate',0],['d6','Income certificate (scholarship)',0],['d7','Gap / migration certificate',0]];
-const docsMissing=s=>DOCS.filter(d=>d[2]&&!s.docs[d[0]]).length;
-const admStatus=s=>s.status!=='Active'?s.status:(docsMissing(s)?'Provisional':'Active');
-function log(action,detail){const u=cur();db.audit.unshift({id:uid('a'),ts:Date.now(),user:u?u.name:'System',role:u?u.role:'-',action,detail});if(db.audit.length>400)db.audit.length=400;if(!/^Signed (in|out)$/.test(action))ev('Audit',action,detail)}
+const CATS=['General','OBC','SC','ST','EWS'];
+const fundingApplies=cat=>db.settings.flags.fundingAllCategories||cat==='SC'||cat==='ST';
+const classLabel=s=>`${course(s.course).name} · Sem ${s.sem}`;
 
-/* ---------- event log: every sign-in, page opened, click, form, change, email and error, for every role.
-   Kept in its own storage key so writing events never triggers the cross-tab refresh of the main data. ---------- */
-const EV_KEY='vp_erp_events_v1',EV_MAX=3000;
-let evBuf=[],evTimer=null;
+/* ---------- audit log: every action with before / after ---------- */
+const device=()=>{const ua=navigator.userAgent;const t=/Mobi|Android|iPhone/i.test(ua)?'Phone':'Desktop';const b=/Edg\//.test(ua)?'Edge':/Chrome\//.test(ua)?'Chrome':/Firefox\//.test(ua)?'Firefox':/Safari\//.test(ua)?'Safari':'Browser';return t+' · '+b};
+function log(action,entity,entityId,before,after,detail){
+  const u=cur();
+  db.audit.unshift({id:uid('a'),at:Date.now(),actorId:u?u.id:'',actor:u?u.name:'System',role:u?u.role:'System',action,entity:entity||'',entityId:entityId||'',before:before??null,after:after??null,detail:detail||'',ip:'127.0.0.1 (demo)',device:device()});
+  if(db.audit.length>1500)db.audit.length=1500;
+}
+/* kept for the shared UI plumbing: page views and clicks are not stored in this build */
 const humanize=n=>String(n||'').replace(/([a-z0-9])([A-Z])/g,'$1 $2').replace(/[_-]+/g,' ').replace(/^./,c=>c.toUpperCase());
-function evRead(){try{const l=JSON.parse(lsGet(EV_KEY)||'[]');return Array.isArray(l)?l:[]}catch(e){return[]}}
-function evFlush(){
-  clearTimeout(evTimer);if(!evBuf.length)return;
-  let l=evBuf.slice().reverse().concat(evRead());evBuf=[];if(l.length>EV_MAX)l.length=EV_MAX;
-  try{lsSet(EV_KEY,JSON.stringify(l))}catch(e){try{l.length=Math.min(l.length,1500);lsSet(EV_KEY,JSON.stringify(l))}catch(x){}}
-}
-function ev(cat,action,detail,o={}){
-  const u=o.user===undefined?cur():o.user;
-  const e={id:uid('e'),ts:Date.now(),uid:u?u.id:'',n:u?u.name:(o.name||'Not signed in'),r:u?u.role:'-',un:u?u.username:(o.un||''),c:cat,a:action,d:String(detail||'').slice(0,300),s:o.status||'ok',p:(typeof ui!=='undefined'&&ui.route)||'',v:innerWidth<720?'Phone':'Desktop',x:1};
-  const l=evBuf[evBuf.length-1];
-  if(l&&l.uid===e.uid&&l.c===e.c&&l.a===e.a&&l.d===e.d&&l.s===e.s&&e.ts-l.ts<2500){l.x++;l.ts=e.ts}else evBuf.push(e);
-  clearTimeout(evTimer);evTimer=setTimeout(evFlush,300);
-}
-addEventListener('pagehide',evFlush);document.addEventListener('visibilitychange',()=>{if(document.hidden)evFlush()});
-addEventListener('error',e=>{try{ev('Error','Script error',e.message||'Unknown error',{status:'fail'})}catch(x){}});
-addEventListener('unhandledrejection',e=>{try{ev('Error','Unhandled error',(e.reason&&e.reason.message)||String(e.reason),{status:'fail'})}catch(x){}});
+function ev(){}
+function evFlush(){}
+const EV_KEY='npcte_events_unused';let evBuf=[];
 
-/* ---------- fee engine ---------- */
-function planFor(total,planName,start){
-  const t=db.plans.find(p=>p.name===planName)||db.plans[0];const off=db.settings.dueOffsets;let used=0;
-  return t.pct.map((p,i)=>{const a=i===t.pct.length-1?total-used:Math.round(total*p/100);used+=a;
-    return{label:t.pct.length===1?'Full payment':'Installment '+(i+1),amt:a,due:addDays(start,off[i]!==undefined?off[i]:off[off.length-1]+30*i)}});
+/* ---------- fees: per semester ---------- */
+const semFee=(s,n)=>s.fees.find(f=>f.sem===n);
+const okPays=s=>db.payments.filter(p=>p.studentId===s.id&&p.status==='SUCCESS');
+function semSummary(s,n){
+  const f=semFee(s,n);const amount=f?f.amount:0;
+  const paid=sum(okPays(s).filter(p=>p.sem===n),p=>p.amount);
+  const adj=db.settings.flags.expenseReducesDue?sum(db.expenses.filter(x=>x.studentId===s.id&&x.sem===n),x=>x.amount):0;
+  const due=Math.max(0,amount-paid-adj);const dueDate=f&&f.due||'';
+  const started=n<=s.sem;
+  const T=today();const overdue=started&&due>0&&dueDate&&dueDate<T;
+  const status=amount===0?'No fee':due===0?'Paid':paid+adj>0?'Partial':started?'Not paid':'Upcoming';
+  return{sem:n,amount,paid,adj,due,dueDate,started,overdue,status};
 }
-function layoutFee(f){
-  let heads=[];if(f.prev>0)heads.push({name:'Previous balance',amount:f.prev});
-  heads=heads.concat(f.base.map(h=>({name:h.name,amount:h.amount})));
-  const c=f.concession;f.govReceivable=0;
-  if(c.status==='approved'){const ti=heads.findIndex(h=>h.name===f.base[0].name);
-    if(c.type==='gov'){f.govReceivable=heads[ti].amount;heads[ti].amount=0}
-    else if(c.type==='mgmt'){heads[ti].amount-=Math.min(c.amount,heads[ti].amount)}}
-  f.heads=heads;f.total=sum(heads,h=>h.amount);f.plan=planFor(f.total,f.planName,f.start);
+function feeSum(s){
+  const sems=[1,2,3,4].map(n=>semSummary(s,n));
+  const cur_=sems.filter(x=>x.started);
+  return{sems,total:sum(sems,x=>x.amount),paid:sum(sems,x=>x.paid),payable:s.status==='ACTIVE'?sum(cur_,x=>x.due):0,upcoming:sum(sems.filter(x=>!x.started),x=>x.due),overdue:cur_.some(x=>x.overdue)};
 }
-function newFee({sem,courseId,planName,start,concession,prev}){
-  const f={id:uid('f'),sem,base:db.feeStructure[courseId].map(h=>({...h})),planName,start,concession:concession||{type:'none',amount:0,status:'none'},prev:prev||0,paid:0,paidLate:0,lateWaived:0,cleared:[],govReceivable:0};
-  layoutFee(f);f.cleared=f.plan.map(()=>null);return f;
-}
-function lateAt(f,onDate,paid,cleared){
-  const{lateFeePerDay:pd,lateCap:cap,graceDays:g}=db.settings;let cum=0,tot=0;
-  f.plan.forEach((p,i)=>{cum+=p.amt;if(p.amt<=0)return;const end=cleared[i]||onDate;const days=diffDays(end,p.due)-g;if(days>0)tot+=Math.min(cap,days*pd)});
-  return tot;
-}
-/* refresh=true is used only when a receipt is cancelled: the later receipts of that student are re-applied without the cancelled money (an existing rule). Every other caller (rule changes, waivers, concessions, issuing) leaves issued receipts exactly as they were. */
-function recompute(s,refresh){
-  const f=s.fee;const pays=db.payments.filter(p=>p.studentId===s.id&&p.feeId===f.id&&p.status==='ok').sort((a,b)=>a.ts-b.ts);
-  let paid=0,paidLate=0;const cleared=f.plan.map(()=>null);
-  for(const p of pays){
-    const late=lateAt(f,p.date,paid,cleared);const lateDue=Math.max(0,late-f.lateWaived-paidLate);
-    const la=Math.min(p.amount,lateDue);const fa=Math.min(p.amount-la,Math.max(0,f.total-paid));
-    const alloc=[];let skip=paid,left=fa;
-    f.heads.forEach(h=>{const before=Math.min(h.amount,skip);skip-=before;const take=Math.min(h.amount-before,left);left-=take;alloc.push({name:h.name,amount:h.amount,before,applied:take,after:before+take})});
-    paid+=fa;paidLate+=la;
-    if(!p.snap||refresh){p.balAfter=Math.max(0,f.total-paid);p.paidAfter=paid;p.late=la;p.feeAmt=fa;p.credit=p.amount-la-fa;p.alloc=alloc}
-    let cum=0;f.plan.forEach((pl,i)=>{cum+=pl.amt;if(!cleared[i]&&pl.amt>0&&paid>=cum)cleared[i]=p.date});
-  }
-  f.paid=paid;f.paidLate=paidLate;f.cleared=cleared;
-}
-function feeSum(s,on){
-  on=on||today();const f=s.fee;const late=lateAt(f,on,f.paid,f.cleared);
-  const lateDue=Math.max(0,late-f.lateWaived-f.paidLate);const balance=Math.max(0,f.total-f.paid);let cum=0;
-  const inst=f.plan.map(p=>{cum+=p.amt;const state=p.amt<=0||f.paid>=cum?'Paid':(f.paid>cum-p.amt?'Part-paid':'Due');
-    return{...p,cum,state,overdue:state!=='Paid'&&diffDays(on,p.due)>0,remaining:Math.max(0,Math.min(p.amt,cum-f.paid))}});
-  const payable=balance+lateDue;const nextInst=inst.find(i=>i.state!=='Paid');
-  return{total:f.total,paid:f.paid,balance,late,lateDue,payable,inst,nextInst,overdue:inst.some(i=>i.overdue),
-    status:payable<=0?'Paid':(f.paid===0&&f.paidLate===0?'Not paid':'Partial'),suggest:(nextInst?nextInst.remaining:0)+lateDue};
-}
+/* invoice date rules (spec §5.2)
+   CASH / CHEQUE / EXPENSE -> the date the user enters (default today, editable later)
+   UPI -> payment date in India + 1 day, never editable */
+const upiInvoiceDate=paidAt=>addDays(istDate(paidAt),1);
+function nextReceiptNo(){const c=db.college;const n=c.nextReceipt++;return`${c.receiptPrefix}${pad(n,4)}`}
 function recordPayment(s,o){
-  const date=o.date||today();const sm=feeSum(s,date);
-  if(!(o.amount>0))throw new Error('Enter an amount above ₹0');
-  if(o.amount>sm.payable)throw new Error(`Amount is more than the payable ${inr(sm.payable)}`);
-  if(o.channel==='counter'&&db.closures[date]&&!o.force)throw new Error('Today is closed. Ask the Principal to reopen the day.');
-  const p={id:uid('p'),rc:db.settings.receiptPrefix+(db.counters.rc++),studentId:s.id,feeId:s.fee.id,sem:s.fee.sem,date,ts:o.ts||Date.now(),
-    amount:o.amount,mode:o.mode,channel:o.channel,ref:o.ref||'',by:o.by||'System',status:'ok',settle:o.channel==='online'?{status:o.settle||'pending'}:null};
-  db.payments.push(p);recompute(s);p.snap=snapOf(p,s);return p;
+  /* o: {sem, mode, amount(paise), invoiceDate?, chequeNo?, bank?, chequeDate?, upiRef?, providerTxnId?, note?, paidAt?} */
+  const sm=semSummary(s,o.sem);
+  if(!(o.amount>0))throw new Error('Enter an amount greater than zero');
+  if(o.amount>sm.due)throw new Error(`Amount is more than the semester ${o.sem} due (${inr(sm.due)})`);
+  const entryAt=Date.now();
+  const invoiceDate=o.mode==='UPI'?upiInvoiceDate(o.paidAt||entryAt):o.invoiceDate;
+  if(!validIso(invoiceDate))throw new Error('Choose a valid invoice date');
+  const u=cur();
+  const p={id:uid('p'),studentId:s.id,sem:o.sem,mode:o.mode,amount:o.amount,invoiceDate,entryAt,paidAt:o.paidAt||entryAt,
+    chequeNo:o.chequeNo||'',bank:o.bank||'',chequeDate:o.chequeDate||'',upiRef:o.upiRef||'',providerTxnId:o.providerTxnId||'',note:o.note||'',
+    status:'SUCCESS',cancelReason:'',rc:nextReceiptNo(),depositId:'',by:u?u.name:'Payment gateway',byId:u?u.id:'',dateEdits:[]};
+  db.payments.push(p);
+  log('Payment recorded','Payment',p.rc,null,{student:s.enrol,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate)});
+  return p;
 }
-function cancelPayment(p,reason,refundMode){
-  if(!p)throw new Error('Receipt not found');
-  /* server-style guard: only a valid (Active) receipt can be cancelled, and never twice, so one receipt can never be refunded twice */
-  if(p.status!=='ok')throw new Error(`Receipt ${p.rc} is already ${p.status}. A receipt can be cancelled only once.`);
-  if(db.refunds.some(r=>r.paymentId===p.id))throw new Error(`Receipt ${p.rc} has already been refunded.`);
-  const s=stu(p.studentId);if(p.feeId!==s.fee.id)throw new Error('Only this semester\'s receipts can be cancelled');
-  p.status='cancelled';p.cancel={reason,by:cur().name,ts:Date.now(),refundMode};recompute(s,true);
-  db.refunds.push({id:uid('r'),paymentId:p.id,rc:p.rc,studentId:p.studentId,amount:p.amount,mode:refundMode,date:today(),reason,by:cur().name});
+function cancelPayment(p,reason){
+  need('fees.cancel','cancel receipts');
+  reason=capText(reason,'Reason',200);if(reason.length<4)throw new Error('Write the reason for cancelling (at least 4 characters)');
+  if(p.status!=='SUCCESS')throw new Error('Only a successful receipt can be cancelled');
+  if(p.depositId)throw new Error('This money is already marked as deposited. Undo the deposit first.');
+  p.status='CANCELLED';p.cancelReason=reason;p.cancelledAt=Date.now();p.cancelledBy=cur().name;
+  log('Receipt cancelled','Payment',p.rc,{status:'SUCCESS'},{status:'CANCELLED',reason});
 }
-const paysOf=(s,okOnly=true)=>db.payments.filter(p=>p.studentId===s.id&&(!okOnly||p.status==='ok')).sort((a,b)=>b.ts-a.ts);
-function cashExpected(date){
-  const cash=sum(db.payments.filter(p=>p.channel==='counter'&&p.mode==='Cash'&&p.date===date),p=>p.amount); /* cancelled receipts still count: the cash was received; the refund below takes it back out */
-  const ref=sum(db.refunds.filter(r=>r.date===date&&r.mode==='Cash'),r=>r.amount);return cash-ref;
+function editInvoiceDate(kind,rec,iso){
+  need('fees.editdate','change invoice dates');
+  if(!validIso(iso))throw new Error('Choose a valid date');
+  if(kind==='p'&&rec.mode==='UPI')throw new Error('UPI invoice date is fixed (payment date + 1 day)');
+  if(kind==='p'&&rec.status!=='SUCCESS')throw new Error('A cancelled receipt cannot be changed');
+  const field=kind==='p'?'invoiceDate':'date';const old=rec[field];if(old===iso)return false;
+  rec[field]=iso;(rec.dateEdits=rec.dateEdits||[]).push({at:Date.now(),from:old,to:iso,by:cur().name});
+  log('Invoice date changed',kind==='p'?'Payment':'Expense',kind==='p'?rec.rc:rec.ref,{date:fmtD(old)},{date:fmtD(iso)},'Receipt regenerated');
+  return true;
 }
-function attPct(s){
-  let p=0,t=0;Object.values(db.attendance).forEach(day=>{const r=day[s.div];if(r&&r.sem===s.sem&&r.marks[s.id]){t++;if(r.marks[s.id]==='P')p++}});
-  return t?Math.round(p/t*100):null;
-}
-function nextEnrol(courseId,batchId){
-  const c=course(courseId),b=batchOf(batchId);const pre=c.code+pad(b.startYear%100);
-  db.counters.enrol[pre]=(db.counters.enrol[pre]||0)+1;return pre+'-'+pad(db.counters.enrol[pre],3);
-}
-function makeStudent(d,by){
-  const c=course(d.course),b=batchOf(d.batch);const id=d.id||nextEnrol(d.course,d.batch);
-  const docs={};DOCS.forEach(x=>docs[x[0]]=!!d.docs?.[x[0]]);
-  const start=d.start||today();
-  const s={id,name:d.name,course:d.course,batch:d.batch,div:d.div,sem:d.sem||1,gender:d.gender,dob:d.dob,category:d.category||'General',blood:d.blood||'',nationality:d.nationality||'Indian',
-    aadhaar:d.aadhaar||'',phone:d.phone,whatsapp:d.whatsapp||d.phone,email:d.email||'',address:d.address||'',city:d.city||'',pin:d.pin||'',
-    guardian:{name:d.gname||'',occupation:d.gocc||'',phone:d.gphone||'',income:d.ginc||'',email:d.gemail||''},
-    academic:{degree:d.degree||'',university:d.university||'',year:d.year||'',pct:d.pct||'',pgPct:d.pgPct||'',sub1:d.sub1||'',sub2:d.sub2||'',rank:d.rank||''},
-    docs,status:'Active',admittedOn:d.admittedOn||today(),feeHistory:[],note:''};
-  s.fee=newFee({sem:s.sem,courseId:s.course,planName:d.planName||db.plans[1].name,start,concession:d.concession});
+
+/* ---------- enrolment numbers BED25-001 ---------- */
+function nextEnrol(courseId,year){const k=courseId+String(year).slice(2);const n=(db.counters.enrol[k]||0)+1;db.counters.enrol[k]=n;return`${k}-${pad(n,3)}`}
+function tempPassword(){const A='ABCDEFGHJKLMNPQRSTUVWXYZ',a='abcdefghjkmnpqrstuvwxyz',d='23456789',sy='@#$%&*!';const pick=s=>s[Math.floor(Math.random()*s.length)];
+  let p=[pick(A),pick(a),pick(d),pick(sy)];const all=A+a+d+sy;while(p.length<10)p.push(pick(all));return p.sort(()=>Math.random()-.5).join('')}
+/* due date of semester n: odd semesters fall in the admission's academic year (Jul-Dec), even ones in Jan-Jun of the next calendar year */
+function defaultDue(courseId,year,n){const d=db.settings.dueDates[courseId]||[];const md=d[n-1]||'';if(!/^\d{2}-\d{2}$/.test(md))return'';const [m,dd]=md.split('-').map(Number);const y=+year+Math.floor((n-1)/2)+(m<7?1:0);return`${y}-${pad(m)}-${pad(dd)}`}
+function makeStudent(d){
+  const s={id:uid('s'),enrol:d.enrol||nextEnrol(d.course,d.admissionYear),name:d.name,gender:d.gender||'',dob:d.dob||'',phone:d.phone||'',email:d.email||'',address:d.address||'',photo:d.photo||'',
+    course:d.course,admissionYear:+d.admissionYear,sem:+d.sem||1,category:d.category||'General',funding:d.funding||'CASH',scholarshipNote:d.scholarshipNote||'',status:d.status||'ACTIVE',
+    createdBy:d.createdBy||'System',createdAt:d.createdAt||Date.now(),
+    fees:[1,2,3,4].map(n=>({sem:n,amount:d.fees?d.fees[n-1]:db.settings.feeDefault[d.course][n-1],due:d.dues?d.dues[n-1]:defaultDue(d.course,d.admissionYear,n)}))};
+  if(!fundingApplies(s.category))s.funding='CASH';
   return s;
 }
+function createStudentLogin(s,pw,must){
+  const u={id:uid('u'),role:'Student',name:s.name,username:s.enrol.toLowerCase(),email:s.email,phone:s.phone,password:pw,mustChange:must,active:true,studentId:s.id,lastLoginAt:0};
+  db.users.push(u);s.userId=u.id;return u;
+}
 
-/* ---------- seed ---------- */
+/* ---------- sample data (spec §12: 1 Super Admin, 1 Principal, 1 Clerk, ~20 students, all 4 modes, a few notices) ---------- */
 function seed(){
-  const T=today();
-  db={ver:3,counters:{rc:2531,req:100,enrol:{}},
-   settings:{college:'Vidyapeeth College of Education',short:'Vidyapeeth',year:'2026–27',receiptPrefix:'RC-',lateFeePerDay:50,lateCap:1000,graceDays:5,dueOffsets:[0,45,90],city:'Ahmedabad'},
-   roles:JSON.parse(JSON.stringify(DEFAULT_ROLES)),
-   plans:[{name:'Full semester (1 payment)',pct:[100]},{name:'2 installments (50 / 50)',pct:[50,50]},{name:'3 installments (40 / 30 / 30)',pct:[40,30,30]}],
-   feeStructure:{bed:[{name:'Tuition fee',amount:19000},{name:'Practice teaching',amount:3000},{name:'Library & lab',amount:1500},{name:'University exam fee',amount:1800}],
-                 med:[{name:'Tuition fee',amount:24000},{name:'Dissertation & research',amount:4000},{name:'Library & lab',amount:1500},{name:'University exam fee',amount:2200}]},
-   courses:[{id:'bed',name:'B.Ed',code:'BED',full:'Bachelor of Education',semesters:4,intake:100,duration:'2 years'},{id:'med',name:'M.Ed',code:'MED',full:'Master of Education',semesters:4,intake:50,duration:'2 years'}],
-   batches:[{id:'b1',course:'bed',name:'2025–27',startYear:2025},{id:'b2',course:'bed',name:'2026–28',startYear:2026},{id:'b3',course:'med',name:'2025–27',startYear:2025},{id:'b4',course:'med',name:'2026–28',startYear:2026}],
-   divisions:[],subjects:[],staff:[],users:[],students:[],payments:[],refunds:[],requests:[],closures:{},attendance:{},marks:[],schools:[],practice:[],notices:[],messages:[],outbox:[],audit:[]};
-
-  /* staff + logins */
-  const S=[['st1','Rajiv Bhatt','College Administrator','Administration','MBA','Super Admin','admin','admin123'],
-   ['st2','Dr. Meena Acharya','Principal','Administration','Ph.D. (Education)','Principal','principal','principal123'],
-   ['st3','Bhavna Shukla','Accountant','Accounts','M.Com','Accountant','accountant','account123'],
-   ['st4','Nilesh Prajapati','Office Clerk','Admissions','B.Com','Clerk','clerk','clerk123'],
-   ['st5','Prof. Rakesh Dave','Assistant Professor','Pedagogy of Science','M.Ed, M.Sc','Faculty','faculty','faculty123'],
-   ['st6','Dr. Hetal Kothari','Associate Professor','Educational Psychology','Ph.D. (Psychology)','Faculty','hetal','faculty123'],
-   ['st7','Prof. Sunil Makwana','Assistant Professor','ICT in Education','M.Ed, M.C.A.','Faculty','sunil','faculty123'],
-   ['st8','Prof. Nirali Bhatt','Assistant Professor','Mathematics Education','M.Ed, M.Sc','Faculty','nirali','faculty123'],
-   ['st9','Kirti Gohil','Librarian','Library','M.Lib','None',null,null]];
-  /* Only five logins exist at first: Super Admin, Principal, Accountant, Parent and Student. Clerk and Faculty logins are created by the admin under Staff and Roles. */
-  const DEFAULT_LOGINS=['st1','st2','st3'];
-  S.forEach((r,i)=>{const userId=DEFAULT_LOGINS.includes(r[0])?'u_'+r[6]:null;
-    db.staff.push({id:r[0],name:r[1],designation:r[2],department:r[3],qualification:r[4],phone:'9'+pad(Math.floor(rnd()*1e4),4)+' '+pad(Math.floor(rnd()*1e5),5),email:(r[6]||'kirti')+'@vidyapeeth.example',joined:addDays(T,-(300+i*190)),role:r[5],status:r[0]==='st7'?'On leave':'Active',userId});
-    if(userId)db.users.push({id:userId,username:r[6],password:r[7],name:r[1],role:r[5],staffId:r[0],active:true})});
-
-  db.divisions=[{id:'d1',course:'bed',batch:'b1',name:'A',teacher:'st5',capacity:50},{id:'d2',course:'bed',batch:'b1',name:'B',teacher:'st8',capacity:50},
-   {id:'d3',course:'bed',batch:'b2',name:'A',teacher:'st6',capacity:50},{id:'d4',course:'bed',batch:'b2',name:'B',teacher:'st8',capacity:50},
-   {id:'d5',course:'med',batch:'b3',name:'A',teacher:'st6',capacity:25},{id:'d6',course:'med',batch:'b4',name:'A',teacher:'st5',capacity:25}];
-  const SUB={bed:{1:['Childhood and Growing Up','Contemporary India and Education','Language Across the Curriculum','Pedagogy of Science'],2:['Learning and Teaching','Assessment for Learning','Pedagogy of Mathematics'],3:['Knowledge and Curriculum','Gender, School and Society','ICT in Education','Teaching Internship'],4:['Creating an Inclusive School','Yoga and Health Education','Understanding the Self']},
-             med:{1:['Philosophy of Education','Research Methods in Education','Advanced Educational Psychology','Curriculum Studies'],2:['Sociology of Education','Statistics in Education','Teacher Education'],3:['Educational Technology','Educational Measurement','Dissertation Seminar','Comparative Education'],4:['Dissertation','Educational Management','Inclusive Education']}};
-  const FAC={1:['st5','st6'],2:['st5','st6'],3:['st7','st8'],4:['st7','st8']};let k=0;
-  Object.keys(SUB).forEach(c=>Object.keys(SUB[c]).forEach(sem=>SUB[c][sem].forEach((n,i)=>db.subjects.push({id:'sb'+(++k),course:c,sem:+sem,name:n,faculty:FAC[sem][i%2]}))));
-
-  /* students */
-  const names=[
-   ['Aarav Patel','M','b1','d1','two',1],['Kinjal Shah','F','b1','d1','full1',1],['Nidhi Trivedi','F','b1','d1','half',1],['Foram Pandya','F','b1','d1','part',1],['Mehul Desai','M','b1','d1','none',1],
-   ['Jignesh Rana','M','b1','d2','two',1],['Hetvi Modi','F','b1','d2','two',2],['Parth Joshi','M','b1','d2','half',1],['Zalak Dave','F','b1','d2','full1',0],
-   ['Riya Joshi','F','b2','d3','half',1],['Harsh Parmar','M','b2','d3','two',1],['Dhara Gajjar','F','b2','d3','none',1],['Vivek Solanki','M','b2','d3','part',1,{type:'mgmt',amount:5000,status:'pending',requestedBy:'Nilesh Prajapati'}],['Mansi Thakkar','F','b2','d3','full1',0],
-   ['Pooja Rathod','F','b2','d4','half',1,{type:'gov',amount:0,status:'approved',approvedBy:'Dr. Meena Acharya'}],['Yash Chauhan','M','b2','d4','two',1],['Tanvi Raval','F','b2','d4','part',1],['Krish Amin','M','b2','d4','none',1],['Disha Bhatt','F','b2','d4','two',1,{type:'mgmt',amount:5000,status:'approved',approvedBy:'Dr. Meena Acharya'}],
-   ['Dhruvi Mehta','F','b3','d5','two',1],['Kunal Bhatt','M','b3','d5','half',1],['Ankita Shukla','F','b3','d5','full1',1],
-   ['Sneha Vyas','F','b4','d6','two',1],['Jay Solanki','M','b4','d6','none',1],['Hiral Jani','F','b4','d6','part',1]];
-  const subj=['Science','Mathematics','English','Gujarati','Social Science','Hindi'];
-  const start=addDays(T,-60);
-  names.forEach((r,i)=>{
-    const b=batchOf(r[2]);const sem=b.startYear===2025?3:1;const last=r[0].split(' ').pop();
-    const docs={};DOCS.forEach((x,j)=>docs[x[0]]=j<5?(i%6!==4||j<3):rnd()>.6);
-    const s=makeStudent({name:r[0],gender:r[1],course:b.course,batch:b.id,div:r[3],sem,dob:`${1998+Math.floor(rnd()*6)}-${pad(1+Math.floor(rnd()*12))}-${pad(1+Math.floor(rnd()*27))}`,
-      category:['General','OBC (SEBC)','General','SC','EWS'][i%5],blood:['A+','B+','O+','AB+'][i%4],aadhaar:`${4000+i*37} ${1000+i*91} ${2000+i*53}`,
-      phone:'9'+pad(Math.floor(rnd()*1e4),4)+' '+pad(Math.floor(rnd()*1e5),5),email:r[0].toLowerCase().replace(/\s/g,'.')+'@example.com',address:`${10+i}, Shantinagar Society`,city:'Ahmedabad',pin:'3800'+pad(10+i),
-      gname:'Shri '+(['Rajesh','Kishor','Mukesh','Dinesh','Hitesh'][i%5])+' '+last,gemail:slugMail('Shri '+(['Rajesh','Kishor','Mukesh','Dinesh','Hitesh'][i%5])+' '+last)+'@example.com',gocc:['Shop owner','Teacher','Farmer','Clerk','Business'][i%5],gphone:'9'+pad(Math.floor(rnd()*1e4),4)+' '+pad(Math.floor(rnd()*1e5),5),ginc:['₹1–3 lakh','₹3–6 lakh','Below ₹1 lakh'][i%3],
-      degree:['B.Sc','B.A.','B.Com'][i%3],university:'Gujarat University',year:String(2023+(i%2)),pct:String(58+Math.floor(rnd()*30)),pgPct:b.course==='med'?String(62+i%20):'',sub1:subj[i%6],sub2:subj[(i+2)%6],rank:String(100+i*17),
-      id:null,docs,planName:db.plans[r[5]].name,start,concession:r[6],admittedOn:addDays(T,-62)});
-    db.students.push(s);
-    /* seeded payments */
-    const sm=()=>feeSum(s,T);const ts0=d=>parseD(d).getTime()+(10+i%6)*3600e3;
-    const pay=(daysAgo,amt,mode)=>{if(amt<=0)return;const date=addDays(T,-daysAgo);const ch=mode==='Cash'||mode==='Cheque / DD'?'counter':'online';
-      const p=recordPayment(s,{amount:amt,mode,channel:ch,date,ts:ts0(date),by:'Bhavna Shukla',ref:ch==='online'?'UTR'+(300000000000+i*7919+daysAgo):(mode==='Cheque / DD'?'Cheque '+(500100+i):''),force:true,settle:daysAgo>3?'matched':'pending'});
-      if(p.settle&&p.settle.status==='matched')p.settle.on=addDays(date,1)};
-    const modes=['Google Pay (UPI)','Cash','Any UPI app','Cash','Cheque / DD','Card / Net banking'];const m=modes[i%6],m2=modes[(i+3)%6];
-    const P=r[4],pl=s.fee.plan;
-    if(P==='full1')pay(59,s.fee.total,m);
-    else if(P==='half')pay(59,pl[0].amt,m);
-    else if(P==='two'){pay(59,pl[0].amt,m);pay(20,pl[1].amt,m2)}
-    else if(P==='part')pay(58,Math.min(8000,pl[0].amt-1000),m);
-    if(i===9)pay(2,1000,'Google Pay (UPI)');
-    if(i===0)pay(0,0,'Cash');
+  _seed=11;const T=today();const Y=+T.slice(0,4);const yNow=+T.slice(5,7)>=7?Y:Y-1;
+  db={ver:DB_VER,
+    college:{name:"The New Progressive College of Teachers' Education",short:'NPCTE',trust:'Karve Trust',address:"'PRASAD' Building, Karve Campus, Mahesana 384001",phone:'02762 220395',email:'npcte@yahoo.co.in',website:'https://npcte.org',receiptPrefix:'NPCTE/'+String(yNow).slice(2)+'-',nextReceipt:1,year:`${yNow}-${String(yNow+1).slice(2)}`},
+    settings:{feeDefault:{BED:[3000000,3000000,3000000,3000000],MED:[3000000,3000000,3000000,3000000]},
+      dueDates:{BED:['11-15','04-30','11-15','04-30'],MED:['11-15','04-30','11-15','04-30']},reminderDays:7,
+      flags:{expenseReducesDue:false,fundingAllCategories:false,lateFee:false},
+      upi:{provider:'Razorpay',vpa:'npcte@okaxis',mode:'Sandbox',googlePay:false},
+      mail:{mode:'demo',fromName:"NPCTE Accounts",replyTo:'npcte@yahoo.co.in',sendReceipts:true,sendCredentials:true},
+      sound:true,expenseCats:['Purchase','Fee adjustment','Maintenance','Other']},
+    courses:[{id:'BED',name:'B.Ed',semesters:4},{id:'MED',name:'M.Ed',semesters:4}],
+    roles:DEFAULT_ROLES(),
+    users:[
+      {id:'u_admin',role:'Super Admin',name:'Virat Sathavara',username:'admin',email:'admin@npcte.org',phone:'',password:'admin123',mustChange:false,active:true,lastLoginAt:0},
+      {id:'u_prin',role:'Principal',name:'Principal, NPCTE',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0},
+      {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0}],
+    students:[],payments:[],expenses:[],deposits:[],notices:[],notifs:[],audit:[],outbox:[],upiOrders:[],enquiries:[],
+    counters:{enrol:{},exp:1}};
+  /* sample names only (demo) */
+  const names=[['Riya Joshi','F'],['Hardik Patel','M'],['Kinjal Prajapati','F'],['Mehul Chaudhary','M'],['Nirali Desai','F'],['Jignesh Rabari','M'],['Pooja Solanki','F'],['Ankit Thakor','M'],['Bhumi Modi','F'],['Kaushal Vaghela','M'],
+    ['Dhara Shah','F'],['Nikunj Parmar','M'],['Foram Raval','F'],['Ravi Makwana','M'],['Krupa Trivedi','F'],['Vishal Dabhi','M'],['Sneha Panchal','F'],['Darshan Zala','M'],['Hetal Barot','F'],['Sagar Vankar','M']];
+  const cats=['General','OBC','SC','General','EWS','ST','OBC','SC','General','ST','General','OBC','SC','EWS','General','ST','OBC','General','SC','OBC'];
+  names.forEach(([n,g],i)=>{
+    const c=i<13?'BED':'MED';const yr=i%2?yNow-1:yNow;const sem=yr===yNow?1:3;const cat=cats[i];
+    const fees=[3000000,3000000,3000000,3000000];if(i===4)fees[1]=2500000;if(i===9)fees.fill(2000000);
+    const s=makeStudent({name:n,gender:g,dob:`${2000+(i%5)}-${pad(1+i%12)}-${pad(3+i)}`,phone:'98'+String(25000000+i*7919).padStart(8,'0'),email:n.toLowerCase().replace(/\s+/g,'.')+'@example.com',address:['Mahesana','Visnagar','Unjha','Kadi','Patan'][i%5]+', Gujarat',
+      course:c,admissionYear:yr,sem,category:cat,funding:(cat==='SC'||cat==='ST')&&i%2===0?'SCHOLARSHIP':'CASH',scholarshipNote:(cat==='SC'||cat==='ST')&&i%2===0?'Government post-matric scholarship':'',fees,createdBy:'System',createdAt:Date.now()-(40-i)*864e5});
+    db.students.push(s);createStudentLogin(s,'student123',false);
+    s.cred={status:'Sent (demo)',at:Date.now()-(40-i)*864e5,to:s.email};
   });
-  /* cash day closures for older days */
-  [59,58,20].forEach(d=>{const date=addDays(T,-d);const ex=cashExpected(date);db.closures[date]={date,expected:ex,counted:ex,diff:0,reason:'',by:'Bhavna Shukla',ts:parseD(date).getTime()+18*3600e3}});
-  /* attendance */
-  const dates=[];for(let d=24;d>=1;d--){const dt=addDays(T,-d);if(parseD(dt).getDay()!==0)dates.push(dt)}
-  const pr={};db.students.forEach(s=>pr[s.id]=0.7+rnd()*.28);
-  dates.forEach(dt=>{db.attendance[dt]={};db.divisions.forEach(dv=>{const marks={};db.students.filter(s=>s.div===dv.id).forEach(s=>marks[s.id]=rnd()<pr[s.id]?'P':'A');db.attendance[dt][dv.id]={sem:db.students.find(s=>s.div===dv.id).sem,marks}})});
-  /* marks */
-  [['d1',3],['d2',3],['d3',1],['d5',3]].forEach(([dv,sem])=>{const d=divOf(dv);db.subjects.filter(x=>x.course===d.course&&x.sem===sem).slice(0,2).forEach(sb=>{
-    const scores={};db.students.filter(s=>s.div===dv).forEach(s=>scores[s.id]=String(10+Math.floor(rnd()*10)));
-    db.marks.push({id:uid('m'),divId:dv,subjectId:sb.id,sem,exam:'Internal 1',max:20,scores,by:sb.faculty})})});
-  /* practice teaching */
-  db.schools=[{id:'sc1',name:'Shardamandir Vidyalaya',city:'Ahmedabad',mentor:'Smt. Jayshree Parikh'},{id:'sc2',name:'Gyan Jyot High School',city:'Ahmedabad',mentor:'Shri Anil Vora'},{id:'sc3',name:'Navrachna Vidyalaya',city:'Gandhinagar',mentor:'Smt. Rupal Shah'},{id:'sc4',name:'Sarvodaya Secondary School',city:'Ahmedabad',mentor:'Shri Manoj Desai'},{id:'sc5',name:'Saraswati Shishu Mandir',city:'Gandhinagar',mentor:'Smt. Heena Trivedi'}];
-  db.students.filter(s=>s.course==='bed'&&s.sem===3).forEach((s,i)=>db.practice.push({id:uid('pt'),studentId:s.id,schoolId:db.schools[i%5].id,phase:'Phase 2',start:addDays(T,-14),end:addDays(T,14),score:i<4?String(16+i):'',notes:i<4?'Lesson plans well prepared. Good class control.':''}));
-  /* notices + messages + audit */
-  db.notices=[{id:uid('n'),title:'Fee deadline for second installment',body:'Second installment was due 15 days ago. Please pay online from the parent portal or at the accounts counter to avoid further late fee.',audience:'all',date:addDays(T,-6),by:'Dr. Meena Acharya'},
-    {id:uid('n'),title:'Practice teaching Phase 2',body:'B.Ed Semester 3 students begin Phase 2 school placement. Report to your allotted school by 9 am.',audience:'bed',date:addDays(T,-14),by:'Rajiv Bhatt'}];
-  db.messages=[];db.audit=[];
-  migrate();ntSeed();
-  db.audit.push({id:uid('a'),ts:Date.now()-864e5,user:'System',role:'-',action:'Demo data created',detail:'25 students, 9 staff, receipts and attendance were loaded.'});
+  /* payments in all 4 modes, dated in the last few weeks */
+  const by=db.users[2];const mk=(s,sem,mode,amt,dAgo,extra={})=>{const ts=Date.now()-dAgo*864e5-3600e3*(1+(dAgo%5));const inv=mode==='UPI'?upiInvoiceDate(ts):addDays(today(),-dAgo-(extra.back||0));
+    db.payments.push(Object.assign({id:uid('p'),studentId:s.id,sem,mode,amount:amt,invoiceDate:inv,entryAt:ts,paidAt:ts,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'SUCCESS',cancelReason:'',rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:mode==='UPI'?'Payment gateway':by.name,byId:mode==='UPI'?'':by.id,dateEdits:[]},extra.f||{}))};
+  const S=db.students;
+  S.forEach((s,i)=>{
+    const f1=semFee(s,1).amount;
+    if(i%5===0)mk(s,1,'UPI',f1,2+i);
+    else if(i%5===1)mk(s,1,'CASH',f1,3+i,{back:i%3});
+    else if(i%5===2)mk(s,1,'CHEQUE',Math.round(f1/2),4+i,{f:{chequeNo:String(100200+i),bank:['SBI','Bank of Baroda','Mehsana Urban Co-op Bank'][i%3],chequeDate:addDays(today(),-6-i)}});
+    else if(i%5===3)mk(s,1,'CASH',1500000,1+i);
+    if(s.sem===3){mk(s,2,i%2?'UPI':'CASH',semFee(s,2).amount,60+i);mk(s,1,'CASH',f1,200+i)}
+  });
+  /* one cancelled receipt */
+  const pc=db.payments.find(p=>p.mode==='CASH');if(pc){const s=stu(pc.studentId);const extra={id:uid('p'),studentId:s.id,sem:pc.sem,mode:'CASH',amount:500000,invoiceDate:addDays(today(),-9),entryAt:Date.now()-9*864e5,paidAt:Date.now()-9*864e5,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'CANCELLED',cancelReason:'Entered twice by mistake',cancelledAt:Date.now()-9*864e5+6e5,cancelledBy:by.name,rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:by.name,byId:by.id,dateEdits:[]};db.payments.push(extra)}
+  db.payments.forEach(p=>{if(p.mode==='UPI'){p.upiRef='UTR'+String(400000000000+Math.floor(rnd()*9e10));p.providerTxnId='pay_'+Math.floor(rnd()*1e12).toString(36)}});
+  /* expenses */
+  [['Library books purchase','Purchase',350000,5,null],['Fee adjustment – sem 1 duplicate entry','Fee adjustment',200000,8,S[3]],['Projector repair','Maintenance',180000,12,null],['Stationery for exam cell','Purchase',95000,20,null]]
+    .forEach(([r,c,a,d,s])=>db.expenses.push({id:uid('x'),ref:'EXP-'+pad(db.counters.exp++,4),studentId:s?s.id:'',sem:s?1:null,amount:a,reason:r,category:c,date:addDays(today(),-d),entryAt:Date.now()-d*864e5,by:by.name,byId:by.id,dateEdits:[]}));
+  /* an older deposit so the report shows both deposited and pending money */
+  const old=db.payments.filter(p=>p.status==='SUCCESS'&&(p.mode==='CASH'||p.mode==='CHEQUE')&&diffDays(today(),p.invoiceDate)>40);
+  if(old.length){const dp={id:uid('d'),type:'CASH+CHEQUE',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,p=>p.amount),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}
+  /* notices */
+  db.notices=[
+    {id:uid('n'),title:'Semester 1 fee – last date',body:'All B.Ed and M.Ed Semester 1 students: please pay the semester fee at the accounts office or online (UPI) by the last date. Keep the receipt for your record.',audience:{type:'all'},isFeeAlert:true,isPublic:false,publishAt:Date.now()-3*864e5,createdBy:'Principal, NPCTE',attachment:null},
+    {id:uid('n'),title:'Internship (practice teaching) orientation',body:'B.Ed Semester 3 students must attend the orientation in the seminar hall on Monday at 10:30 am.',audience:{type:'sem',course:'BED',sem:3},isFeeAlert:false,isPublic:false,publishAt:Date.now()-6*864e5,createdBy:'Principal, NPCTE',attachment:null},
+    {id:uid('n'),title:'Library timings',body:'The college library is open from 9:00 am to 5:00 pm on all working days.',audience:{type:'all'},isFeeAlert:false,isPublic:true,publishAt:Date.now()-10*864e5,createdBy:'Accounts Clerk',attachment:null}];
+  db.audit=[];log('Sample data loaded','System','',null,null,'Demo data created');
+  if(typeof ntSeed==='function')ntSeed();
 }

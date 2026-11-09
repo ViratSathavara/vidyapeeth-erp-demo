@@ -1,29 +1,29 @@
 /* Layout: login split screen; app = left rail + top bar + one working canvas (side drawers for detail). Two themes: light and dark. */
 :root{
-  --bg:#f6f7f9; --surface:#ffffff; --sunk:#eef0f4; --line:#e2e5ea;
-  --fg:#0f172a; --muted:#5b6472;
-  --accent:#2563eb; --accent-soft:#e8f0fe; --accent-fg:#ffffff;
-  --marigold:#2563eb; --marigold-soft:#eef4ff;
+  --bg:#f5f6f9; --surface:#ffffff; --sunk:#eef0f4; --line:#e2e5ea;
+  --fg:#14213d; --muted:#5b6472;
+  --accent:#14284b; --accent-soft:#e8edf7; --accent-fg:#ffffff;
+  --marigold:#b8862b; --marigold-soft:#fbf3e2;
   --good:#15803d; --good-soft:#dcfce7; --warn:#b45309; --warn-soft:#fef3c7; --bad:#b91c1c; --bad-soft:#fee2e2;
-  --rail:#ffffff; --rail-fg:#475569; --rail-hover:#f1f5f9; --rail-active:#e8f0fe; --rail-active-fg:#1d4ed8; --rail-line:#e2e5ea; --rail-strong:#0f172a;
-  --art:#172554; --art-fg:#c7d2fe; --art-strong:#ffffff;
+  --rail:#14284b; --rail-fg:#c3cde2; --rail-hover:#1d3561; --rail-active:#25427a; --rail-active-fg:#f3d9a4; --rail-line:#24406f; --rail-strong:#ffffff;
+  --art:#14284b; --art-fg:#c3cde2; --art-strong:#ffffff;
   --badge-bg:#b91c1c; --badge-fg:#ffffff; --field-line:#7f8a9d;
   --shadow:0 1px 2px rgba(15,23,42,.06),0 1px 3px rgba(15,23,42,.08);
   --display:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif; --body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#0b0f17; --surface:#131a26; --sunk:#1a2231; --line:#263043; --fg:#e6eaf2; --muted:#94a0b4;
-  --accent:#60a5fa; --accent-soft:#172a4d; --accent-fg:#0b1220; --marigold:#60a5fa; --marigold-soft:#111d36;
+  --bg:#0a0f1c; --surface:#111a2d; --sunk:#17223a; --line:#24314d; --fg:#e6eaf2; --muted:#94a0b4;
+  --accent:#e0b25a; --accent-soft:#3a2d12; --accent-fg:#1a1405; --marigold:#e0b25a; --marigold-soft:#3a2d12;
   --good:#4ade80; --good-soft:#12301f; --warn:#fbbf24; --warn-soft:#3a2c0c; --bad:#f87171; --bad-soft:#3b1717;
-  --rail:#0f1520; --rail-fg:#9aa6ba; --rail-hover:#182131; --rail-active:#172a4d; --rail-active-fg:#93c5fd; --rail-line:#263043; --rail-strong:#e6eaf2;
+  --rail:#0c1630; --rail-fg:#9aa6ba; --rail-hover:#14244a; --rail-active:#1d3561; --rail-active-fg:#f3d9a4; --rail-line:#1d2c4f; --rail-strong:#e6eaf2;
   --art:#0a1020; --art-fg:#9aa6ba; --art-strong:#e6eaf2;
   --badge-bg:#d32020; --badge-fg:#ffffff; --field-line:#66748f;
   --shadow:0 1px 2px rgba(0,0,0,.4); color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#0b0f17; --surface:#131a26; --sunk:#1a2231; --line:#263043; --fg:#e6eaf2; --muted:#94a0b4;
-  --accent:#60a5fa; --accent-soft:#172a4d; --accent-fg:#0b1220; --marigold:#60a5fa; --marigold-soft:#111d36;
+  --bg:#0a0f1c; --surface:#111a2d; --sunk:#17223a; --line:#24314d; --fg:#e6eaf2; --muted:#94a0b4;
+  --accent:#e0b25a; --accent-soft:#3a2d12; --accent-fg:#1a1405; --marigold:#e0b25a; --marigold-soft:#3a2d12;
   --good:#4ade80; --good-soft:#12301f; --warn:#fbbf24; --warn-soft:#3a2c0c; --bad:#f87171; --bad-soft:#3b1717;
-  --rail:#0f1520; --rail-fg:#9aa6ba; --rail-hover:#182131; --rail-active:#172a4d; --rail-active-fg:#93c5fd; --rail-line:#263043; --rail-strong:#e6eaf2;
+  --rail:#0c1630; --rail-fg:#9aa6ba; --rail-hover:#14244a; --rail-active:#1d3561; --rail-active-fg:#f3d9a4; --rail-line:#1d2c4f; --rail-strong:#e6eaf2;
   --art:#0a1020; --art-fg:#9aa6ba; --art-strong:#e6eaf2;
   --badge-bg:#d32020; --badge-fg:#ffffff; --field-line:#66748f;
   --shadow:0 1px 2px rgba(0,0,0,.4); color-scheme:dark}

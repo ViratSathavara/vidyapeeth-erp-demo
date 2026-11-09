@@ -1,0 +1,15 @@
+{
+  "name": "npcte-erp-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NPCTE College ERP - Phase 1 demo (B.Ed / M.Ed, Karve Trust, Mehsana). Single-file app, data in browser localStorage.",
+  "scripts": {
+    "start": "node serve.js",
+    "build": "bash src/make-index.sh",
+    "check": "bash src/make-index.sh --check",
+    "test": "node tests/logic.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

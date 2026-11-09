@@ -1,269 +1,219 @@
 /* =====================================================================
-   Staff and roles, messages and notices, reports, audit log, settings
+   Notice Board (§8) · Audit (§7) · Settings, Roles & Permissions (§2, §11)
    ===================================================================== */
-/* ----- staff & roles ----- */
-const SYS_ROLES=['None',...ROLE_NAMES];
-function viewStaff(){
-  const t=ui.tab.staff||'staff';
-  const acts=can('staff.manage')?'<button class="btn primary" data-act="addStaff">+ Add staff</button>':'';
-  const body=t==='roles'?staffRoles():`<div class="panel" style="padding:6px 8px"><div class="tablewrap"><table><thead><tr><th>Name</th><th>Designation</th><th>Department</th><th>System role</th><th>Login</th><th>Status</th><th></th></tr></thead><tbody>
-   ${db.staff.map(s=>{const u=db.users.find(x=>x.id===s.userId);return`<tr><td><div class="who"><div class="av">${E(initials(s.name))}</div><div>${E(s.name)}<br><small class="muted">${E(s.qualification)}</small></div></div></td><td>${E(s.designation)}</td><td>${E(s.department)}</td><td>${s.role==='None'?pill('No login'):pill(s.role,'acc')}</td>
-   <td>${u?`<span class="mono">${E(u.username)}</span> ${u.active?pill('On','good'):pill('Off','bad')}`:s.role!=='None'?pill('Login not created','warn'):'—'}</td><td>${pill(s.status,s.status==='Active'?'good':s.status==='On leave'?'warn':'bad')}</td><td>${can('staff.manage')?`<button class="btn sm" data-act="editStaff" data-id="${E(s.id)}">Edit</button>`:''}</td></tr>`}).join('')}</tbody></table></div></div>`;
-  return head('Staff and Roles','Every person gets their own login. The role decides which menus and actions they get.',acts)+tabsBar('staff',[['staff','Staff and logins'],['roles','Role permissions']],t)+body;
-}
-function staffRoles(){
-  const edit=can('roles.manage');
-  return`<div class="panel"><p class="note" style="margin:0 0 10px">${edit?'Tick or clear a box to change what a role can do. Changes apply the next time that person opens a page.':'Only the admin can change role permissions.'} Super Admin always has everything.</p><div class="tablewrap"><table class="matrix"><thead><tr><th>Permission</th>${ROLE_NAMES.map(r=>`<th>${E(r)}</th>`).join('')}</tr></thead><tbody>
-  ${PERMS.map(p=>`<tr><td>${E(p[1])}</td>${ROLE_NAMES.map(r=>`<td><input type="checkbox" aria-label="${E(r)}: ${E(p[1])}" ${r==='Super Admin'||(db.roles[r]||[]).includes(p[0])?'checked':''} ${r==='Super Admin'||!edit?'disabled':''} data-change="permToggle" data-role="${E(r)}" data-p="${E(p[0])}"></td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`;
-}
-CHG.permToggle=el=>{if(!can('roles.manage'))throw new Error('Only the admin can change permissions');const r=el.dataset.role,p=el.dataset.p;const set=new Set(db.roles[r]||[]);el.checked?set.add(p):set.delete(p);db.roles[r]=[...set];log('Permission changed',`${r}: ${PERMS.find(x=>x[0]===p)[1]} ${el.checked?'granted':'removed'}`);{const lb=PERMS.find(x=>x[0]===p)[1];notify('system','Permissions changed',`${r}: ${lb} ${el.checked?'granted':'removed'} by ${cur().name}.`,{tone:'warn',go:{staff:['staff','roles']}});notify('account','Your access changed',`“${lb}” was ${el.checked?'given to':'removed from'} the ${r} role by ${cur().name}. It applies the next time you open a page.`,{uids:db.users.filter(x=>x.role===r&&x.active).map(x=>x.id),roles:[],tone:'info'})}save();renderNav()};
-const staffForm=s=>`<form data-form="saveStaff" data-id="${E(s?s.id:'')}" class="form" style="margin-top:12px">${F('name','Full name',{val:s?.name,req:1,span:1,attrs:`maxlength="${NAME_MAX}"`})}${F('designation','Designation',{val:s?.designation,req:1})}${F('department','Department',{val:s?.department})}${F('qualification','Qualification',{val:s?.qualification})}${F('phone','Mobile',{val:s?.phone})}${F('email','Email',{val:s?.email,type:'email'})}${F('joined','Joined on',{type:'date',val:s?.joined||today()})}
-  ${F('status','Status',{opts:['Active','On leave','Left'],val:s?.status||'Active'})}${F('role','System role',{opts:SYS_ROLES,val:s?.role||'None'})}${(()=>{const u=s&&db.users.find(x=>x.id===s.userId);return F('username','Login username',{val:u?.username||'',ph:'Needed when a role is chosen'})+F('password','Password',{val:'',ph:u?'Leave blank to keep':'Min 6 characters'})})()}
-  <button class="btn primary span">${s?'Save changes':'Add staff'}</button></form>`;
-ACT.addStaff=()=>{need('staff.manage','manage staff');drawer(`<button class="btn x" data-act="close">Close</button><h2>Add staff</h2>${staffForm(null)}`)};
-ACT.editStaff=el=>{need('staff.manage','manage staff');if(!staffOf(el.dataset.id))throw new Error('Staff member not found');drawer(`<button class="btn x" data-act="close">Close</button><h2>Edit staff</h2>${staffForm(staffOf(el.dataset.id))}`)};
-FORM.saveStaff=(f,d)=>{
-  if(!can('staff.manage'))throw new Error('You do not have access to manage staff');
-  d.name=capText(d.name,'The staff name');if(!d.name)throw new Error('Enter the staff name');
-  let s=f.dataset.id?staffOf(f.dataset.id):null;const isNew=!s;let u=s&&db.users.find(x=>x.id===s.userId);const was=u?{role:u.role,active:u.active,un:u.username}:null;
-  if(d.role!=='None'){const un=(d.username||'').trim().toLowerCase();if(!un)throw new Error('Enter a login username for this role');
-    if(db.users.some(x=>x.username.toLowerCase()===un&&x.id!==u?.id))throw new Error('This username is already taken');
-    if(!u&&(d.password||'').length<6)throw new Error('Password must be at least 6 characters');if(d.password&&d.password.length<6)throw new Error('Password must be at least 6 characters')}
-  if(isNew){s={id:uid('st'),userId:null};db.staff.push(s)}
-  Object.assign(s,{name:d.name.trim(),designation:d.designation,department:d.department,qualification:d.qualification,phone:d.phone,email:d.email,joined:d.joined,status:d.status,role:d.role});
-  if(d.role==='None'){if(u)u.active=false}
-  else{if(!u){u={id:uid('u'),username:'',password:'',role:d.role,staffId:s.id,active:true};db.users.push(u);s.userId=u.id}
-    u.username=d.username.trim();u.name=s.name;u.role=d.role;if(d.password)u.password=d.password;u.active=d.status!=='Left'}
-  if(u&&u.id===sesGet()&&!u.active)sesDel();
-  log(isNew?'Staff added':'Staff edited',`${s.name} (${d.role})`);
-  if(u&&d.role!=='None'){const ch=[];if(isNew||!was)ch.push('created');else{if(was.role!==u.role)ch.push('role changed to '+u.role);if(d.password)ch.push('password reset by the administrator');if(was.un!==u.username)ch.push('username changed');if(!was.active&&u.active)ch.push('switched on')}
-    if(ch.length){const by=(cur()||{name:'the administrator'}).name,made=ch[0]==='created';notify('account',`Your login was ${made?'created':'updated'}`,`${ch.join(', ')}. Username: ${u.username}.`,{uids:[u.id],roles:[],tone:'info'});notify('account',`Login ${made?'created':'updated'} · ${s.name}`,`${ch.join(', ')} (by ${by}).`,{tone:'info',go:{staff:['staff']}})}}save();closeLayer();toast(isNew?'Staff added. They can sign in now.':'Saved');if(!cur()){renderLogin();return}renderApp();
-};
 
-/* ----- messages ----- */
-function viewMessages(){
-  const tabs=(can('messages.send')?[['remind','Send reminders']]:[]).concat([['notices','Notices'],['log','Message log']]);let t=ui.tab.messages;if(!tabs.find(x=>x[0]===t))t=ui.tab.messages=tabs[0][0];
-  const body=t==='remind'?msgRemind():t==='notices'?msgNotices():msgLog();
-  return head('Messages and Notices','Send fee reminders and notices. In this demo, messages are written to the log instead of going out on WhatsApp or SMS.')+tabsBar('messages',tabs,t)+body;
+/* ---------- notices ---------- */
+const MAX_ATT=450*1024;
+function publishNotice(n,cat){
+  if(n.publishAt>Date.now())return 0;n.sent=true;
+  const k=cat||'notice';
+  return notify(k,(n.isFeeAlert&&k==='notice'?'Fee alert: ':'')+n.title,String(n.body).slice(0,160),{audience:n.audience,key:'notice:'+n.id,portal:'snotices',staff:'notices',tone:n.isFeeAlert?'warn':'info',self:true});
 }
-function msgRemind(){
-  const f=ui.f.remind=ui.f.remind||{only:'1',kind:'reminder',channel:'WhatsApp'};
-  const l=dueList().filter(x=>!f.only||x.sm.overdue);const sample=l[0]?tpl(f.kind,l[0].s):'';
-  return`<div class="grid two"><div class="panel"><h2>Students with dues</h2><form data-form="sendRemind"><div class="filters"><select aria-label="Who" data-change="remindF" data-k="only"><option value="1" ${f.only?'selected':''}>Overdue only</option><option value="" ${f.only?'':'selected'}>All with dues</option></select></div>
-   <div class="tablewrap"><table><thead><tr><th></th><th>Student</th><th>Guardian mobile</th><th class="num">Payable</th></tr></thead><tbody>${l.map(x=>`<tr><td><input type="checkbox" name="ids" value="${E(x.s.id)}" checked aria-label="Select ${E(x.s.name)}"></td><td>${E(x.s.name)}</td><td>${E(x.s.whatsapp)}</td><td class="num amt">${inr(x.sm.payable)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">No students match.</td></tr>'}</tbody></table></div>
-   <div class="form" style="margin-top:12px">${F('kind','Message',{opts:[['reminder','Fee reminder'],['overdue','Overdue notice']],val:f.kind,attrs:'data-change="remindF" data-k="kind"'})}${F('channel','Send by',{opts:['WhatsApp','SMS'],val:f.channel,attrs:'data-change="remindF" data-k="channel"'})}<button class="btn gold span" ${l.length?'':'disabled'}>Send to selected</button></div></form></div>
-   <div class="panel"><h2>Preview</h2>${sample?`<div class="bubble">${E(sample)}</div><p class="note">Example for ${E(l[0].s.name)}. Each message is filled in for its own student.</p>`:'<p class="note">Nothing to preview.</p>'}<p class="note">WhatsApp messages need templates approved by WhatsApp before the live system can send them, and parents must agree to receive them.</p></div></div>`;
+/* scheduled notices go out when their time comes (the server does this with a job queue) */
+setInterval(()=>{if(!db||!cur())return;let n=0;db.notices.forEach(x=>{if(!x.sent&&x.publishAt<=Date.now()){n+=publishNotice(x)>0?1:0;x.sent=true}});if(n){save();updateBell()}},15000);
+const unreadNotices=u=>{if(!u||u.role!=='Student')return 0;const s=stu(u.studentId);const r=new Set(u.readNotices||[]);return studentNotices(s).filter(n=>!r.has(n.id)).length};
+const studentNotices=s=>db.notices.filter(n=>n.publishAt<=Date.now()&&audienceStudents(n.audience).some(x=>x.id===s.id)).sort((a,b)=>b.publishAt-a.publishAt);
+function viewNotices(){
+  need('notices.post','the notice board');const f=ui.f.notices=Object.assign({q:'',kind:''},ui.f.notices||{});const q=f.q.toLowerCase();
+  const l=db.notices.filter(n=>(!f.kind||(f.kind==='fee'?n.isFeeAlert:f.kind==='public'?n.isPublic:f.kind==='scheduled'?n.publishAt>Date.now():true))&&(!q||(n.title+' '+n.body).toLowerCase().includes(q))).sort((a,b)=>b.publishAt-a.publishAt);
+  return head('Notice Board','Notices reach students in their portal with a live notification, sound and a phone popup.','<button class="btn primary" data-act="newNotice">New notice</button>')+
+  `<div class="panel"><div class="filters"><input type="search" placeholder="Search notices" aria-label="Search notices" data-live="sq" data-scope="notices" value="${E(f.q)}">${sel('notices','kind','Type',[['','All notices'],['fee','Fee alerts'],['scheduled','Scheduled'],['public','Public (website)']])}</div>
+  <div class="nlist">${l.map(n=>{const reach=audienceStudents(n.audience).length;const sched=n.publishAt>Date.now();return`<article class="ncard">
+   <div class="nc-h"><h3>${E(n.title)}</h3><div class="actions">${n.isFeeAlert?pill('Fee alert','warn'):''}${n.isPublic?pill('Public','acc'):''}${sched?pill('Scheduled '+fmtT(n.publishAt),'warn'):pill('Published','good')}</div></div>
+   <p>${E(n.body)}</p>${n.attachment?`<button class="lnk" data-act="openAtt" data-id="${E(n.id)}">📎 ${E(n.attachment.name)} (${fmtSize(n.attachment.size)})</button>`:''}
+   <small class="muted">${E(audienceLabel(n.audience))} · ${reach} student${reach===1?'':'s'} · ${sched?'goes out':'sent'} ${fmtT(n.publishAt)} · by ${E(n.createdBy)}</small>
+   <div class="actions" style="margin-top:8px"><button class="btn sm danger" data-act="delNotice" data-id="${E(n.id)}">Delete</button></div></article>`}).join('')||'<p class="empty">No notices yet.</p>'}</div></div>`;
 }
-CHG.remindF=el=>{ui.f.remind[el.dataset.k]=el.value;renderPage()};
-FORM.sendRemind=(form,d)=>{if(!can('messages.send'))throw new Error('You do not have access to send messages');const ids=$$('input[name=ids]:checked',form).map(i=>i.value);if(!ids.length)throw new Error('Select at least one student');
-  ids.forEach(id=>{sendMsg(d.kind,stu(id),d.channel);notifyReminder(stu(id),d.kind)});log('Reminders sent',`${ids.length} by ${d.channel}`);save();toast(`${ids.length} messages written to the log`);ui.tab.messages='log';renderPage()};
-function msgNotices(){
-  const audName=a=>a==='all'?'Everyone':(course(a)?.name+' students');
-  return`<div class="grid two"><div class="panel"><h2>Notices</h2><div class="list">${db.notices.map(n=>`<div class="li" style="align-items:flex-start"><div><b>${E(n.title)}</b><small>${fmtD(n.date)} · ${E(n.by)} · for ${E(audName(n.audience))}</small><p style="margin:6px 0 0">${E(n.body)}</p></div>${can('notices.post')?`<button class="btn sm danger" data-act="delNotice" data-id="${E(n.id)}" aria-label="Delete notice">×</button>`:''}</div>`).join('')||'<p class="note">No notices yet.</p>'}</div></div>
-   ${can('notices.post')?`<div class="panel"><h2>Post a notice</h2><form data-form="addNotice" class="form">${F('title','Title',{req:1,span:1})}${F('audience','For',{opts:[['all','Everyone'],...db.courses.map(c=>[c.id,c.name+' students'])]})}<span></span>${F('body','Message',{type:'textarea',req:1,span:1,rows:4})}<button class="btn primary span">Post notice</button></form><p class="note">Parents see notices in their portal.</p></div>`:''}</div>`;
+function noticeForm(){
+  const sts=db.students.filter(s=>s.status==='ACTIVE').sort((a,b)=>a.name.localeCompare(b.name));
+  return`<button class="btn x" data-act="close">Close</button><h2>New notice</h2>
+  <form data-form="notice" class="grid" style="gap:12px;margin-top:12px">${F('title','Title',{req:true,attrs:'maxlength="100"'})}${F('body','Message',{type:'textarea',req:true,rows:5,attrs:'maxlength="2000"'})}
+   <div class="field"><span class="label">Attachment (PDF or image, optional, up to 450 KB)</span><label class="btn sm" style="width:fit-content"><input type="file" class="sr" accept="application/pdf,image/*" data-change="noticeFile"> Choose file</label><small id="attName" class="muted"></small></div>
+   <div class="form">${F('aud','Send to',{opts:[['all','All students'],['BED','B.Ed (all semesters)'],['MED','M.Ed (all semesters)'],['sem','A semester'],['students','Selected students'],['one','One student']],attrs:'data-change="audType"'})}
+    <div class="field" id="audSem" hidden><label class="label" for="f_semc">Semester</label><select id="f_semc" name="semc">${db.courses.flatMap(c=>SEMS.map(n=>`<option value="${c.id}-${n}">${E(c.name)} Sem ${n}</option>`)).join('')}</select></div></div>
+   <div class="field" id="audStu" hidden><span class="label">Students</span><input type="search" placeholder="Filter list" aria-label="Filter students" data-live="audFilter"><div class="picklist" id="audList">${sts.map(s=>`<label data-n="${E((s.name+' '+s.enrol).toLowerCase())}"><input type="checkbox" name="sid" value="${E(s.id)}"> ${E(s.name)} <small class="muted">${E(s.enrol)} · ${E(classLabel(s))}</small></label>`).join('')}</div></div>
+   <div class="form">${F('when','Publish at (optional · empty = now)',{type:'datetime-local'})}<div class="field"><span class="label">Tags</span><label class="chk"><input type="checkbox" name="fee"> Fee alert</label><label class="chk"><input type="checkbox" name="pub"> Public (show on college website)</label></div></div>
+   <div class="actions"><button class="btn primary big">Publish notice</button><button type="button" class="btn" data-act="close">Cancel</button></div></form>`;
 }
-FORM.addNotice=(f,d)=>{if(!can('notices.post'))throw new Error('You do not have access to post notices');db.notices.unshift({id:uid('n'),title:d.title,body:d.body,audience:d.audience,date:today(),by:cur().name});log('Notice posted',d.title);notify('notice',d.title,String(d.body||'').slice(0,140),{course:d.audience,tone:'info',go:{staff:['messages','notices'],portal:'pnotices'}});save();toast('Notice posted');renderPage()};
-ACT.delNotice=el=>{need('notices.post','notices');db.notices=db.notices.filter(n=>n.id!==el.dataset.id);save();renderPage()};
-function msgLog(){
-  return`<div class="panel"><h2>Message log ${pill(String(db.messages.length))}</h2><div class="list">${db.messages.slice(0,60).map(m=>`<div class="li" style="align-items:flex-start"><div><span class="label">${E(m.channel)} · ${E(m.kind)} · to ${E(m.studentId&&stu(m.studentId)?stu(m.studentId).guardian.name+' ('+m.to+')':m.to)}</span><div class="bubble" style="margin-top:6px">${E(m.text)}</div></div><div class="right"><small class="muted">${fmtT(m.ts)}</small><br>${pill(m.status,'good')}</div></div>`).join('')||'<p class="note">No messages yet. Collect a payment or send a reminder.</p>'}</div></div>`;
-}
+ACT.newNotice=()=>{need('notices.post');ui.att=null;drawer(noticeForm(),true,'New notice');$('#f_title').focus()};
+CHG.audType=el=>{$('#audSem').hidden=el.value!=='sem';$('#audStu').hidden=!(el.value==='students'||el.value==='one');$$('#audList input').forEach(i=>i.type=el.value==='one'?'radio':'checkbox')};
+LIVE.audFilter=el=>{const q=el.value.toLowerCase();$$('#audList label').forEach(l=>l.hidden=!!q&&!l.dataset.n.includes(q))};
+CHG.noticeFile=el=>{const file=el.files&&el.files[0];if(!file)return;if(!/^(application\/pdf|image\/)/.test(file.type))throw new Error('Only PDF or image files');if(file.size>MAX_ATT)throw new Error('File is larger than 450 KB. In the live system files go to cloud storage; this demo keeps them in the browser.');
+  const r=new FileReader();r.onload=()=>{ui.att={name:file.name.slice(0,80),type:file.type,size:file.size,data:r.result};$('#attName').textContent=file.name+' · '+fmtSize(file.size)};r.readAsDataURL(file)};
+FORM.notice=(f,d)=>{
+  need('notices.post');const title=capText(d.title,'Title',100),body=capText(d.body,'Message',2000);if(title.length<3||body.length<3)throw new Error('Write a title and a message');
+  let a;const t=d.aud;if(t==='all')a={type:'all'};else if(t==='BED'||t==='MED')a={type:'course',course:t};else if(t==='sem'){const[c,n]=d.semc.split('-');a={type:'sem',course:c,sem:+n}}
+  else{const ids=new FormData(f).getAll('sid');if(!ids.length)throw new Error('Choose at least one student');a={type:'students',ids:t==='one'?ids.slice(0,1):ids}}
+  let at=Date.now();if(d.when){at=new Date(d.when).getTime();if(!(at>0))throw new Error('Check the publish time');if(at<Date.now()-6e4)throw new Error('Publish time is in the past. Leave it empty to publish now.')}
+  const reach=audienceStudents(a).length;if(!reach)throw new Error('No active student is in this audience');
+  const n={id:uid('n'),title,body,audience:a,isFeeAlert:!!d.fee,isPublic:!!d.pub,publishAt:at,createdBy:cur().name,attachment:ui.att,sent:false};
+  db.notices.unshift(n);const sent=publishNotice(n);log('Notice posted','Notice',n.id,null,{title,to:audienceLabel(a),at:fmtT(at)});ui.att=null;
+  if(!save()){db.notices.shift();throw new Error('Not enough browser storage for this attachment. Try a smaller file.')}
+  closeLayer();renderPage();toast(at>Date.now()?`Scheduled for ${fmtT(at)} · ${reach} students`:`Published to ${reach} students${sent?' · live notification sent':''}`)};
+ACT.delNotice=el=>{need('notices.post');const n=db.notices.find(x=>x.id===el.dataset.id);confirmBox('Delete notice',`“${n.title}” will be removed from every student's notice board.`,'Delete',()=>{db.notices=db.notices.filter(x=>x!==n);log('Notice deleted','Notice',n.id,{title:n.title},null);save();renderPage();toast('Notice deleted')},true)};
+ACT.openAtt=el=>{const n=db.notices.find(x=>x.id===el.dataset.id);if(!n||!n.attachment)return;const u=cur();if(isStudentUser(u)&&!audienceStudents(n.audience).some(s=>s.id===u.studentId))throw new Error('403 · Not allowed');
+  const b=atob(n.attachment.data.split(',')[1]);const arr=new Uint8Array(b.length);for(let i=0;i<b.length;i++)arr[i]=b.charCodeAt(i);download(n.attachment.name,arr,n.attachment.type)};
 
-/* ----- reports ----- */
-const REPORTS=[
- {id:'daily',g:'Fees',perm:'reports.fees',name:'Daily fee collection',flt:['date'],run:f=>{const l=db.payments.filter(p=>p.date===f.date).sort((a,b)=>a.ts-b.ts);return{cols:['Receipt','Student','Class','Mode','Reference','Amount','Status'],rows:l.map(p=>[p.rc,stu(p.studentId).name,classLabel(stu(p.studentId)),p.mode,p.ref,p.amount,p.status==='ok'?'Valid':'Cancelled']),foot:`Valid receipts ${inr(sum(l.filter(p=>p.status==='ok'),p=>p.amount))} · cash ${inr(sum(l.filter(p=>p.status==='ok'&&p.mode==='Cash'),p=>p.amount))} · online ${inr(sum(l.filter(p=>p.status==='ok'&&p.channel==='online'),p=>p.amount))}`}}},
- {id:'defaulters',g:'Fees',perm:'reports.fees',name:'Defaulter list',flt:['course'],run:f=>{const l=dueList().filter(x=>!f.course||x.s.course===f.course);return{cols:['Enrolment','Student','Class','Guardian mobile','Fee balance','Late fee','Payable','Overdue'],rows:l.map(x=>[x.s.id,x.s.name,classLabel(x.s),x.s.guardian.phone,x.sm.balance,x.sm.lateDue,x.sm.payable,x.sm.overdue?'Yes':'No']),foot:`${l.length} students · ${inr(sum(l,x=>x.sm.payable))} payable`}}},
- {id:'heads',g:'Fees',perm:'reports.fees',name:'Fee head summary',flt:['course'],run:f=>{const names={};live().filter(s=>!f.course||s.course===f.course).forEach(s=>{s.fee.heads.forEach(h=>{names[h.name]=names[h.name]||{d:0,c:0};names[h.name].d+=h.amount});db.payments.filter(p=>p.studentId===s.id&&p.feeId===s.fee.id&&p.status==='ok').forEach(p=>(p.alloc||[]).forEach(a=>{names[a.name]=names[a.name]||{d:0,c:0};names[a.name].c+=a.applied}))});
-   const late=sum(db.payments.filter(p=>p.status==='ok'),p=>p.late||0);const rows=Object.entries(names).map(([n,v])=>[n,v.d,v.c,v.d-v.c]);rows.push(['Late fee collected','',late,'']);return{cols:['Fee head','Demand','Collected','Pending'],rows,foot:`Collected ${inr(sum(rows,r=>+r[2]||0))}`}}},
- {id:'conc',g:'Fees',perm:'reports.fees',name:'Concession register',flt:[],run:()=>{const l=db.students.filter(s=>s.fee.concession.status!=='none');return{cols:['Enrolment','Student','Type','Amount','Status','Requested by','Decided by'],rows:l.map(s=>{const c=s.fee.concession;return[s.id,s.name,c.type==='gov'?'Government scholarship':'Management',c.type==='gov'?s.fee.govReceivable:c.amount,c.status,c.requestedBy||'',c.approvedBy||'']})}}},
- {id:'mode',g:'Fees',perm:'reports.fees',name:'Online vs cash',flt:['range'],run:f=>{const l=db.payments.filter(p=>p.status==='ok'&&p.date>=f.from&&p.date<=f.to);const by={};l.forEach(p=>{by[p.mode]=by[p.mode]||{n:0,a:0};by[p.mode].n++;by[p.mode].a+=p.amount});const rows=Object.entries(by).map(([m,v])=>[m,ONLINE_MODES.includes(m)?'Online':m==='Imported'?'Imported':'Counter',v.n,v.a]);return{cols:['Mode','Channel','Receipts','Amount'],rows,foot:`Online ${inr(sum(l.filter(p=>p.channel==='online'),p=>p.amount))} · counter ${inr(sum(l.filter(p=>p.channel==='counter'),p=>p.amount))}`}}},
- {id:'bank',g:'Fees',perm:'reports.fees',name:'Bank matching',flt:[],run:()=>{const l=db.payments.filter(p=>p.channel==='online'&&p.status==='ok');return{cols:['Receipt','Date','Student','Reference','Amount','Bank status'],rows:l.map(p=>[p.rc,fmtD(p.date),stu(p.studentId).name,p.ref,p.amount,p.settle.status==='matched'?'Matched '+fmtD(p.settle.on):'Waiting']),foot:`Waiting ${inr(sum(l.filter(p=>p.settle.status==='pending'),p=>p.amount))}`}}},
- {id:'refunds',g:'Fees',perm:'reports.fees',name:'Cancelled receipts and refunds',flt:[],run:()=>({cols:['Receipt','Student','Date','Refund mode','Amount','Reason','By'],rows:db.refunds.map(r=>[r.rc,stu(r.studentId).name,fmtD(r.date),r.mode,r.amount,r.reason,r.by])})},
- {id:'gov',g:'Fees',perm:'reports.fees',name:'Scholarship receivable',flt:[],run:()=>{const l=db.students.filter(s=>s.fee.govReceivable>0);return{cols:['Enrolment','Student','Class','Receivable from portal'],rows:l.map(s=>[s.id,s.name,classLabel(s),s.fee.govReceivable]),foot:`Total ${inr(sum(l,s=>s.fee.govReceivable))}`}}},
- {id:'strength',g:'Students',perm:'reports.students',name:'Student strength',flt:[],run:()=>({cols:['Course','Batch','Division','Semester','Students','Seats'],rows:db.divisions.map(d=>[course(d.course).name,batchOf(d.batch).name,d.name,semOfDiv(d),db.students.filter(s=>s.div===d.id&&s.status==='Active').length,d.capacity])})},
- {id:'adm',g:'Students',perm:'reports.students',name:'Admission register',flt:['course'],run:f=>({cols:['Enrolment','Name','Gender','Category','Course','Batch','Admitted on','Guardian','Status'],rows:db.students.filter(s=>!f.course||s.course===f.course).map(s=>[s.id,s.name,s.gender,s.category,course(s.course).name,batchOf(s.batch).name,fmtD(s.admittedOn),s.guardian.name,admStatus(s)])})},
- {id:'docs',g:'Students',perm:'reports.students',name:'Documents pending',flt:[],run:()=>{const l=db.students.filter(s=>docsMissing(s));return{cols:['Enrolment','Student','Class','Missing required documents'],rows:l.map(s=>[s.id,s.name,classLabel(s),DOCS.filter(d=>d[2]&&!s.docs[d[0]]).map(d=>d[1]).join('; ')]),foot:`${l.length} students`}}},
- {id:'att',g:'Academic',perm:'reports.academic',name:'Attendance summary',flt:['div'],run:f=>({cols:['Enrolment','Student','Division','Attendance %','Below 75%'],rows:db.students.filter(s=>s.status==='Active'&&(!f.div||s.div===f.div)).map(s=>{const a=attPct(s);return[s.id,s.name,divName(divOf(s.div)),a===null?'':a,a!==null&&a<75?'Yes':'']})})},
- {id:'marks',g:'Academic',perm:'reports.academic',name:'Internal marks sheet',flt:['div','exam'],run:f=>{const d=divOf(f.div);if(!d)return{cols:['Info'],rows:[['Choose a division']]};const subs=db.subjects.filter(s=>s.course===d.course&&s.sem===semOfDiv(d));return{cols:['Enrolment','Student',...subs.map(s=>s.name)],rows:db.students.filter(s=>s.div===d.id&&s.status==='Active').map(s=>[s.id,s.name,...subs.map(sb=>{const r=db.marks.find(x=>x.divId===d.id&&x.subjectId===sb.id&&x.exam===f.exam);return r&&r.scores[s.id]!==undefined?r.scores[s.id]+'/'+r.max:''})])}}},
- {id:'practice',g:'Academic',perm:'reports.academic',name:'Practice teaching allotment',flt:[],run:()=>({cols:['Student','School','City','Mentor','Phase','From','To','Score'],rows:db.practice.map(p=>{const sc=db.schools.find(x=>x.id===p.schoolId);return[stu(p.studentId).name,sc?.name,sc?.city,sc?.mentor,p.phase,fmtD(p.start),fmtD(p.end),p.score]})})},
- {id:'staff',g:'Staff',perm:'reports.staff',name:'Staff register',flt:[],run:()=>({cols:['Name','Designation','Department','Qualification','Role','Status','Joined'],rows:db.staff.map(s=>[s.name,s.designation,s.department,s.qualification,s.role,s.status,fmtD(s.joined)])})}];
-function viewReports(){
-  const avail=REPORTS.filter(r=>can(r.perm));const f=ui.f.rep=ui.f.rep||{};if(!avail.find(r=>r.id===f.id))f.id=avail[0].id;
-  Object.assign(f,{date:f.date||today(),from:f.from||addDays(today(),-60),to:f.to||today(),course:f.course||'',exam:f.exam||'Internal 1'});if(!f.div||!divOf(f.div))f.div=myDivisions()[0]?.id||'';
-  const r=avail.find(x=>x.id===f.id);const res=r.run(f);const groups=[...new Set(avail.map(x=>x.g))];
-  const ctl=r.flt.map(k=>k==='date'?`<div class="field"><label class="label" for="rp_date">Date</label><input type="date" id="rp_date" value="${E(f.date)}" data-change="repF" data-k="date"></div>`:
-   k==='range'?`<div class="field"><label class="label" for="rp_from">From</label><input type="date" id="rp_from" value="${E(f.from)}" data-change="repF" data-k="from"></div><div class="field"><label class="label" for="rp_to">To</label><input type="date" id="rp_to" value="${E(f.to)}" data-change="repF" data-k="to"></div>`:
-   k==='course'?`<div class="field"><label class="label" for="rp_course">Course</label><select id="rp_course" data-change="repF" data-k="course"><option value="">All courses</option>${db.courses.map(c=>`<option value="${E(c.id)}" ${f.course===c.id?'selected':''}>${E(c.name)}</option>`).join('')}</select></div>`:
-   k==='div'?`<div class="field"><label class="label" for="rp_div">Division</label><select id="rp_div" data-change="repF" data-k="div"><option value="">All divisions</option>${db.divisions.map(d=>`<option value="${E(d.id)}" ${f.div===d.id?'selected':''}>${E(divName(d))}</option>`).join('')}</select></div>`:
-   `<div class="field"><label class="label" for="rp_exam">Exam</label><select id="rp_exam" data-change="repF" data-k="exam">${EXAMS.map(x=>`<option ${f.exam===x?'selected':''}>${x}</option>`).join('')}</select></div>`).join('');
-  const num=c=>/Amount|Payable|balance|Fee balance|Late fee|Demand|Collected|Pending|Receivable|Seats|Students|Receipts|%/i.test(c);
-  return head('Reports','Pick a report, set the filters and copy it as CSV for Excel.',`<button class="btn" data-act="exportReport">Copy as CSV</button>`)+
-  `<select class="repsel" aria-label="Choose a report" data-change="repPick">${groups.map(g=>`<optgroup label="${g}">${avail.filter(x=>x.g===g).map(x=>`<option value="${E(x.id)}" ${x.id===f.id?'selected':''}>${E(x.name)}</option>`).join('')}</optgroup>`).join('')}</select><div class="repgrid"><div class="panel repnav" style="padding:10px">${groups.map(g=>`<div class="label" style="padding:8px 8px 4px">${g}</div>${avail.filter(x=>x.g===g).map(x=>`<button class="btn" style="width:100%;text-align:left;margin-bottom:4px;${x.id===f.id?'background:var(--accent-soft);border-color:var(--accent)':''}" data-act="pickReport" data-id="${E(x.id)}">${E(x.name)}</button>`).join('')}`).join('')}</div>
-  <div class="panel"><h2>${E(r.name)} ${pill(res.rows.length+' rows')}</h2>${ctl?`<div class="filters">${ctl}</div>`:''}<div class="tablewrap"><table><thead><tr>${res.cols.map(c=>`<th class="${num(c)?'num':''}">${E(c)}</th>`).join('')}</tr></thead><tbody>${res.rows.map(row=>`<tr>${row.map((v,i)=>`<td class="${typeof v==='number'?'num':''}">${typeof v==='number'&&/Amount|Payable|balance|Late|Demand|Collected|Pending|Receivable/i.test(res.cols[i])?inr(v):E(v)}</td>`).join('')}</tr>`).join('')||`<tr><td colspan="${res.cols.length}" class="empty">No data for these filters.</td></tr>`}</tbody></table></div>${res.foot?`<p class="note"><b>${E(res.foot)}</b></p>`:''}</div></div>`;
-}
-ACT.pickReport=el=>{ui.f.rep.id=el.dataset.id;renderPage()};
-CHG.repPick=el=>{ui.f.rep.id=el.value;renderPage()};
-CHG.repF=el=>{ui.f.rep[el.dataset.k]=el.value;renderPage()};
-ACT.exportReport=()=>{const f=ui.f.rep;const r=REPORTS.find(x=>x.id===f.id);if(!r)throw new Error('Report not found');need(r.perm,'this report');const res=r.run(f);showCsv(r.name+' (CSV)',res.cols,res.rows)};
-
-/* ----- audit ----- */
+/* ---------- audit ---------- */
 function viewAudit(){
-  const q=(ui.f.audit||'').toLowerCase();const l=db.audit.filter(a=>!q||(a.action+' '+a.detail+' '+a.user).toLowerCase().includes(q)).slice(0,120);
-  return head('Audit Log','Who did what and when. Fee edits, waivers, cancellations and permission changes are all recorded.')+`<div class="filters"><input type="search" placeholder="Search the log" value="${E(ui.f.audit||'')}" data-live="auditQ" aria-label="Search the audit log"></div>
-  <div class="panel" style="padding:6px 8px"><div class="tablewrap"><table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead><tbody id="auditRows">${auditRows(l)}</tbody></table></div></div>`;
+  const tabs=[];if(can('audit.view'))tabs.push(['tx','Transactions'],['deposit','Cash & cheque deposit']);if(can('activity.view'))tabs.push(['activity','Activity log']);
+  let t=ui.tab.audit||tabs[0][0];if(!tabs.some(x=>x[0]===t))t=tabs[0][0];ui.tab.audit=t;
+  if(t==='activity')need('activity.view','the activity log');else need('audit.view','the audit');
+  return head('Audit','Every payment and expense, with filters, totals and exports.','')+tabsBar('audit',tabs,t)+({tx:auditTx,deposit:auditDeposit,activity:auditActivity}[t])();
 }
-const auditRows=l=>l.map(a=>`<tr><td>${fmtT(a.ts)}</td><td>${E(a.user)} ${a.role&&a.role!=='-'?pill(a.role):''}</td><td><b>${E(a.action)}</b></td><td style="white-space:normal;min-width:240px">${E(a.detail)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">Nothing in the log yet.</td></tr>';
-LIVE.auditQ=el=>{ui.f.audit=el.value;const q=el.value.toLowerCase();$('#auditRows').innerHTML=auditRows(db.audit.filter(a=>!q||(a.action+' '+a.detail+' '+a.user).toLowerCase().includes(q)).slice(0,120))};
+/* one row per payment or expense */
+function txAll(){
+  return db.payments.map(p=>{const s=stu(p.studentId);return{kind:'p',id:p.id,date:p.invoiceDate,entry:p.entryAt,s,sem:p.sem,mode:p.mode,amount:p.amount,ref:p.rc,status:p.status,by:p.by,rec:p}})
+   .concat(db.expenses.map(x=>{const s=x.studentId?stu(x.studentId):null;return{kind:'x',id:x.id,date:x.date,entry:x.entryAt,s,sem:x.sem,mode:'EXPENSE',amount:x.amount,ref:x.ref,status:'SUCCESS',by:x.by,rec:x,reason:x.reason}}));
+}
+function txFilter(){return ui.f['audit.tx']=Object.assign({q:'',modes:[],from:'',to:'',course:'',sem:'',cat:'',fund:'',status:'',by:'',min:'',max:'',sort:'date',dir:-1,page:0},ui.f['audit.tx']||{})}
+function txFiltered(){
+  const f=txFilter();const q=f.q.toLowerCase();const mn=f.min!==''?toPaise(f.min):null,mx=f.max!==''?toPaise(f.max):null;
+  let l=txAll().filter(r=>(!f.modes.length||f.modes.includes(r.mode))&&(!f.from||r.date>=f.from)&&(!f.to||r.date<=f.to)&&(!f.course||(r.s&&r.s.course===f.course))&&(!f.sem||r.sem===+f.sem)
+   &&(!f.cat||(r.s&&r.s.category===f.cat))&&(!f.fund||(r.s&&r.s.funding===f.fund))&&(!f.status||r.status===f.status)&&(!f.by||r.by===f.by)&&(mn===null||r.amount>=mn)&&(mx===null||r.amount<=mx)
+   &&(!q||[r.ref,r.s&&r.s.name,r.s&&r.s.enrol,r.reason,r.rec.chequeNo,r.rec.upiRef].some(v=>String(v||'').toLowerCase().includes(q))));
+  const k={date:r=>r.date+String(r.entry).padStart(14,'0'),entry:r=>r.entry,name:r=>r.s?r.s.name:'~',course:r=>r.s?r.s.course:'~',sem:r=>r.sem||0,cat:r=>r.s?r.s.category:'~',fund:r=>r.s?r.s.funding:'~',mode:r=>r.mode,amount:r=>r.amount,ref:r=>r.ref,status:r=>r.status,by:r=>r.by}[f.sort]||(r=>r.date);
+  l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l;
+}
+const txTotals=l=>{const ok=l.filter(r=>r.status==='SUCCESS');const o={};['CASH','CHEQUE','UPI','EXPENSE'].forEach(m=>o[m]=sum(ok.filter(r=>r.mode===m),r=>r.amount));o.income=o.CASH+o.CHEQUE+o.UPI;return o};
+function auditTx(){
+  const f=txFilter();const sc='audit.tx';const l=txFiltered();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);const t=txTotals(l);const bys=[...new Set(txAll().map(r=>r.by))];
+  return`<div class="totals">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)}</span><b>${inr(t[m])}</b></div>`).join('')}<div class="tt sum"><span>Fees received</span><b>${inr(t.income)}</b></div></div>
+  <div class="panel"><div class="filters"><input type="search" placeholder="Search receipt, name, cheque, UTR, reason" aria-label="Search transactions" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
+   <div class="chips" role="group" aria-label="Mode">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<button type="button" class="chip ${MODE_TONE[m]}" aria-pressed="${f.modes.includes(m)}" data-act="txMode" data-m="${m}">${modeName(m)}</button>`).join('')}</div>
+   <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label>
+   ${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'sem','Semester',SEM_OPTS)}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled'],['FAILED','Failed']])}${sel(sc,'by','Entered by',[['','Anyone'],...bys.map(b=>[b,b])])}
+   <input class="numin" placeholder="Min ₹" aria-label="Minimum amount" value="${E(f.min)}" data-change="sf" data-scope="${sc}" data-k="min" inputmode="decimal"><input class="numin" placeholder="Max ₹" aria-label="Maximum amount" value="${E(f.max)}" data-change="sf" data-scope="${sc}" data-k="max" inputmode="decimal">
+   <button class="btn sm" data-act="txClear">Clear</button></div>
+  <div class="actions" style="margin-bottom:10px"><span class="muted">${l.length} rows</span><span style="flex:1"></span><button class="btn" data-act="txCsv">Export Excel</button><button class="btn" data-act="txPrint">Export PDF</button></div>
+  <div class="tablewrap"><table class="dense"><thead><tr>${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entry time')}${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course')}${sortTh(sc,'sem','Sem')}${sortTh(sc,'cat','Category')}${sortTh(sc,'fund','Funding')}${sortTh(sc,'mode','Mode')}${sortTh(sc,'amount','Amount',1)}${sortTh(sc,'ref','Receipt / ref')}${sortTh(sc,'status','Status')}${sortTh(sc,'by','Entered by')}</tr></thead><tbody>
+  ${pg.map(r=>`<tr><td>${fmtD(r.date)}</td><td><small>${fmtT(r.entry)}</small></td><td>${r.s?`<button class="lnk" data-act="openStudent" data-id="${E(r.s.id)}">${E(r.s.name)}</button>`:`<span class="muted">${E(r.reason||'—')}</span>`}</td><td>${r.s?E(course(r.s.course).name):'—'}</td><td>${r.sem||'—'}</td><td>${r.s?E(r.s.category):'—'}</td><td>${r.s?E(fundLabel(r.s.funding)):'—'}</td><td>${modePill(r.mode)}</td><td class="num amt">${inr(r.amount)}</td><td class="mono">${r.kind==='p'?`<button class="lnk mono" data-act="viewReceipt" data-id="${E(r.id)}">${E(r.ref)}</button>`:E(r.ref)}</td><td>${payPill(r.status)}</td><td>${E(r.by)}</td></tr>`).join('')||'<tr><td colspan="12" class="empty">No transactions for these filters.</td></tr>'}
+  </tbody></table></div>${pager(sc,l.length)}</div>`;
+}
+ACT.txMode=el=>{const f=txFilter();const m=el.dataset.m;f.modes=f.modes.includes(m)?f.modes.filter(x=>x!==m):[...f.modes,m];f.page=0;renderPage()};
+ACT.txClear=()=>{const f=txFilter();ui.f['audit.tx']={sort:f.sort,dir:f.dir,page:0};renderPage()};
+const txCols=['Invoice date','Entry time','Student','Enrolment no','Course','Sem','Category','Funding','Mode','Amount (₹)','Receipt / ref','Status','Entered by','Cheque no','Bank','UPI ref','Reason'];
+const txRow=r=>[fmtD(r.date),fmtT(r.entry),r.s?r.s.name:'',r.s?r.s.enrol:'',r.s?course(r.s.course).name:'',r.sem||'',r.s?r.s.category:'',r.s?fundLabel(r.s.funding):'',modeName(r.mode),r.amount/100,r.ref,r.status,r.by,r.rec.chequeNo||'',r.rec.bank||'',r.rec.upiRef||'',r.reason||r.rec.cancelReason||''];
+ACT.txCsv=()=>{need('audit.view');const l=txFiltered();const t=txTotals(l);showCsv('NPCTE transactions',txCols,[...l.map(txRow),[],['Totals (successful)','','','','','','','','Cash',t.CASH/100],['','','','','','','','','Cheque',t.CHEQUE/100],['','','','','','','','','UPI',t.UPI/100],['','','','','','','','','Expense',t.EXPENSE/100]]);log('Audit exported','Audit','',null,{rows:l.length,format:'Excel'})};
+/* printable report with the college header: the browser's "Save as PDF" makes the PDF */
+function printReport(title,sub,cols,rows,foot){
+  const c=db.college;const w=$('#printArea')||document.body.appendChild(Object.assign(document.createElement('div'),{id:'printArea'}));
+  w.innerHTML=`<div class="ph"><div><b>${E(c.name)}</b><div>${E(c.trust)} · ${E(c.address)} · ${E(c.phone)}</div></div><div class="right"><b>${E(title)}</b><div>${E(sub)}</div><div>Printed ${E(fmtT(Date.now()))} by ${E(cur().name)}</div></div></div>
+   <table><thead><tr>${cols.map(x=>`<th>${E(x)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(v=>`<td>${E(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>${foot||''}`;
+  document.body.classList.add('printing');setTimeout(()=>{window.print();document.body.classList.remove('printing')},60);
+}
+ACT.txPrint=()=>{need('audit.view');const f=txFilter();const l=txFiltered();const t=txTotals(l);
+  printReport('Transactions audit',`${f.from?fmtD(f.from):'Start'} to ${f.to?fmtD(f.to):fmtD(today())}${f.modes.length?' · '+f.modes.map(modeName).join(', '):''}`,['Invoice date','Student','Course','Sem','Category','Funding','Mode','Amount','Receipt','Status','By'],
+   l.map(r=>[fmtD(r.date),r.s?r.s.name+' ('+r.s.enrol+')':r.reason,r.s?course(r.s.course).name:'',r.sem||'',r.s?r.s.category:'',r.s?fundLabel(r.s.funding):'',modeName(r.mode),inr(r.amount),r.ref,r.status,r.by]),
+   `<p class="pt">Cash ${inr(t.CASH)} · Cheque ${inr(t.CHEQUE)} · UPI ${inr(t.UPI)} · Expense ${inr(t.EXPENSE)} · Fees received ${inr(t.income)} · ${l.length} rows</p>`);log('Audit exported','Audit','',null,{rows:l.length,format:'PDF'})};
 
-/* ----- settings: one card per job ----- */
-const SET_IC={
- college:'<path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/>',
- access:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5M17 11l2 2 3.5-4"/>',
- fees:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/>',
- mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
- bell:'<path d="M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7M10 20a2 2 0 0 0 4 0"/>',
- data:'<ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
- reset:'<path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/>'};
-const setIc=k=>`<span class="sic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${SET_IC[k]}</svg></span>`;
-const setCard=(id,ic,title,desc,body,cls='')=>`<section class="scard ${cls}" id="set-${id}" aria-labelledby="set-${id}-h"><header class="shead">${setIc(ic)}<div><h2 id="set-${id}-h">${E(title)}</h2><p>${E(desc)}</p></div></header><div class="sbody">${body}</div></section>`;
-const setGroup=(id,title,cards,cls='')=>cards.filter(Boolean).length?`<div class="sgroup" id="set-g-${id}"><h3 class="sglabel">${E(title)}</h3><div class="sgrid ${cls}">${cards.filter(Boolean).join('')}</div></div>`:'';
+/* deposit report (§7A) */
+function weekStart(iso){const d=parseD(iso);const k=(d.getDay()+6)%7;return addDays(iso,-k)}
+function depPeriod(){const f=ui.f.dep=Object.assign({p:'week',from:'',to:''},ui.f.dep||{});const T=today();
+  if(f.p==='week')return{from:weekStart(T),to:addDays(weekStart(T),6),f};if(f.p==='lastweek'){const w=addDays(weekStart(T),-7);return{from:w,to:addDays(w,6),f}}
+  if(f.p==='month')return{from:T.slice(0,8)+'01',to:addDays(isoOf(new Date(+T.slice(0,4),+T.slice(5,7),1)),-1),f};
+  if(f.p==='lastmonth'){const d=new Date(+T.slice(0,4),+T.slice(5,7)-2,1);return{from:isoOf(d),to:addDays(isoOf(new Date(d.getFullYear(),d.getMonth()+1,1)),-1),f}}
+  return{from:f.from||addDays(T,-30),to:f.to||T,f}}
+function auditDeposit(){
+  const{from,to,f}=depPeriod();const inP=p=>p.invoiceDate>=from&&p.invoiceDate<=to&&p.status==='SUCCESS';
+  const pays=db.payments.filter(inP);const und=pays.filter(p=>(p.mode==='CASH'||p.mode==='CHEQUE')&&!p.depositId);const ex=db.expenses.filter(x=>x.date>=from&&x.date<=to);
+  const col=m=>{const l=m==='EXPENSE'?ex:pays.filter(p=>p.mode===m);return{t:sum(l,x=>x.amount),n:l.length,und:m==='CASH'||m==='CHEQUE'?sum(l.filter(p=>!p.depositId),p=>p.amount):null}};
+  const sc=can('audit.deposit');
+  return`<div class="panel"><h2>Cash & cheque deposit report</h2>
+   <div class="filters"><div class="chips" role="group" aria-label="Period">${[['week','This week'],['lastweek','Last week'],['month','This month'],['lastmonth','Last month'],['custom','Custom']].map(([k,l])=>`<button type="button" class="chip" aria-pressed="${f.p===k}" data-act="depP" data-p="${k}">${l}</button>`).join('')}</div>
+    ${f.p==='custom'?`<label class="dl">From <input type="date" value="${E(from)}" data-change="sf" data-scope="dep" data-k="from"></label><label class="dl">To <input type="date" value="${E(to)}" data-change="sf" data-scope="dep" data-k="to"></label>`:`<span class="muted">${fmtD(from)} to ${fmtD(to)}</span>`}</div>
+   <div class="totals four">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>{const c=col(m);return`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)} · ${c.n}</span><b>${inr(c.t)}</b>${c.und!==null?`<small>${c.und?inr(c.und)+' not deposited':'all deposited'}</small>`:`<small>${m==='UPI'?'goes to bank by gateway':'paid out'}</small>`}</div>`}).join('')}</div>
+   <h3>Not yet deposited · ${und.length} entries · ${inr(sum(und,p=>p.amount))}</h3>
+   <div class="tablewrap"><table><thead><tr>${sc?`<th><input type="checkbox" aria-label="Select all" data-change="depAll" checked></th>`:''}<th>Invoice date</th><th>Receipt</th><th>Student</th><th>Mode</th><th>Cheque</th><th class="num">Amount</th></tr></thead><tbody>
+   ${und.sort((a,b)=>a.invoiceDate<b.invoiceDate?-1:1).map(p=>`<tr>${sc?`<td><input type="checkbox" name="dep" value="${E(p.id)}" checked aria-label="Include ${E(p.rc)}" data-change="depCount"></td>`:''}<td>${fmtD(p.invoiceDate)}</td><td class="mono">${E(p.rc)}</td><td>${E(stu(p.studentId).name)}</td><td>${modePill(p.mode)}</td><td>${p.mode==='CHEQUE'?E(p.chequeNo+' · '+p.bank):'—'}</td><td class="num amt">${inr(p.amount)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nothing waiting to be deposited in this period.</td></tr>'}</tbody></table></div>
+   ${sc&&und.length?`<form data-form="deposit" class="form" style="margin-top:14px"><div class="field span"><b id="depSum">Selected: ${und.length} · ${inr(sum(und,p=>p.amount))}</b></div>${F('depositedOn','Deposited on',{type:'date',val:today(),req:true,attrs:`max="${today()}"`})}${F('bankRef','Bank slip / reference',{req:true,attrs:'maxlength="60"'})}<div class="actions span"><button class="btn primary big">Mark as deposited</button><button type="button" class="btn" data-act="depPrint">Print report</button></div></form>`:`<div class="actions" style="margin-top:12px"><button class="btn" data-act="depPrint">Print report</button></div>`}
+  </div>
+  <div class="panel" style="margin-top:16px"><h2>Deposits made</h2><div class="tablewrap"><table><thead><tr><th>Deposited on</th><th>Period</th><th>Entries</th><th class="num">Total</th><th>Bank ref</th><th>By</th><th></th></tr></thead><tbody>
+   ${db.deposits.slice().sort((a,b)=>b.at-a.at).map(d=>`<tr><td>${fmtD(d.depositedOn)}</td><td>${fmtD(d.periodFrom)} – ${fmtD(d.periodTo)}</td><td>${d.count}</td><td class="num amt">${inr(d.total)}</td><td>${E(d.bankRef)}</td><td>${E(d.by)}</td><td>${['Super Admin','Principal'].includes(cur().role)?`<button class="btn sm" data-act="depUndo" data-id="${E(d.id)}">Undo</button>`:''}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">No deposits yet.</td></tr>'}</tbody></table></div></div>`;
+}
+ACT.depP=el=>{depPeriod().f.p=el.dataset.p;renderPage()};
+const depChecked=()=>$$('input[name=dep]:checked').map(i=>db.payments.find(p=>p.id===i.value)).filter(Boolean);
+CHG.depCount=()=>{const l=depChecked();const s=$('#depSum');if(s)s.textContent=`Selected: ${l.length} · ${inr(sum(l,p=>p.amount))}`};
+CHG.depAll=el=>{$$('input[name=dep]').forEach(i=>i.checked=el.checked);CHG.depCount()};
+FORM.deposit=(f,d)=>{need('audit.deposit','mark deposits');const l=depChecked().filter(p=>p.status==='SUCCESS'&&!p.depositId&&(p.mode==='CASH'||p.mode==='CHEQUE'));if(!l.length)throw new Error('Select at least one entry');
+  if(!validIso(d.depositedOn)||d.depositedOn>today())throw new Error('Choose the deposit date');const ref=capText(d.bankRef,'Bank reference',60);if(ref.length<2)throw new Error('Enter the bank slip / reference');
+  const{from,to}=depPeriod();const types=[...new Set(l.map(p=>p.mode))];
+  const dp={id:uid('d'),type:types.join('+'),periodFrom:from,periodTo:to,total:sum(l,p=>p.amount),depositedOn:d.depositedOn,bankRef:ref,by:cur().name,at:Date.now(),count:l.length};
+  db.deposits.push(dp);l.forEach(p=>p.depositId=dp.id);log('Marked as deposited','Deposit',dp.id,null,{total:inr(dp.total),entries:dp.count,bankRef:ref,on:fmtD(dp.depositedOn)});save();renderPage();toast(`${inr(dp.total)} marked as deposited`)};
+ACT.depUndo=el=>{if(!['Super Admin','Principal'].includes(cur().role))throw new Error('Only the Principal can undo a deposit');const dp=db.deposits.find(x=>x.id===el.dataset.id);
+  confirmBox('Undo deposit',`${dp.count} entries (${inr(dp.total)}) go back to "not deposited".`,'Undo',()=>{db.payments.forEach(p=>{if(p.depositId===dp.id)p.depositId=''});db.deposits=db.deposits.filter(x=>x!==dp);log('Deposit undone','Deposit',dp.id,{total:inr(dp.total)},null);save();renderPage();toast('Deposit undone')},true)};
+ACT.depPrint=()=>{const{from,to}=depPeriod();const l=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&(p.mode==='CASH'||p.mode==='CHEQUE'));const ex=db.expenses.filter(x=>x.date>=from&&x.date<=to);const t=m=>inr(sum(db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&p.mode===m),p=>p.amount));
+  printReport('Cash & cheque deposit report',`${fmtD(from)} to ${fmtD(to)}`,['Invoice date','Receipt','Student','Mode','Cheque','Amount','Deposited'],l.map(p=>[fmtD(p.invoiceDate),p.rc,stu(p.studentId).name,modeName(p.mode),p.mode==='CHEQUE'?p.chequeNo+' '+p.bank:'',inr(p.amount),p.depositId?'Yes':'No']),
+   `<p class="pt">Cash ${t('CASH')} · Cheque ${t('CHEQUE')} · UPI ${t('UPI')} · Expense ${inr(sum(ex,x=>x.amount))} · Not deposited ${inr(sum(l.filter(p=>!p.depositId),p=>p.amount))}</p><p class="pt">Deposited by: ____________________ &nbsp; Checked by: ____________________</p>`)};
+
+/* activity log (§7B): read-only, Principal and Super Admin */
+function auditActivity(){
+  need('activity.view');const f=ui.f.act=Object.assign({q:'',role:'',from:'',to:'',page:0},ui.f.act||{});const q=f.q.toLowerCase();
+  const l=db.audit.filter(a=>(!f.role||a.role===f.role)&&(!f.from||istDate(a.at)>=f.from)&&(!f.to||istDate(a.at)<=f.to)&&(!q||[a.action,a.actor,a.entity,a.entityId,a.detail,JSON.stringify(a.after||''),JSON.stringify(a.before||'')].some(v=>String(v).toLowerCase().includes(q))));
+  const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);
+  return`<div class="panel"><h2>Activity log ${pill(l.length+' actions')}<button class="btn" data-act="actCsv">Export Excel</button></h2>
+   <div class="filters"><input type="search" placeholder="Search action, person, receipt, value" aria-label="Search activity" data-live="sq" data-scope="act" value="${E(f.q)}">${sel('act','role','Role',[['','All roles'],...ROLE_NAMES.map(r=>[r,r]),['System','System']])}
+    <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="act" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="act" data-k="to"></label></div>
+   <div class="tablewrap"><table class="dense"><thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Record</th><th>Before → after</th><th>IP · device</th></tr></thead><tbody>
+   ${pg.map(a=>`<tr><td><small>${fmtT(a.at)}</small></td><td>${E(a.actor)}<small class="muted" style="display:block">${E(a.role)}</small></td><td><b>${E(a.action)}</b>${a.detail?`<small class="muted" style="display:block">${E(a.detail)}</small>`:''}</td><td class="mono">${E(a.entity)}${a.entityId?' · '+E(a.entityId):''}</td><td><small>${E(diffText(a.before,a.after))||'—'}</small></td><td><small>${E(a.ip)}<br>${E(a.device)}</small></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Nothing found.</td></tr>'}</tbody></table></div>${pager('act',l.length)}
+   <p class="note">Read-only. Nobody can edit or delete these entries.</p></div>`;
+}
+ACT.actCsv=()=>{need('activity.view');showCsv('NPCTE activity log',['Time','Who','Role','Action','Entity','Record','Before','After','Detail','IP','Device'],db.audit.map(a=>[fmtT(a.at),a.actor,a.role,a.action,a.entity,a.entityId,JSON.stringify(a.before||''),JSON.stringify(a.after||''),a.detail,a.ip,a.device]))};
+
+/* ---------- settings ---------- */
 function viewSettings(){
-  const st=db.settings;const n=k=>db[k].length;const su=cur().role==='Super Admin';
-  const stat=(l,v)=>`<div class="li"><span>${l}</span><b>${v}</b></div>`;
-  const college=setCard('college','college','College profile','Name and academic year shown on receipts, messages and the sidebar.',`<form data-form="saveSettings" class="form">${F('college','College name',{val:st.college,req:1,span:1,attrs:`maxlength="${NAME_MAX}"`})}${F('short','Short name (messages)',{val:st.short,attrs:`maxlength="${NAME_MAX}"`})}${F('city','City',{val:st.city,attrs:`maxlength="${NAME_MAX}"`})}${F('year','Academic year',{val:st.year,attrs:'maxlength="20"'})}<button class="btn primary span">Save</button></form>`);
-  const access=setCard('access','access','Logins and roles','Who can sign in. Roles and their permissions are managed under Staff and Roles.',`<div class="list">${stat('Staff members',n('staff'))}${stat('Logins',n('users'))}${stat('Active logins',db.users.filter(u=>u.active!==false).length)}</div>${can('staff.view')?'<div class="actions" style="margin-top:12px"><button class="btn" data-act="go" data-to="staff">Open Staff and Roles</button></div>':''}`);
-  const fees=setCard('fees','fees','Fees and receipts','Current rules used for every payment. Change them in Fee setup.',`<div class="list">${stat('Next receipt number',E(st.receiptPrefix+db.counters.rc))}${stat('Late fee per day',inr(st.lateFeePerDay))}${stat('Late fee cap',inr(st.lateCap))}${stat('Grace days',E(st.graceDays))}${stat('Installments due after',E(st.dueOffsets.join(', '))+' days')}</div>${can('fees.setup')?'<div class="actions" style="margin-top:12px"><button class="btn" data-act="alertGo" data-to="fees" data-sub="setup">Open Fee setup</button></div>':''}`);
-  const mail=mailSettingsPanel();
-  const nt=su?ntRulesPanel():'';
-  const data=setCard('data','data','Data and backup','Everything is kept in this browser (localStorage). Another browser or device starts with its own sample data.',`<div class="list">${stat('Students',n('students'))}${stat('Receipts',n('payments'))}${stat('Audit entries',n('audit'))}</div><div class="actions" style="margin-top:12px"><button class="btn" data-act="backupOut">Show backup</button><button class="btn" data-act="backupIn">Restore from backup</button></div>`);
-  const reset=setCard('reset','reset','Reset demo','Wipes every change you made and brings back the original sample students, fees and logins.',`<div class="actions"><button class="btn danger" data-act="resetDemo">Reset to sample data</button></div>`,'danger');
-  const jump=[['college','College'],['fees','Fees and receipts'],['mail','Email'],...(su?[['notify','Notifications']]:[]),['data','Data and backup']];
-  return head('Settings','Everything that can be configured, grouped by what it controls.')+
-   `<nav class="sjump" aria-label="Jump to a settings card">${jump.map(([k,l])=>`<button type="button" data-act="setJump" data-to="${E(k)}">${E(l)}</button>`).join('')}</nav>`+
-   setGroup('org','College and access',[college,access])+setGroup('fin','Fees and email',[fees,mail],'one')+(nt?`<div class="sgroup" id="set-g-notify"><h3 class="sglabel">Notifications</h3><div class="sgrid one">${nt}</div></div>`:'')+setGroup('data','Data',[data,reset]);
+  const tabs=[];if(can('settings.manage'))tabs.push(['college','College profile']);if(can('fees.setup'))tabs.push(['fees','Fees & receipts']);if(can('roles.manage'))tabs.push(['roles','Roles & permissions']);
+  if(cur().role==='Super Admin')tabs.push(['users','Staff logins']);if(can('settings.manage'))tabs.push(['mail','Email & alerts'],['flags','Open items']);if(cur().role==='Super Admin')tabs.push(['data','Data']);
+  let t=ui.tab.settings||tabs[0][0];if(!tabs.some(x=>x[0]===t))t=tabs[0][0];ui.tab.settings=t;
+  return head('Settings',`${db.college.short} · ${db.college.trust}`,'')+tabsBar('settings',tabs,t)+({college:setCollege,fees:()=>feeSetup(),roles:setRoles,users:setUsers,mail:setMail,flags:setFlags,data:setData}[t])();
 }
-/* scroll to the card; when it sits in the first row of its group, scroll to the group so the group label is visible too */
-ACT.setJump=el=>{const t=document.getElementById('set-'+el.dataset.to);if(t){const g=t.closest('.sgroup'),f=g&&g.querySelector('.scard'),top=g&&f&&Math.abs(t.getBoundingClientRect().top-f.getBoundingClientRect().top)<2;(top?g:t).scrollIntoView({behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth',block:'start'});t.classList.add('flash');setTimeout(()=>t.classList.remove('flash'),1400)}};
-FORM.saveSettings=(f,d)=>{if(!can('settings.manage'))throw new Error('You do not have access to settings');const col=capText(d.college,'The college name'),sh=capText(d.short,'The short name'),ct=capText(d.city,'The city'),yr=capText(d.year,'The academic year',20);if(!col)throw new Error('Enter the college name');Object.assign(db.settings,{college:col,short:sh||col,city:ct,year:yr});log('Settings changed','College details');save();toast('Saved');renderApp()};
-/* ----- backup and restore: settings.manage only. A backup never contains passwords or the mail access key; they stay in this browser. ----- */
-function backupText(){
-  const c=JSON.parse(JSON.stringify(db));
-  c.users.forEach(u=>{delete u.password});
-  if(c.settings&&c.settings.mail)delete c.settings.mail.key;
-  return JSON.stringify(c);
-}
-ACT.backupOut=()=>{need('settings.manage','backups');drawer(`<button class="btn x" data-act="close">Close</button><h2>Backup</h2><p class="note">Copy this text and keep it safe. Paste it into Restore to bring the data back. Passwords and the mail access key are not included: they stay in this browser, and anyone restored on a new device gets a temporary password.</p><textarea class="csvbox" id="csvText" readonly>${E(backupText())}</textarea><div class="actions" style="margin-top:12px"><button class="btn primary" data-act="copyCsv">Copy to clipboard</button></div>`,true)};
-ACT.backupIn=()=>{need('settings.manage','backups');drawer(`<button class="btn x" data-act="close">Close</button><h2>Restore from backup</h2><p class="note">The backup is checked first and refused if anything in it looks wrong. Existing logins keep their current password. A login that is not on this device gets a temporary password that you will see once.</p><form data-form="restore" class="grid" style="gap:12px;margin-top:12px"><textarea class="csvbox" name="json" required placeholder="Paste backup text here"></textarea><button class="btn danger">Replace all data with this backup</button></form>`,true)};
-/* shape check: s text, i id, n number, d date, b true/false, o object, a list; a leading ? means optional; "x|y" lists the allowed words */
-const BK_ID=/^[A-Za-z0-9_.-]{1,64}$/,BK_DATE=/^\d{4}-\d\d-\d\d$/,BK_NUM=/^\d+(\.\d+)?$/;
-const BK_ROLES=[...ROLE_NAMES,'Parent','Student'].join('|'),BK_SYS=['None',...ROLE_NAMES].join('|');
-const BK={
- user:{id:'i',username:'s',name:'s',role:BK_ROLES,active:'b',studentId:'?i',staffId:'?i',mustChange:'?b'},
- staff:{id:'i',name:'s',designation:'?s',department:'?s',qualification:'?s',phone:'?s',email:'?s',joined:'?d',role:BK_SYS,status:'s',userId:'?i'},
- student:{id:'i',name:'s',course:'i',batch:'i',div:'i',sem:'n',status:'s',phone:'s',whatsapp:'?s',email:'?s',address:'?s',city:'?s',pin:'?s',category:'?s',gender:'?s',dob:'?d',admittedOn:'?d',guardian:'o',academic:'o',docs:'o',fee:'o',feeHistory:'a'},
- guardian:{name:'?s',phone:'?s',email:'?s',occupation:'?s',income:'?s'},
- academic:{degree:'?s',university:'?s',year:'?s',pct:'?s',pgPct:'?s',sub1:'?s',sub2:'?s',rank:'?s'},
- fee:{id:'i',sem:'n',total:'n',paid:'n',paidLate:'n',lateWaived:'n',prev:'?n',planName:'s',start:'d',heads:'a',plan:'a',base:'a',concession:'o',cleared:'a',govReceivable:'?n'},
- concession:{type:'none|gov|mgmt',amount:'n',status:'none|pending|approved|rejected',requestedBy:'?s',approvedBy:'?s',why:'?s'},
- head:{name:'s',amount:'n'},plan:{label:'s',amt:'n',due:'d'},hist:{sem:'n',total:'n',paid:'?n',balanceCarried:'?n',feeId:'?i'},
- payment:{id:'i',rc:'s',studentId:'i',feeId:'i',sem:'n',date:'d',ts:'n',amount:'n',mode:'s',channel:'counter|online|imported',ref:'?s',by:'?s',status:'ok|cancelled',balAfter:'?n',paidAfter:'?n',late:'?n',feeAmt:'?n',credit:'?n',alloc:'?a',settle:'?o',cancel:'?o',snap:'?o'},
- alloc:{name:'s',amount:'n',before:'n',applied:'n',after:'n'},settle:{status:'s',on:'?d'},cancel:{reason:'?s',by:'?s',ts:'n',refundMode:'?s'},
- course:{id:'i',name:'s',code:'s',full:'s',semesters:'n',intake:'n',duration:'?s'},
- batch:{id:'i',course:'i',name:'s',startYear:'n'},
- division:{id:'i',course:'i',batch:'i',name:'s',teacher:'?s',capacity:'n'},
- subject:{id:'i',course:'i',sem:'n',name:'s',faculty:'?s'},
- refund:{id:'i',rc:'s',studentId:'i',amount:'n',mode:'s',date:'d',reason:'?s',by:'?s'},
- request:{id:'i',studentId:'i',amount:'n',mode:'s',status:'s',created:'n',by:'?s',paymentId:'?i'},
- mark:{id:'i',divId:'i',subjectId:'i',sem:'n',exam:'s',max:'n',scores:'o',by:'?s'},
- school:{id:'i',name:'s',city:'?s',mentor:'?s'},
- practice:{id:'i',studentId:'i',schoolId:'i',phase:'s',start:'d',end:'d',score:'?s',notes:'?s'},
- notice:{id:'i',title:'s',body:'s',audience:'s',date:'d',by:'?s'},
- message:{id:'i',ts:'n',channel:'s',to:'?s',studentId:'?i',kind:'s',text:'s',status:'s'},
- audit:{id:'i',ts:'n',user:'?s',role:'?s',action:'s',detail:'?s'},
- outbox:{id:'i',ts:'n',paymentId:'i',rc:'s',studentId:'i',to:'a',subject:'?s',filename:'?s',status:'s',mode:'?s',attempts:'?n',error:'?s'},
- notif:{id:'i',ts:'n',uid:'i',k:'s',t:'s',x:'?s',tone:'?s',route:'?s',tab:'?s',sid:'?s',open:'?s',read:'b',key:'?s',by:'?s'},
- closure:{date:'d',expected:'n',counted:'n',diff:'n',reason:'?s',by:'?s',ts:'n'},
- counters:{rc:'n',req:'n',enrol:'o'},
- settings:{college:'s',short:'?s',year:'?s',receiptPrefix:'s',lateFeePerDay:'n',lateCap:'n',graceDays:'n',dueOffsets:'a',city:'?s',mail:'?o',notify:'?o'},
- mail:{enabled:'?b',to:'?both|guardian|student',mode:'?demo|live',endpoint:'?s',fromName:'?s',replyTo:'?s',redirect:'?s'}};
-function bkShape(v,kind,where){
-  const spec=BK[kind];if(!v||typeof v!=='object'||Array.isArray(v))throw new Error(where+' is not an object');
-  for(const k of Object.keys(spec)){
-    let t=spec[k];const opt=t[0]==='?';if(opt)t=t.slice(1);const x=v[k];
-    if(x===undefined||x===null){if(opt)continue;throw new Error(`${where}.${k} is missing`)}
-    const good=t==='s'?typeof x==='string'&&x.length<=4000:t==='i'?typeof x==='string'&&BK_ID.test(x):t==='n'?typeof x==='number'&&isFinite(x):t==='d'?typeof x==='string'&&BK_DATE.test(x)
-      :t==='b'?typeof x==='boolean':t==='o'?typeof x==='object'&&!Array.isArray(x):t==='a'?Array.isArray(x):t.split('|').includes(x);
-    if(!good)throw new Error(`${where}.${k} has the wrong type or value`);
-  }
-}
-function bkCheck(x){
-  const L=(k,kind,req=true)=>{if(x[k]===undefined&&!req)return[];if(!Array.isArray(x[k]))throw new Error(k+' is missing');if(x[k].length>20000)throw new Error(k+' is too large');x[k].forEach((v,i)=>bkShape(v,kind,`${k}[${i}]`));return x[k]};
-  const ids=(l,k)=>new Set(l.map(v=>v[k||'id']));
-  const must=(set,v,w)=>{if(!set.has(v))throw new Error(w+' points to something that is not in the backup')};
-  const O=(k)=>{if(!x[k]||typeof x[k]!=='object'||Array.isArray(x[k]))throw new Error(k+' is missing');return x[k]};
-  const users=L('users','user'),staff=L('staff','staff'),students=L('students','student'),courses=L('courses','course'),batches=L('batches','batch'),divisions=L('divisions','division');
-  L('subjects','subject');const payments=L('payments','payment'),refunds=L('refunds','refund'),requests=L('requests','request'),marks=L('marks','mark'),schools=L('schools','school'),practice=L('practice','practice');
-  L('notices','notice');const messages=L('messages','message');L('audit','audit');const outbox=L('outbox','outbox',false);L('notifs','notif',false);
-  if(!Array.isArray(x.plans)||!x.plans.length)throw new Error('plans is missing');
-  x.plans.forEach((p,i)=>{if(!p||typeof p.name!=='string'||!Array.isArray(p.pct)||!p.pct.length||p.pct.some(n=>typeof n!=='number'||!isFinite(n)))throw new Error(`plans[${i}] is not valid`)});
-  bkShape(O('settings'),'settings','settings');if(x.settings.mail)bkShape(x.settings.mail,'mail','settings.mail');
-  if(!x.settings.dueOffsets.length||x.settings.dueOffsets.some(n=>typeof n!=='number'||!isFinite(n)))throw new Error('settings.dueOffsets is not valid');
-  bkShape(O('counters'),'counters','counters');Object.values(x.counters.enrol).forEach(n=>{if(typeof n!=='number'||!isFinite(n))throw new Error('counters.enrol is not valid')});
-  const roles=O('roles'),perms=new Set(PERMS.map(p=>p[0]));
-  Object.keys(roles).forEach(r=>{if(!ROLE_NAMES.includes(r)||!Array.isArray(roles[r])||roles[r].some(p=>!perms.has(p)))throw new Error('roles is not valid')});
-  const fs=O('feeStructure');Object.keys(fs).forEach(c=>{if(!Array.isArray(fs[c])||!fs[c].length)throw new Error('feeStructure is not valid');fs[c].forEach((h,i)=>bkShape(h,'head',`feeStructure.${c}[${i}]`))});
-  Object.keys(O('closures')).forEach(d=>{if(!BK_DATE.test(d))throw new Error('closures is not valid');bkShape(x.closures[d],'closure','closures.'+d)});
-  Object.keys(O('attendance')).forEach(d=>{if(!BK_DATE.test(d)||!x.attendance[d]||typeof x.attendance[d]!=='object')throw new Error('attendance is not valid');
-    Object.keys(x.attendance[d]).forEach(dv=>{const r=x.attendance[d][dv];if(!BK_ID.test(dv)||!r||typeof r.sem!=='number'||!r.marks||typeof r.marks!=='object')throw new Error('attendance is not valid');
-      Object.keys(r.marks).forEach(sid=>{if(!BK_ID.test(sid)||(r.marks[sid]!=='P'&&r.marks[sid]!=='A'))throw new Error('attendance is not valid')})})});
-  marks.forEach((m,i)=>Object.keys(m.scores).forEach(sid=>{if(!BK_ID.test(sid)||typeof m.scores[sid]!=='string'||!BK_NUM.test(m.scores[sid]))throw new Error(`marks[${i}].scores must be numbers`)}));
-  students.forEach((s,i)=>{const w=`students[${i}]`;bkShape(s.guardian,'guardian',w+'.guardian');bkShape(s.academic,'academic',w+'.academic');bkShape(s.fee,'fee',w+'.fee');bkShape(s.fee.concession,'concession',w+'.fee.concession');
-    Object.values(s.docs).forEach(b=>{if(typeof b!=='boolean')throw new Error(w+'.docs is not valid')});
-    s.fee.heads.concat(s.fee.base).forEach(h=>bkShape(h,'head',w+'.fee.heads'));s.fee.plan.forEach(p=>bkShape(p,'plan',w+'.fee.plan'));s.feeHistory.forEach(h=>bkShape(h,'hist',w+'.feeHistory'));
-    if(s.fee.cleared.some(d=>d!==null&&!(typeof d==='string'&&BK_DATE.test(d))))throw new Error(w+'.fee.cleared is not valid')});
-  payments.forEach((p,i)=>{if(p.alloc)p.alloc.forEach(a=>bkShape(a,'alloc',`payments[${i}].alloc`));if(p.settle)bkShape(p.settle,'settle',`payments[${i}].settle`);if(p.cancel)bkShape(p.cancel,'cancel',`payments[${i}].cancel`);if(p.status==='cancelled'&&!p.cancel)throw new Error(`payments[${i}].cancel is missing`)});
-  outbox.forEach((o,i)=>{if(o.to.some(e=>typeof e!=='string'))throw new Error(`outbox[${i}].to is not valid`)});
-  const sCourse=ids(courses),sBatch=ids(batches),sDiv=ids(divisions),sStu=ids(students),sSub=ids(x.subjects),sSch=ids(schools),sPay=ids(payments);
-  batches.forEach(b=>must(sCourse,b.course,'a batch'));divisions.forEach(d=>{must(sCourse,d.course,'a division');must(sBatch,d.batch,'a division')});
-  students.forEach(s=>{must(sCourse,s.course,'a student');must(sBatch,s.batch,'a student');must(sDiv,s.div,'a student')});
-  payments.forEach(p=>must(sStu,p.studentId,'a receipt'));refunds.forEach(r=>must(sStu,r.studentId,'a refund'));requests.forEach(r=>must(sStu,r.studentId,'a payment request'));
-  practice.forEach(p=>{must(sStu,p.studentId,'an allotment');must(sSch,p.schoolId,'an allotment')});marks.forEach(m=>{must(sDiv,m.divId,'a marks sheet');must(sSub,m.subjectId,'a marks sheet')});
-  messages.forEach(m=>{if(m.studentId)must(sStu,m.studentId,'a message')});outbox.forEach(o=>{must(sStu,o.studentId,'an email');must(sPay,o.paymentId,'an email')});
-  /* ids and receipt numbers must be unique: a duplicate would make two students (or two receipts) share one record, login or number */
-  const uniq=(l,k,what)=>{const seen=new Set();l.forEach(v=>{if(seen.has(v[k]))throw new Error(`two ${what} share the same ${k==='rc'?'receipt number':'id'} (${v[k]})`);seen.add(v[k])})};
-  uniq(students,'id','students');uniq(payments,'id','receipts');uniq(payments,'rc','receipts');uniq(refunds,'id','refunds');uniq(courses,'id','courses');uniq(batches,'id','batches');uniq(divisions,'id','divisions');uniq(staff,'id','staff members');uniq(x.subjects,'id','subjects');
-  const seenU=new Set(),seenI=new Set();
-  users.forEach(u=>{const k=u.username.trim().toLowerCase();if(!k||seenU.has(k)||seenI.has(u.id))throw new Error('two logins share a name or id');seenU.add(k);seenI.add(u.id);
-    if(u.role==='Parent'||u.role==='Student')must(sStu,u.studentId,'a portal login')});
-  if(!users.some(u=>u.active&&u.role==='Super Admin'))throw new Error('there is no active Super Admin login');
-  const sUsr=ids(users);staff.forEach(s=>{if(s.userId)must(sUsr,s.userId,'a staff member')});
-}
-const tempPw=()=>{const a=new Uint32Array(2);crypto.getRandomValues(a);return 'Tmp-'+a[0].toString(36)+a[1].toString(36).slice(0,3)};
-ACT.copyTemps=()=>{need('settings.manage','the temporary passwords');const t=$('#dlg textarea');if(!t)return;t.focus();t.select();try{navigator.clipboard.writeText(t.value).then(()=>toast('Copied'),()=>toast('Press Ctrl+C to copy the selected text'))}catch(e){toast('Press Ctrl+C to copy the selected text')}};
-FORM.restore=(f,d)=>{
-  need('settings.manage','restore backups');
-  if(String(d.json||'').length>8e6)throw new Error('This backup is too large');
-  let x;try{x=JSON.parse(d.json)}catch(e){throw new Error('This is not a valid backup')}if(!x||typeof x!=='object'||x.ver!==3||!x.students||!x.users)throw new Error('This backup is from a different version');
-  try{bkCheck(x)}catch(e){throw new Error('This backup is damaged ('+e.message+'). Nothing was changed.')}
-  /* passwords never come from the backup: a login that already exists here (same id or same username, same role) keeps its current password; any other login gets a temporary one.
-     The Super Admin who is doing the restore always keeps their own login and password, so the college cannot be locked out by a restore. */
-  const me=cur(),byId=new Map(db.users.map(u=>[u.id,u])),byName=new Map(db.users.map(u=>[u.username.toLowerCase(),u])),temps=[];
-  x.users.forEach(u=>{const e=[byId.get(u.id),byName.get(u.username.toLowerCase())].find(c=>c&&c.role===u.role&&c.username.toLowerCase()===u.username.toLowerCase()&&typeof c.password==='string'&&c.password);
-    if(e){u.password=e.password;if(e.mustChange)u.mustChange=true;else delete u.mustChange}else{u.password=tempPw();u.mustChange=true;temps.push([u.username,u.password])}});
-  let kept='';
-  if(me&&me.role==='Super Admin'&&typeof me.password==='string'&&me.password&&!x.users.some(u=>u.role==='Super Admin'&&u.username.toLowerCase()===me.username.toLowerCase())){
-    const clash=x.users.find(u=>u.username.toLowerCase()===me.username.toLowerCase());
-    if(!clash){x.users.push({id:x.users.some(u=>u.id===me.id)?uid('u'):me.id,username:me.username,password:me.password,name:me.name,role:'Super Admin',active:true});kept=me.username}
-  }
-  /* the mail access key is kept only when the mail server address is unchanged */
-  const om=db.settings.mail||{},nm=x.settings.mail;x.settings.mail=Object.assign({},nm||{},{key:nm&&String(nm.endpoint||'')===String(om.endpoint||'')?(om.key||''):''});
-  const fixed=fixCounters(x);
-  db=x;migrate();
-  /* the audit log records only how many temporary passwords were issued, never the passwords */
-  log('Backup restored',`${x.students.length} students, ${x.users.length} logins${temps.length?`; temporary passwords issued for ${temps.length} users`:''}${kept?`; the signed-in Super Admin login "${kept}" was kept`:''}${fixed.length?`; counters raised: ${fixed.join(', ')}`:''}`);
-  const saved=save();sesDel();closeLayer();renderLogin();toast('Backup restored. Sign in again.');
-  if(temps.length||kept||!saved)dialog(`<h3>Restore finished</h3>
-   ${saved?'':`<p class="err" role="alert" style="margin:0 0 10px">${E(SAVE_FAIL_MSG)}. This backup is too big for the browser storage, so it exists only in memory until you reload.</p>`}
-   ${kept?`<p class="muted" style="margin:0 0 10px">Your own login <b>${E(kept)}</b> is not in this backup. It was kept with your current password, so you can sign in.</p>`:''}
-   ${temps.length?`<p class="muted" style="margin:0 0 10px">Temporary passwords were issued for ${temps.length} user${temps.length>1?'s':''}: ${temps.length>1?'these logins were':'this login was'} not on this device. Passwords are never stored in a backup. Each person must choose a new password at first sign-in. <b>Copy this list now. It is shown once and is not saved anywhere.</b></p><textarea class="csvbox" readonly rows="8" aria-label="Temporary passwords">${E(temps.map(t=>t[0]+'   '+t[1]).join('\n'))}</textarea>`:''}
-   <div class="actions" style="justify-content:flex-end;margin-top:12px">${temps.length?'<button class="btn" data-act="copyTemps" type="button">Copy list</button>':''}<button class="btn primary" data-act="closeDialog" type="button">${temps.length?'I have noted them':'Close'}</button></div>`,'Restore finished',true);
-};
+function setCollege(){need('settings.manage');const c=db.college;
+  return`<form class="scard" data-form="college" style="max-width:820px"><h2>College profile</h2><p class="note" style="margin:0 0 12px">Shown on receipts, reports and the login screen.</p><div class="form">
+   ${F('name','College name',{val:c.name,req:true,span:1,attrs:'maxlength="120"'})}${F('short','Short name',{val:c.short,req:true,attrs:'maxlength="12"'})}${F('trust','Trust',{val:c.trust,req:true,attrs:'maxlength="80"'})}
+   ${F('address','Address',{type:'textarea',val:c.address,span:1,rows:2})}${F('phone','Phone',{val:c.phone,attrs:'maxlength="40"'})}${F('email','Email',{type:'email',val:c.email})}${F('website','Website',{val:c.website})}${F('year','Academic year',{val:c.year,attrs:'maxlength="9"'})}</div>
+   <p class="note">Contact on receipts: please confirm before go-live. Logo: waiting for the college's logo file.</p><div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>`}
+FORM.college=(f,d)=>{need('settings.manage');const c=db.college;const before={...c};['name','short','trust','address','phone','email','website','year'].forEach(k=>{c[k]=capText(d[k],k,k==='address'?300:120)});if(!c.name||!c.short)throw new Error('Name and short name are required');
+  const a={},b={};Object.keys(c).forEach(k=>{if(before[k]!==c[k]){a[k]=c[k];b[k]=before[k]}});log('College profile changed','Settings','college',b,a);save();renderApp();toast('Saved')};
+function setRoles(){need('roles.manage');const editable=STAFF_ROLES.filter(r=>cur().role==='Super Admin'||r!=='Principal');
+  return`<div class="scard"><h2>Roles & permissions</h2><p class="note" style="margin:0 0 12px">Ticks are checked by the server on every request, not only by hiding buttons. Super Admin always has everything; the Student role sees only its own portal.${cur().role==='Principal'?' The Principal row can be changed by the Super Admin only.':''}</p>
+  <div class="tablewrap"><table class="matrix"><thead><tr><th>Permission</th><th>Super Admin</th>${STAFF_ROLES.map(r=>`<th>${E(r)}</th>`).join('')}<th>Student</th></tr></thead><tbody>
+  ${PERMS.map(([k,l])=>`<tr><td>${E(l)}<small class="muted mono" style="display:block">${E(k)}</small></td><td><input type="checkbox" checked disabled aria-label="Super Admin: ${E(l)}"></td>${STAFF_ROLES.map(r=>`<td><input type="checkbox" aria-label="${E(r)}: ${E(l)}" ${(db.roles[r]||[]).includes(k)?'checked':''} ${editable.includes(r)&&!(r==='Principal'&&k==='roles.manage')?'':'disabled'} data-change="perm" data-r="${E(r)}" data-p="${E(k)}"></td>`).join('')}<td><input type="checkbox" disabled aria-label="Student: ${E(l)}"></td></tr>`).join('')}</tbody></table></div>
+  <div class="actions" style="margin-top:12px"><button class="btn" data-act="permReset">Restore defaults</button></div></div>`}
+CHG.perm=el=>{need('roles.manage');const r=el.dataset.r,p=el.dataset.p;if(!STAFF_ROLES.includes(r)||!PERMS.some(x=>x[0]===p))throw new Error('Unknown permission');if(r==='Principal'&&cur().role!=='Super Admin')throw new Error('Only the Super Admin can change the Principal role');if(r==='Principal'&&p==='roles.manage')throw new Error('The Principal always keeps this');
+  const l=db.roles[r]=db.roles[r]||[];const had=l.includes(p);if(el.checked&&!had)l.push(p);if(!el.checked&&had)l.splice(l.indexOf(p),1);log('Permission changed','Role',r,{[p]:had},{[p]:el.checked});save();toast(`${r}: ${PERMS.find(x=>x[0]===p)[1]} ${el.checked?'allowed':'removed'}`)};
+ACT.permReset=()=>{need('roles.manage');confirmBox('Restore default permissions','Principal and Clerk go back to the permissions in the spec.','Restore',()=>{const before=JSON.stringify(db.roles);const d=DEFAULT_ROLES();if(cur().role!=='Super Admin')d.Principal=db.roles.Principal;db.roles=d;log('Permissions reset','Role','',{roles:before},{roles:JSON.stringify(d)});save();renderPage();toast('Defaults restored')})};
+function setUsers(){if(cur().role!=='Super Admin')throw new Error('Only the Super Admin manages staff logins');const l=db.users.filter(u=>u.role!=='Student');
+  return`<div class="scard"><h2>Staff logins <button class="btn primary" data-act="newUser">Add Clerk / Principal login</button></h2><div class="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Username</th><th>Email</th><th>Last sign-in</th><th>Status</th><th></th></tr></thead><tbody>
+  ${l.map(u=>`<tr><td><b>${E(u.name)}</b></td><td>${E(u.role)}</td><td class="mono">${E(u.username)}</td><td>${E(u.email)}</td><td><small>${u.lastLoginAt?fmtT(u.lastLoginAt):'Never'}</small></td><td>${u.active?pill('Active','good'):pill('Off','bad')}</td><td>${u.id===cur().id?'<small class="muted">You</small>':`<div class="actions nowrap"><button class="btn sm" data-act="userToggle" data-id="${E(u.id)}">${u.active?'Switch off':'Switch on'}</button><button class="btn sm" data-act="userPw" data-id="${E(u.id)}">Reset password</button></div>`}</td></tr>`).join('')}</tbody></table></div></div>`}
+ACT.newUser=()=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');drawer(`<button class="btn x" data-act="close">Close</button><h2>Add staff login</h2><form data-form="newUser" class="form" style="margin-top:12px">${F('name','Full name',{req:true,span:1})}${F('role','Role',{opts:STAFF_ROLES})}${F('username','Username',{req:true,attrs:'autocapitalize="off" maxlength="30"'})}${F('email','Email',{type:'email',req:true,span:1})}<p class="note span">A temporary password is created; they must change it at first sign-in.</p><div class="actions span"><button class="btn primary">Create login</button></div></form>`)};
+FORM.newUser=(f,d)=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const un=String(d.username||'').trim().toLowerCase();if(!/^[a-z0-9._-]{3,30}$/.test(un))throw new Error('Username: 3-30 letters, numbers, . _ -');if(db.users.some(u=>u.username.toLowerCase()===un))throw new Error('This username is taken');
+  const email=String(d.email||'').trim().toLowerCase();if(!MAIL_OK.test(email))throw new Error('Enter a valid email');if(!STAFF_ROLES.includes(d.role))throw new Error('Choose a role');const name=capText(d.name,'Name');if(name.length<2)throw new Error('Enter the name');
+  const pw=tempPassword();const u={id:uid('u'),role:d.role,name,username:un,email,phone:'',password:pw,mustChange:true,active:true,lastLoginAt:0};db.users.push(u);log('Staff login created','User',un,null,{role:u.role,email});save();closeLayer();renderPage();
+  dialog(`<h3>Login created</h3><p class="muted">Give these to ${E(name)}. Shown once.</p><div class="panel" style="padding:12px"><div class="rline"><span>Username</span><b class="mono">${E(un)}</b></div><div class="rline"><span>Temporary password</span><b class="mono">${E(pw)}</b></div></div><div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn primary" data-act="closeDialog">Done</button></div>`,'Login created',true)};
+ACT.userToggle=el=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const u=db.users.find(x=>x.id===el.dataset.id);u.active=!u.active;log(u.active?'Login switched on':'Login switched off','User',u.username,{active:!u.active},{active:u.active});save();renderPage()};
+ACT.userPw=el=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const u=db.users.find(x=>x.id===el.dataset.id);const pw=tempPassword();u.password=pw;u.mustChange=true;log('Password reset','User',u.username);save();dialog(`<h3>New temporary password</h3><div class="panel" style="padding:12px"><div class="rline"><span>${E(u.username)}</span><b class="mono">${E(pw)}</b></div></div><div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn primary" data-act="closeDialog">Done</button></div>`,'Password reset',true)};
+function setMail(){const m=db.settings.mail;
+  return`<div class="sgrid"><form class="scard" data-form="mailSet"><h2>Email sender</h2><div class="form">${F('fromName','From name',{val:m.fromName,attrs:'maxlength="60"'})}${F('replyTo','Reply-to',{type:'email',val:m.replyTo})}${F('mode','Mode',{val:m.mode,opts:[['demo','Demo (nothing is sent)'],['live','Live (Resend)']]})}</div>
+   <label class="chk" style="margin-top:10px"><input type="checkbox" name="sendReceipts" ${m.sendReceipts?'checked':''}> Email the receipt PDF after every payment</label><label class="chk"><input type="checkbox" name="sendCredentials" ${m.sendCredentials?'checked':''} disabled> Email login details to new students (always on)</label>
+   <p class="note">The Resend API key stays on the server. Demo mode shows each email in the outbox below.</p><div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>
+   <div class="scard"><h2>Outbox ${pill(db.outbox.length+' emails')}</h2><div class="list">${db.outbox.slice(0,12).map(o=>`<div class="li"><div><b>${E(o.subject)}</b><small>${E(o.to.join(', '))} · ${E(fmtT(o.ts))}</small></div>${mailPill(o.status)}</div>`).join('')||'<p class="note">Nothing sent yet.</p>'}</div>
+   <h2 style="margin-top:14px">Notification sound</h2><label class="chk"><input type="checkbox" data-change="mute" ${muted()?'':'checked'}> Play a sound for live notifications on this device</label></div></div>`}
+FORM.mailSet=(f,d)=>{need('settings.manage');const m=db.settings.mail;const before={...m};m.fromName=capText(d.fromName,'From name',60);const rt=String(d.replyTo||'').trim();if(rt&&!MAIL_OK.test(rt))throw new Error('Check the reply-to email');m.replyTo=rt;m.mode=d.mode==='live'?'live':'demo';m.sendReceipts=!!d.sendReceipts;log('Email settings changed','Settings','mail',before,{...m});save();renderPage();toast('Saved')};
+CHG.mute=el=>{lsSet('npcte_mute',el.checked?'0':'1');toast(el.checked?'Sound on':'Sound off')};
+function setFlags(){const fl=db.settings.flags;
+  return`<form class="scard" data-form="flags" style="max-width:820px"><h2>Open items · feature flags</h2><p class="note" style="margin:0 0 12px">These questions are waiting for the college (Roshanbhai). The app works with the default until they answer.</p>
+   <label class="chk"><input type="checkbox" name="expenseReducesDue" ${fl.expenseReducesDue?'checked':''}> 1 · An expense linked to a student reduces that student's due <small class="muted">(default: off)</small></label>
+   <label class="chk"><input type="checkbox" name="fundingAllCategories" ${fl.fundingAllCategories?'checked':''}> 2 · Show the funding type (Cash / Scholarship) for all categories, not only SC / ST <small class="muted">(default: off)</small></label>
+   <label class="chk"><input type="checkbox" name="lateFee" disabled> 3 · Late fee <small class="muted">(default: no late fee · due dates in Fees & receipts)</small></label>
+   <ul class="note"><li>4 · Receipt format and numbering used today (send a photo)</li><li>5 · College bank account and UPI merchant / gateway</li><li>6 · Old data: Excel of current students (CSV import template is in Students → Import)</li><li>7 · Exact reports the trust / university asks for</li><li>8 · Student login ID: enrolment no. or email (now: either works)</li></ul>
+   <div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>`}
+FORM.flags=(f,d)=>{need('settings.manage');const fl=db.settings.flags;const before={...fl};fl.expenseReducesDue=!!d.expenseReducesDue;fl.fundingAllCategories=!!d.fundingAllCategories;log('Feature flags changed','Settings','flags',before,{...fl});save();renderPage();toast('Saved')};
+function setData(){return`<div class="scard danger" style="max-width:720px"><h2>Demo data</h2><p class="note">Everything lives in this browser. Reset puts back the sample students, payments and notices.</p><div class="actions" style="margin-top:10px"><button class="btn" data-act="backup">Download backup (JSON)</button><button class="btn danger" data-act="resetDemo">Reset demo data</button></div></div>`}
+ACT.backup=()=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const c=JSON.parse(JSON.stringify(db));c.users.forEach(u=>delete u.password);download('npcte-backup-'+today()+'.json',JSON.stringify(c,null,1),'application/json');log('Backup downloaded','System','')};
+
+/* ---------- my account ---------- */
+function accountPanel(){return`<form class="panel" data-form="myPw"><h2>Change password</h2><div class="grid" style="gap:10px">${F('old','Current password',{type:'password',req:true,attrs:'autocomplete="current-password"'})}${F('p1','New password',{type:'password',req:true,attrs:'autocomplete="new-password"'})}${F('p2','Type it again',{type:'password',req:true,attrs:'autocomplete="new-password"'})}<button class="btn primary">Change password</button></div></form>`}
+FORM.myPw=(f,d)=>{const u=cur();if(d.old!==u.password)throw new Error('Current password is wrong');if(!pwOk(d.p1))throw new Error('Use at least 8 characters with a letter and a number');if(d.p1!==d.p2)throw new Error('The two new passwords are not the same');u.password=d.p1;log('Password changed','User',u.username);save();f.reset();toast('Password changed')};
+function staffProfileHtml(){const u=cur();const L=(k,v)=>`<div class="rline"><span>${k}</span><b style="font-weight:500;text-align:right;overflow-wrap:anywhere">${E(v||'-')}</b></div>`;
+  return`<button class="btn x" data-act="close">Close</button><div class="who" style="margin:4px 0 14px"><div class="av lg">${E(initials(u.name))}</div><div><h2 style="margin:0">${E(u.name)}</h2><small class="muted">${E(u.role)}</small></div></div>
+  <div class="panel">${L('Username',u.username)}${L('Email',u.email)}${L('Last sign-in',fmtT(u.lastLoginAt))}</div><div class="panel" style="margin-top:12px"><h2>What you can open</h2><div class="actions">${navFor(u).map(n=>pill(n[1])).join('')}</div></div><div style="margin-top:12px">${accountPanel()}</div>`}

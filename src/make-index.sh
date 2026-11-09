@@ -20,7 +20,15 @@ head='''<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>Vidyapeeth ERP Demo</title>
+<title>NPCTE ERP</title>
+<meta name="description" content="NPCTE College ERP - The New Progressive College of Teachers' Education, Mehsana">
+<meta name="theme-color" content="#14284b">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NPCTE">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 </head>
@@ -36,7 +44,7 @@ def only(tag):
     return re.search(r'<'+tag+r'>(.*?)</'+tag+'>',html,re.S).group(1)
 h=lambda t:"'sha256-"+base64.b64encode(hashlib.sha256(t.encode('utf-8')).digest()).decode()+"'"
 sh,st=h(only('script')),h(only('style'))
-csp="; ".join(["default-src 'none'","script-src "+sh,"style-src "+st+" https://fonts.googleapis.com","style-src-attr 'unsafe-inline'","font-src https://fonts.gstatic.com","connect-src 'self'","img-src 'self' data:","object-src 'none'","base-uri 'none'","form-action 'none'","frame-ancestors 'none'"])
+csp="; ".join(["default-src 'none'","script-src "+sh,"style-src "+st+" "+h(re.search(r"<style>(.*?)</style>",open("../offline.html",encoding="utf-8").read(),re.S).group(1))+" https://fonts.googleapis.com","style-src-attr 'unsafe-inline'","font-src https://fonts.gstatic.com","connect-src 'self'","img-src 'self' data: blob:","manifest-src 'self'","worker-src 'self'","object-src 'none'","base-uri 'none'","form-action 'none'","frame-ancestors 'none'"])
 p='../vercel.json'
 v=json.load(open(p,encoding='utf-8'))
 blk=[x for x in v['headers'] if x['source']=='/(.*)'][0]

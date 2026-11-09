@@ -1,71 +1,36 @@
-# Vidyapeeth ERP Demo (B.Ed / M.Ed college management)
+# NPCTE College ERP — Phase 1 demo
 
-A single-page demo (`index.html`) plus one small server function (`api/send-receipt.js`) that e-mails fee receipt PDFs.
-All demo data is stored in the visitor's browser (localStorage). No build step.
+The New Progressive College of Teachers' Education (NPCTE), Mehsana · Karve Trust · B.Ed and M.Ed (4 semesters each).
 
-## Logins
-| Role | Username | Password |
-|---|---|---|
-| Super Admin | admin | admin123 |
-| Principal | principal | principal123 |
-| Accountant | accountant | account123 |
-| Parent (of Riya Joshi) | parent | parent123 |
-| Student (Riya Joshi) | student | student123 |
+This is the **clickable Phase 1 demo** built from `docs/NPCTE-ERP-Phase1-Spec.md`: a single page (`index.html`) whose data
+lives in the browser (localStorage). It shows every Phase 1 screen and rule to the college before the real
+Next.js + Express + PostgreSQL build (spec §1, §13).
 
-Only these five logins exist at first. The admin adds Clerk and Faculty logins under **Staff and Roles > Edit** (choose the role, type a username and password).
+Run it: see `RUN-LOCALLY.md` (`npm start`, then http://127.0.0.1:5173).
 
-Every student also has a parent login (the enrolment number, e.g. `bed25-001` / `parent123`) and a student login (`stu-bed25-001` / `student123`).
-
-## How receipt e-mail works
-1. A payment is recorded (counter, gateway, parent portal or student portal).
-2. The app builds a PDF receipt in the browser and puts an entry in **Fee Collection > Email outbox**.
-3. **Demo mode** (default): nothing is sent; you can preview the exact email and PDF details.
-   **Live mode**: the app posts the PDF to `/api/send-receipt`, which sends it through Resend.
-
-## Turn on live e-mail (5 minutes, works from a phone)
-1. Create a free account at https://resend.com. Add and verify your domain (Domains > Add). Create an API key (API Keys > Create).
-   - Without a verified domain Resend only lets you send to your own signup address. That is fine for a first test.
-2. In Vercel open the project > **Settings > Environment Variables** and add (for Production):
-   - `RESEND_API_KEY` = the key from Resend
-   - `MAIL_FROM` = for example `accounts@yourcollege.edu` (use `onboarding@resend.dev` while testing)
-   - `RECEIPT_API_KEY` = a long random password you invent (at least 24 characters; shorter keys make the function refuse to send)
-   - `MAIL_ALLOWED_DOMAINS` = required, the recipient domains you accept, e.g. `gmail.com,yourcollege.edu` (without it the function refuses to send; `MAIL_ALLOW_ANY_DOMAIN=1` overrides, not advised)
-   - `ALLOWED_ORIGIN` = your deployed site, e.g. `https://erp.yourcollege.edu` (one origin, no `*`). Leave unset to allow same-site calls only.
-   - `RECEIPT_DEMO_MODE` = optional `1` for local/preview tests: needs no key, validates requests, sends nothing. Ignored on production.
-3. **Deployments > latest > Redeploy** so the variables take effect.
-4. Open the site, sign in as `admin`, go to **Settings > Email receipts**:
-   - Sending mode: **Live**
-   - Access key: the same `RECEIPT_API_KEY`
-   - Test redirect: your own email (so nothing goes to real parents while you demo)
-   - Tap **Check mail server**, then **Send a test email**.
-5. Take a payment. The PDF arrives in your inbox and the outbox shows **Sent**.
-
-## Notifications (every role)
-Every login has a bell at the top with an unread count. Tap it to see the inbox: filter All / Unread / by type, mark all as read, tap one to jump to the right screen.
-
-| Role | Examples of what arrives |
+## What is in it (spec section → screen)
+| Spec | Where |
 |---|---|
-| Super Admin | payments, cancelled receipts, new admissions, concessions to decide, day close, failed receipt emails, bank imports, repeated wrong passwords, permission and fee-rule changes, new logins, overdue-fees and pending-documents summary |
-| Principal | concessions to decide, day close and reopen, cancelled receipts, new admissions, promotion, overdue summary, rule changes |
-| Accountant | online payments, failed online payments, cancelled receipts, failed receipt emails, bank imports, concession decisions, overdue summary |
-| Clerk | families changing their details, pending documents, the decision on a concession they requested, notices |
-| Faculty | "attendance not marked" for their class, practice teaching, notices |
-| Parent / Student | payment received, failed payment, cancelled receipt, installment due soon or overdue, reminders, absence, marks published, practice teaching, concession decision, promotion, notices for their course |
+| §2 Roles | Super Admin, Principal, Clerk, Student. Permission matrix in Settings → Roles & permissions; every handler checks the permission, not only the menu. |
+| §4 Dashboard | 6 KPI cards, 4 charts (month line, mode donut, course × semester bars, category + cash/scholarship bars), top dues, latest 10 payments, latest notices. Every card and chart opens the filtered list. Clerk sees the fee view. |
+| §5 Fee collection | 5 tabs: Collect payment · Expenses · Pending dues · Receipts · Fee setup. 4 modes. Cash / Cheque / Expense invoice date = date entered, editable inline in the table (logged, receipt regenerated). UPI invoice date = payment date + 1 day (Asia/Kolkata), fixed. UPI goes through a `PaymentProvider` adapter; only a verified webhook marks SUCCESS. Cancel with reason, never delete. |
+| §6 Students | Add / edit form (personal, course, category, funding type for SC/ST only, 4 editable semester fees + due dates, photo). Auto login + credentials email, forced password change, resend / reset. List with search, filters, sorting, paging, Excel export; CSV import template. Profile with fee cards, receipts, notices, audit trail. |
+| §7 Audit | Transactions (every payment + expense, all filters incl. multi-mode, sort on every column, totals per mode, Excel + PDF export). Cash & cheque deposit report (week / month / custom, 4 modes side by side, mark as deposited, undo by Principal). Activity log with before → after, actor, IP / device (Principal + Super Admin). |
+| §8 Notices | Audience: all / B.Ed / M.Ed / a semester / selected students / one student. Attachment, schedule, fee-alert and public tags. Fee reminders from Pending dues and the student profile. |
+| §9 Student PWA | Manifest, service worker, offline page, install banner (Android prompt / iPhone steps), bottom tabs Home · Fees · Notices · Profile, Pay now (UPI). |
+| §10 Notifications | Bell with unread count, inbox (All / Unread / Fees / Notices), live toast + sound + system popup across tabs, missed-notification sync when a tab comes back. |
+| §11 Settings | College profile, fees & receipts, roles, staff logins, email sender + outbox, open-item flags, data reset / backup. |
 
-Rules: the person who does something is never notified about their own action; the people directly concerned (the one who requested a concession, the owner of a changed login) are always told. Super Admin can change who gets what in **Settings > Notification rules** and can send themselves a test. Automatic alerts (due soon, overdue, daily summaries) are created at sign-in and never repeat. The newest 60 per login are kept.
-This is an in-app inbox. WhatsApp, SMS and push messages are not sent from this demo (reminders are still written to the Message log).
+## Demo limits (the real build replaces these)
+- Data is per browser; there is no server. "Live" = between tabs of the same browser (the real app uses Socket.IO + Web Push).
+- Emails are shown in the outbox (demo mode). The UPI QR is a sample picture, and the gateway is simulated with two webhook buttons.
+- The browser PDF uses Helvetica; the server PDF will embed Noto Sans Gujarati.
+- Passwords are stored in plain text in the browser. The server uses bcrypt + JWT httpOnly cookies.
 
-## Event Log (Super Admin only)
-**Event Log** in the menu records every sign-in (and failed sign-in), page opened, button tap, form saved or refused, change, email and script error, for every role, with the person, role, time, device and result. Passwords are never stored. Filter by role, person, type, result, date or any word; open an event for details; see per-person activity on the **People** tab; export CSV; or clear the log (the clearing itself is recorded). The newest 3,000 events are kept in the browser. The older **Audit Log** keeps only business actions (payments, admissions, edits).
-
-## Security notes
-- The function refuses every request without the correct `x-api-key` (timing-safe check; if `RECEIPT_API_KEY` is not set it refuses everything), accepts POST only from `ALLOWED_ORIGIN`, validates every field (at most 4 recipients, domain allow-list, no CR/LF in headers, unknown fields such as cc/bcc rejected), accepts only a real PDF up to 1 MB, limits request size, and rate-limits per IP, per key and per recipient.
-- Rate limits are kept in memory, so on Vercel each warm instance counts separately and counters reset on cold start. They slow abuse but are not a hard cap. For production use a shared store (Upstash Redis or Vercel KV) or a Vercel Firewall rate-limit rule.
-- In this demo the key is typed into the app by the administrator and kept in that browser. For the real product, send the email from the server that records the payment (after the payment gateway confirms it) so the key never reaches a browser, and keep the receipts in a database.
-- PDF text uses the built-in Helvetica font, so Gujarati/Hindi names print as `?` in the PDF. The production build should embed a Unicode font (for example Noto Sans Gujarati) on the server.
+## Open items (built with defaults, see Settings → Open items)
+expenseReducesDue (off) · funding type for OBC / EWS (off) · semester due dates (11-15 / 04-30 placeholders) and late fee (none) ·
+receipt format · bank / UPI gateway · old data import · required reports · student login ID (either works).
 
 ## Files
-- `index.html` the whole app
-- `api/send-receipt.js` e-mail function (Vercel Node, no dependencies)
-- `vercel.json` headers
-- `src/` the readable source parts and the test suite
+`src/` sources (`npm run build` → `index.html` + CSP in `vercel.json`) · `tests/logic.test.js` (`npm test`, spec §14 rules) ·
+`manifest.webmanifest`, `sw.js`, `offline.html`, `icons/` (PWA) · `api/send-receipt.js` (Resend mail function) · `_legacy-demo/` (old Vidyapeeth demo).

@@ -1,111 +1,93 @@
 /* =====================================================================
-   Notifications: one inbox per login. notify() writes one record for every
-   person who should hear about something; the Super Admin chooses, per type
-   and per role, who that is (Settings > Notification rules).
+   Notifications (spec §10). In the real app the server saves a Notification row,
+   emits it over Socket.IO to the right rooms and sends a Web Push.
+   In this demo: a row is saved, every other open tab of the same browser
+   gets it at once (storage event = the "socket"), shows a toast, plays a
+   short sound and, when the tab is in the background, a system popup.
    ===================================================================== */
-const NT_ROLES=['Super Admin','Principal','Accountant','Clerk','Faculty','Parent','Student'];
-const NT_MAX=60; /* newest notifications kept per login */
+const NT_MAX=80;
 const NT_CATS=[
- {k:'payment',l:'Payment received',d:'A fee payment, receipt or late-fee waiver was recorded.',on:['Super Admin','Accountant','Parent','Student']},
- {k:'payfail',l:'Online payment failed',d:'A Google Pay / UPI payment did not go through.',on:['Accountant','Parent','Student']},
- {k:'cancel',l:'Receipt cancelled',d:'A receipt was cancelled and the money reversed.',on:['Super Admin','Principal','Accountant','Parent','Student']},
- {k:'mailfail',l:'Receipt email failed',d:'A receipt email could not be sent.',on:['Super Admin','Accountant']},
- {k:'admission',l:'New admission',d:'A student was admitted. The family gets a welcome with their logins.',on:['Super Admin','Principal','Accountant','Parent','Student']},
- {k:'conc_req',l:'Concession requested',d:'A concession needs the Principal to decide.',on:['Super Admin','Principal']},
- {k:'conc_dec',l:'Concession decided',d:'A concession was approved or rejected. The person who asked is always told.',on:['Super Admin','Accountant','Parent']},
- {k:'dayclose',l:'Day closed or reopened',d:'Cash drawer closed, with any difference, or a closed day was reopened.',on:['Super Admin','Principal']},
- {k:'due',l:'Fee due soon or overdue',d:'Sent automatically when an installment is due within 7 days or has become overdue.',on:['Parent','Student']},
- {k:'digest',l:'Overdue fees summary',d:'Once a day: how many students are overdue and how much.',on:['Super Admin','Principal','Accountant']},
- {k:'reminder',l:'Fee reminder sent',d:'The office sent a reminder or message to the family.',on:['Parent','Student']},
- {k:'notice',l:'Notice posted',d:'A notice for everyone or for one course.',on:['Super Admin','Principal','Accountant','Clerk','Faculty','Parent','Student']},
- {k:'attendance',l:'Absence and low attendance',d:'A student was marked absent today, or is below 75%.',on:['Parent','Student']},
- {k:'attpending',l:'Attendance not marked',d:'Once a day: a class teacher has not marked today.',on:['Faculty']},
- {k:'marks',l:'Marks published',d:'Internal marks were saved for a subject.',on:['Parent','Student']},
- {k:'practice',l:'Practice teaching',d:'A school was allotted or the evaluation was saved.',on:['Principal','Faculty','Parent','Student']},
- {k:'bank',l:'Bank settlement',d:'A bank statement was imported and payments were matched.',on:['Super Admin','Accountant']},
- {k:'promotion',l:'Promotion and leaving',d:'Semester promotion, passing out, or a student marked as left.',on:['Super Admin','Principal','Accountant','Parent','Student']},
- {k:'student',l:'Family changed details',d:'A parent or student updated their phone or email.',on:['Super Admin','Clerk']},
- {k:'docs',l:'Documents pending',d:'Once a day: admissions still provisional because documents are missing.',on:['Super Admin','Principal','Clerk']},
- {k:'account',l:'Logins and passwords',d:'A login was created or changed, or someone changed their password. The person concerned is always told.',on:['Super Admin']},
- {k:'security',l:'Repeated failed sign-ins',d:'Three wrong passwords for the same user within 15 minutes.',on:['Super Admin']},
- {k:'system',l:'Rules and permissions changed',d:'Role permissions, fee structure or late-fee rules were changed.',on:['Super Admin','Principal','Accountant']}
-];
-const NT_DEFAULTS=()=>{const o={};NT_CATS.forEach(c=>{o[c.k]={};NT_ROLES.forEach(r=>o[c.k][r]=c.on.includes(r))});return o};
-const ntCat=k=>NT_CATS.find(c=>c.k===k);
-const ntOn=(k,role)=>{const n=db.settings&&db.settings.notify;return !!(n&&n[k]&&n[k][role])};
-function ntInit(){ /* fill in anything missing, never overwrite the admin's choices */
-  if(!Array.isArray(db.notifs))db.notifs=[];
-  const d=NT_DEFAULTS();const n=db.settings.notify=db.settings.notify||{};
-  Object.keys(d).forEach(k=>{n[k]=n[k]||{};Object.keys(d[k]).forEach(r=>{if(n[k][r]===undefined)n[k][r]=d[k][r]})});
+ {k:'payment',l:'Payment received',g:'fees'},{k:'payfail',l:'Payment failed',g:'fees'},{k:'cancel',l:'Receipt cancelled',g:'fees'},
+ {k:'datechange',l:'Invoice date changed',g:'fees'},{k:'reminder',l:'Fee reminder',g:'fees'},{k:'due',l:'Fee due / overdue',g:'fees'},
+ {k:'notice',l:'Notice',g:'notices'},{k:'credentials',l:'Login details',g:'other'},{k:'mailfail',l:'Email failed',g:'other'},
+ {k:'enquiry',l:'Admission enquiry',g:'other'},{k:'security',l:'Security',g:'other'},{k:'system',l:'System',g:'other'}];
+const ntCat=k=>NT_CATS.find(c=>c.k===k)||{k,l:'Notification',g:'other'};
+function ntInit(){if(!Array.isArray(db.notifs))db.notifs=[]}
+/* rooms, as in the Socket.IO design: user:<id>, role:<role>, course:<code>, sem:<course>-<n>, college */
+function audienceStudents(a){
+  const act=db.students.filter(s=>s.status==='ACTIVE');
+  if(!a||a.type==='all')return act;
+  if(a.type==='course')return act.filter(s=>s.course===a.course);
+  if(a.type==='sem')return act.filter(s=>s.course===a.course&&s.sem===+a.sem);
+  if(a.type==='students')return act.filter(s=>(a.ids||[]).includes(s.id));
+  return[];
 }
-/* where a notification takes you, by who is reading it */
-const ntGo=(u,go)=>{if(!go)return{r:'',t:''};if(u.role==='Parent'||u.role==='Student'){const p=go.portal;return{r:(p&&typeof p==='object'?p[u.role]:p)||'',t:''}}const s=go.staff||[];return{r:s[0]||'',t:s[1]||''}};
-function ntRecipients(cat,o){
-  const act=cur();const out=new Map();const roles=o.roles||NT_ROLES.filter(r=>ntOn(cat,r));
-  db.users.forEach(u=>{
-    if(!u.active||!roles.includes(u.role))return;
-    if(u.role==='Parent'||u.role==='Student'){
-      const s=stu(u.studentId);if(!s)return;
-      if(o.course){if(s.status!=='Active'||(o.course!=='all'&&s.course!==o.course))return}
-      else if(!o.sid||u.studentId!==o.sid)return;
-    }
-    out.set(u.id,u);
-  });
-  (o.uids||[]).forEach(id=>{const u=db.users.find(x=>x.id===id&&x.active);if(u)out.set(id,u)});
-  if(act&&!o.self)out.delete(act.id); /* you do not need a notification about what you just did */
+const audienceLabel=a=>!a||a.type==='all'?'All students':a.type==='course'?course(a.course).name+' (all semesters)':a.type==='sem'?`${course(a.course).name} Sem ${a.sem}`:a.type==='students'?((a.ids||[]).length===1?(stu(a.ids[0])||{}).name||'1 student':(a.ids||[]).length+' students'):'—';
+function ntRecipients(o){
+  const out=new Map();const act=cur();
+  (o.users||[]).forEach(id=>{const u=db.users.find(x=>x.id===id&&x.active);if(u)out.set(u.id,u)});
+  (o.roles||[]).forEach(r=>db.users.filter(u=>u.active&&u.role===r).forEach(u=>out.set(u.id,u)));
+  const sids=o.students||(o.audience?audienceStudents(o.audience).map(s=>s.id):[]);
+  sids.forEach(id=>{const s=stu(id);const u=s&&db.users.find(x=>x.id===s.userId&&x.active);if(u)out.set(u.id,u)});
+  if(act&&!o.self)out.delete(act.id);
   return[...out.values()];
 }
 function notify(cat,title,text,o={}){
-  if(!db.notifs)ntInit();
-  const rs=ntRecipients(cat,o);if(!rs.length)return 0;const c=ntCat(cat)||{};const act=cur();let n=0;
+  ntInit();const rs=ntRecipients(o);if(!rs.length)return 0;let n=0;const act=cur();
   rs.forEach(u=>{
     const key=o.key?o.key+'|'+u.id:'';if(key&&db.notifs.some(x=>x.key===key))return;
-    const portal=u.role==='Parent'||u.role==='Student';const g=ntGo(u,o.go);const p=portal&&o.p?o.p:null;
-    db.notifs.unshift({id:uid('nt'),ts:o.ts||Date.now(),uid:u.id,k:cat,t:(p&&p.t)||title,x:(p&&p.x!==undefined?p.x:text)||'',tone:o.tone||c.tone||'info',route:g.r,tab:g.t,sid:o.sid||'',open:o.open||'',read:false,key,by:act?act.name:'System'});n++;
+    const portal=u.role==='Student';
+    db.notifs.unshift({id:uid('nt'),ts:o.ts||Date.now(),uid:u.id,k:cat,t:title,x:text||'',tone:o.tone||'info',route:portal?(o.portal||''):(o.staff||''),tab:portal?'':(o.tab||''),sid:o.sid||'',read:false,key,by:act?act.name:'System'});n++;
   });
   if(n)ntPrune();
   if(n&&typeof updateBell==='function')updateBell();
   return n;
 }
-function ntPrune(){
-  const seen={};let drop=false;
-  db.notifs=db.notifs.filter(x=>{seen[x.uid]=(seen[x.uid]||0)+1;if(seen[x.uid]>NT_MAX){drop=true;return false}return true});
-  return drop;
-}
+function ntPrune(){const seen={};db.notifs=db.notifs.filter(x=>{seen[x.uid]=(seen[x.uid]||0)+1;return seen[x.uid]<=NT_MAX})}
 const ntUnread=u=>u?db.notifs.reduce((a,n)=>a+(n.uid===u.id&&!n.read?1:0),0):0;
 const ntMine=u=>u?db.notifs.filter(n=>n.uid===u.id):[];
-const ago=ts=>{const s=Math.max(0,(Date.now()-ts)/1000);if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+' min ago';if(s<86400)return Math.floor(s/3600)+' h ago';const d=Math.floor(s/86400);return d===1?'yesterday':d<7?d+' days ago':fmtD(isoOf(new Date(ts)))};
+const ago=ts=>{const s=Math.max(0,(Date.now()-ts)/1000);if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+' min ago';if(s<86400)return Math.floor(s/3600)+' h ago';const d=Math.floor(s/86400);return d===1?'yesterday':d<7?d+' days ago':fmtD(istDate(ts))};
 
-/* ---------- automatic alerts: due dates, daily summaries ---------- */
+/* automatic fee alerts (spec §5.5): X days before the due date and when overdue */
 function ntSync(){
-  if(!db||!db.students)return;ntInit();const T=today();
-  db.students.filter(s=>s.status==='Active').forEach(s=>{
-    const sm=feeSum(s);
-    sm.inst.forEach((i,ix)=>{
-      if(i.state==='Paid'||!(i.remaining>0))return;const left=-diffDays(T,i.due); /* days until due */
-      if(i.overdue)notify('due',`Installment ${ix+1} is overdue`,`${inr(i.remaining)} was due on ${fmtD(i.due)}. A late fee applies until it is paid.`,{sid:s.id,key:`over:${s.id}:${s.fee.id||s.sem}:${ix}`,tone:'bad',go:{portal:'pfees'},self:true});
-      else if(left>=0&&left<=7)notify('due',`Installment ${ix+1} is due ${left===0?'today':left===1?'tomorrow':'in '+left+' days'}`,`${inr(i.remaining)} is due on ${fmtD(i.due)}. Pay from the Fees page to avoid a late fee.`,{sid:s.id,key:`soon:${s.id}:${s.fee.id||s.sem}:${ix}`,tone:'warn',go:{portal:'pfees'},self:true});
+  if(!db||!db.students)return;ntInit();const T=today();const X=+db.settings.reminderDays||7;
+  db.students.filter(s=>s.status==='ACTIVE').forEach(s=>{
+    feeSum(s).sems.forEach(m=>{
+      if(!m.started||!(m.due>0)||!m.dueDate)return;const left=diffDays(m.dueDate,T);
+      if(left<0)notify('due',`Semester ${m.sem} fee is overdue`,`${inr(m.due)} was due on ${fmtD(m.dueDate)}. Please pay at the office or with UPI.`,{students:[s.id],key:`over:${s.id}:${m.sem}`,tone:'bad',portal:'sfees',self:true});
+      else if(left<=X)notify('due',`Semester ${m.sem} fee due ${left===0?'today':left===1?'tomorrow':'in '+left+' days'}`,`${inr(m.due)} is due on ${fmtD(m.dueDate)}.`,{students:[s.id],key:`soon:${s.id}:${m.sem}`,tone:'warn',portal:'sfees',self:true});
     });
   });
-  const od=db.students.filter(s=>s.status==='Active').map(s=>({s,sm:feeSum(s)})).filter(x=>x.sm.overdue&&x.sm.payable>0);
-  if(od.length)notify('digest',`${od.length} student${od.length>1?'s have':' has'} overdue fees`,`${inr(sum(od,x=>x.sm.payable))} is outstanding from overdue installments. Open Pending dues to send reminders.`,{key:'digest:'+T,tone:'warn',go:{staff:['fees','dues']},self:true});
-  const prov=db.students.filter(s=>s.status==='Active'&&admStatus(s)==='Provisional');
-  if(prov.length)notify('docs',`${prov.length} admission${prov.length>1?'s are':' is'} provisional`,'Required documents are still missing. Open Students and look for Provisional.',{key:'docs:'+T,tone:'warn',go:{staff:['students']},self:true});
-  if(parseD(T).getDay()!==0&&typeof semOfDiv==='function'){
-    db.users.filter(u=>u.active&&u.role==='Faculty'&&u.staffId).forEach(u=>{
-      const mine=db.divisions.filter(d=>d.teacher===u.staffId&&db.students.some(s=>s.div===d.id&&s.status==='Active'));
-      const todo=mine.filter(d=>!(db.attendance[T]&&db.attendance[T][d.id]));
-      if(todo.length)notify('attpending','Attendance not marked yet today',`${todo.map(divName).join(', ')}. Open Attendance and tap only the absent students.`,{uids:[u.id],roles:[],key:'attp:'+T,tone:'warn',go:{staff:['attendance']},self:true});
-    });
-  }
   ntPrune();
 }
-/* demo data starts with the existing notices already delivered */
-function ntSeed(){ntInit();db.notices.slice().reverse().forEach(n=>notify('notice',n.title,String(n.body||'').slice(0,140),{course:n.audience,key:'notice:'+n.id,go:{staff:['messages','notices'],portal:'pnotices'},self:true,ts:Date.now()-diffDays(today(),n.date)*864e5}));ntSync()}
+function ntSeed(){ntInit();db.notices.slice().reverse().forEach(n=>notify('notice',n.title,String(n.body||'').slice(0,140),{audience:n.audience,key:'notice:'+n.id,portal:'snotices',staff:'notices',self:true,ts:n.publishAt}));ntSync()}
 
-/* ---------- repeated wrong passwords ---------- */
+/* repeated wrong passwords */
 const ntFails={};
 function ntFailed(un,known){
   const k=String(un||'').toLowerCase();if(!k)return;const now=Date.now();const a=(ntFails[k]=(ntFails[k]||[]).filter(t=>now-t<9e5));a.push(now);
-  if(a.length>=3){notify('security',`${a.length} failed sign-ins for “${k}”`,`${known?'This login exists. Someone may be guessing the password.':'There is no login with this name.'} Open the Event Log to see when.`,{key:`sec:${k}:${Math.floor(now/9e5)}`,tone:'bad',go:{staff:['eventlog']},self:true});save()}
+  if(a.length>=3){notify('security',`${a.length} failed sign-ins for “${k}”`,known?'Someone may be guessing this password.':'No login has this name.',{roles:['Super Admin'],key:`sec:${k}:${Math.floor(now/9e5)}`,tone:'bad',staff:'audit',tab:'activity',self:true});save()}
 }
+
+/* ---------- live delivery: sound + system popup ---------- */
+let audioCtx=null,soundReady=false;
+['pointerdown','keydown'].forEach(t=>document.addEventListener(t,()=>{soundReady=true},{capture:true,once:true}));
+const muted=()=>lsGet('npcte_mute')==='1';
+function ding(){
+  if(!soundReady||muted())return; /* browsers allow sound only after the first tap or key press */
+  try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();const t=audioCtx.currentTime;
+    [[880,0],[1320,.12]].forEach(([f,d])=>{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(.0001,t+d);g.gain.exponentialRampToValueAtTime(.18,t+d+.02);g.gain.exponentialRampToValueAtTime(.0001,t+d+.25);o.connect(g);g.connect(audioCtx.destination);o.start(t+d);o.stop(t+d+.3)})}catch(e){}
+}
+function sysPopup(n){
+  try{if(!('Notification' in window)||Notification.permission!=='granted'||!document.hidden)return;
+    const show=()=>{const x=new Notification(n.t,{body:n.x||'',tag:n.id,icon:'/icons/icon-192.png'});x.onclick=()=>{window.focus();x.close()}};
+    if(navigator.serviceWorker&&navigator.serviceWorker.controller)navigator.serviceWorker.ready.then(r=>r.showNotification(n.t,{body:n.x||'',tag:n.id,icon:'/icons/icon-192.png',badge:'/icons/icon-192.png'})).catch(show);else show()}catch(e){}
+}
+/* a toast that names the notification and opens it on tap */
+function liveToast(n){
+  const box=document.getElementById('livebox')||(()=>{const b=document.createElement('div');b.id='livebox';b.setAttribute('aria-live','polite');document.body.appendChild(b);return b})();
+  const el=document.createElement('button');el.type='button';el.className='live '+(n.tone||'info');el.dataset.act='ntOpen';el.dataset.id=n.id;
+  el.innerHTML=`<span class="ldot" aria-hidden="true"></span><span><b>${E(n.t)}</b>${n.x?`<small>${E(n.x)}</small>`:''}</span>`;
+  box.prepend(el);while(box.children.length>3)box.lastChild.remove();setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),300)},6500);
+}
+function deliverLive(list){if(!list.length)return;list.slice(0,3).forEach(liveToast);ding();list.forEach(sysPopup)}
