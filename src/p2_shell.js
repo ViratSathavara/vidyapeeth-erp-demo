@@ -9,12 +9,14 @@ function renderLogin(msg){
    <div class="points"><span>Cash, Cheque, UPI and Expense in one ledger</span><span>Receipt PDF and email for every payment</span><span>Live notifications for staff and students</span></div>
    <small class="artfoot">${E(c.address)} · ${E(c.phone)}</small></section>
    <section class="login-form"><div><h2>Sign in</h2><p class="muted" style="margin:4px 0 0">Staff use their username. Students use their enrolment number or email.</p></div>
+   <div id="loginInstall" class="install-holder"></div>
    <form data-form="login" class="grid" style="gap:12px">${msg?`<div class="err" role="alert">${E(msg)}</div>`:''}
     <div class="field"><label class="label" for="lu">Username, enrolment no. or email</label><input id="lu" name="u" autocomplete="username" required autocapitalize="off" spellcheck="false"></div>
     <div class="field"><label class="label" for="lp">Password</label><input id="lp" name="p" type="password" autocomplete="current-password" required></div>
     <button class="btn primary big">Sign in</button></form>
    <div><span class="label">Demo accounts (tap to fill)</span><div class="demo-accts" style="margin-top:8px">${DEMO_ACCTS().map(a=>`<button class="acct" type="button" data-act="fillLogin" data-u="${E(a[0])}" data-p="${E(a[1])}"><b>${E(a[2])}</b><small>${E(a[0])} / ${E(a[1])}</small><small>${E(a[3])}</small></button>`).join('')}</div></div>
    <div class="actions"><button class="btn sm" data-act="theme" type="button">Dark mode</button><button class="btn sm danger" data-act="resetDemo" type="button">Reset demo data</button></div></section></div>`;
+  if(typeof renderInstallUI==='function')renderInstallUI();
 }
 ACT.fillLogin=el=>{$('#lu').value=el.dataset.u;$('#lp').value=el.dataset.p;$('#lp').focus()};
 /* demo rate limit: 5 wrong passwords in 10 minutes locks that username for 10 minutes (the server does this per IP + user) */
@@ -44,7 +46,7 @@ function renderForceChange(msg){
 }
 const pwOk=p=>p.length>=8&&/[A-Za-z]/.test(p)&&/\d/.test(p);
 FORM.forcePw=(f,d)=>{const u=cur();if(!pwOk(d.p1))return renderForceChange('Use at least 8 characters with a letter and a number.');if(d.p1!==d.p2)return renderForceChange('The two passwords are not the same.');if(d.p1===u.password)return renderForceChange('Choose a password different from the temporary one.');
-  u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();renderApp();toast('Password saved. Welcome!');if(u.role==='Student')setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
+  u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();renderApp();toast('Password saved. Welcome!');setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
 ACT.logout=()=>{const u=cur();if(u)log('Signed out','User',u.username);save();sesDel();closeLayer();renderLogin();const h=$('.login-form h2');if(h){h.tabIndex=-1;softFocus(h)}};
 ACT.resetDemo=()=>{const u=cur();if(u&&u.role!=='Super Admin')throw new Error('Only the Super Admin can reset the data');confirmBox('Reset demo data','All students, payments and changes in this browser will be replaced by fresh sample data.','Reset',()=>{seed();save();sesDel();closeLayer();renderLogin();toast('Demo data reset')},true)};
 
@@ -88,12 +90,12 @@ function renderApp(){
    <div class="rail-scrim" data-act="railClose"></div>
    <main><div class="topbar"><button class="iconbtn menu-btn" data-act="railOpen" type="button" aria-label="Open menu" aria-controls="rail" aria-expanded="false">${ICON_MENU}</button>
     <div class="tb-brand">${LOGO()}<b>${E(db.college.short)}</b></div><div class="crumb" id="crumb"></div>
-    <div class="tb-end">${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button>
+    <div class="tb-end"><span id="tbInstall" class="install-holder"></span>${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button>
     ${portal?'':`<button class="iconbtn" data-act="logout" type="button" title="Sign out" aria-label="Sign out">${ICON_OUT}</button>`}</div></div>
-    <div id="page"></div></main>
+    <div id="installSlot" class="install-holder"></div><div id="page"></div></main>
    ${portal?`<nav class="btabs" id="btabs" aria-label="Student menu"></nav>`:''}</div>`;
   renderNav();renderPage();playEnter('enter');
-  if(portal&&typeof installBanner==='function')installBanner();
+  if(typeof renderInstallUI==='function')renderInstallUI();
   if(userDriven&&(!document.activeElement||document.activeElement===document.body))focusH1();
 }
 function renderNav(){

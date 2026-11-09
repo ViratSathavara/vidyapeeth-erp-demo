@@ -755,6 +755,15 @@ table.dense th,table.dense td{padding:7px 8px;font-size:13px}
   #printArea .pt{margin-top:10px;font-weight:700}#printArea .receipt{border:1px solid #999}
 }
 @media (max-width:420px){button.kpi .v{font-size:18px}button.kpi{padding:12px}.duecard .v{font-size:26px}.hb{grid-template-columns:90px 1fr 56px}}
+/* install as app */
+.install-holder:empty{display:none}
+.installbar .btn{display:inline-flex;align-items:center;gap:6px}.installbar .btn .ic{width:16px;height:16px}
+.installbar.ib-app{margin:0 0 14px}
+.installbar.ib-login{margin:0}
+#installSlot{max-width:1560px;margin-inline:auto}
+.instbtn{display:inline-flex;align-items:center;gap:6px;width:auto!important;padding:0 10px;border:1px solid color-mix(in srgb,var(--gold) 60%,var(--line))!important;color:var(--fg);font-weight:600;font-size:13px}
+.instbtn .lbl{white-space:nowrap}
+@media (max-width:560px){.instbtn .lbl{display:none}.instbtn{padding:0;width:40px!important;justify-content:center}}
 </style>
 <div id="root"></div><div id="layer"></div><div id="dlg"></div>
 <script>
@@ -1324,12 +1333,14 @@ function renderLogin(msg){
    <div class="points"><span>Cash, Cheque, UPI and Expense in one ledger</span><span>Receipt PDF and email for every payment</span><span>Live notifications for staff and students</span></div>
    <small class="artfoot">${E(c.address)} · ${E(c.phone)}</small></section>
    <section class="login-form"><div><h2>Sign in</h2><p class="muted" style="margin:4px 0 0">Staff use their username. Students use their enrolment number or email.</p></div>
+   <div id="loginInstall" class="install-holder"></div>
    <form data-form="login" class="grid" style="gap:12px">${msg?`<div class="err" role="alert">${E(msg)}</div>`:''}
     <div class="field"><label class="label" for="lu">Username, enrolment no. or email</label><input id="lu" name="u" autocomplete="username" required autocapitalize="off" spellcheck="false"></div>
     <div class="field"><label class="label" for="lp">Password</label><input id="lp" name="p" type="password" autocomplete="current-password" required></div>
     <button class="btn primary big">Sign in</button></form>
    <div><span class="label">Demo accounts (tap to fill)</span><div class="demo-accts" style="margin-top:8px">${DEMO_ACCTS().map(a=>`<button class="acct" type="button" data-act="fillLogin" data-u="${E(a[0])}" data-p="${E(a[1])}"><b>${E(a[2])}</b><small>${E(a[0])} / ${E(a[1])}</small><small>${E(a[3])}</small></button>`).join('')}</div></div>
    <div class="actions"><button class="btn sm" data-act="theme" type="button">Dark mode</button><button class="btn sm danger" data-act="resetDemo" type="button">Reset demo data</button></div></section></div>`;
+  if(typeof renderInstallUI==='function')renderInstallUI();
 }
 ACT.fillLogin=el=>{$('#lu').value=el.dataset.u;$('#lp').value=el.dataset.p;$('#lp').focus()};
 /* demo rate limit: 5 wrong passwords in 10 minutes locks that username for 10 minutes (the server does this per IP + user) */
@@ -1359,7 +1370,7 @@ function renderForceChange(msg){
 }
 const pwOk=p=>p.length>=8&&/[A-Za-z]/.test(p)&&/\d/.test(p);
 FORM.forcePw=(f,d)=>{const u=cur();if(!pwOk(d.p1))return renderForceChange('Use at least 8 characters with a letter and a number.');if(d.p1!==d.p2)return renderForceChange('The two passwords are not the same.');if(d.p1===u.password)return renderForceChange('Choose a password different from the temporary one.');
-  u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();renderApp();toast('Password saved. Welcome!');if(u.role==='Student')setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
+  u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();renderApp();toast('Password saved. Welcome!');setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
 ACT.logout=()=>{const u=cur();if(u)log('Signed out','User',u.username);save();sesDel();closeLayer();renderLogin();const h=$('.login-form h2');if(h){h.tabIndex=-1;softFocus(h)}};
 ACT.resetDemo=()=>{const u=cur();if(u&&u.role!=='Super Admin')throw new Error('Only the Super Admin can reset the data');confirmBox('Reset demo data','All students, payments and changes in this browser will be replaced by fresh sample data.','Reset',()=>{seed();save();sesDel();closeLayer();renderLogin();toast('Demo data reset')},true)};
 
@@ -1403,12 +1414,12 @@ function renderApp(){
    <div class="rail-scrim" data-act="railClose"></div>
    <main><div class="topbar"><button class="iconbtn menu-btn" data-act="railOpen" type="button" aria-label="Open menu" aria-controls="rail" aria-expanded="false">${ICON_MENU}</button>
     <div class="tb-brand">${LOGO()}<b>${E(db.college.short)}</b></div><div class="crumb" id="crumb"></div>
-    <div class="tb-end">${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button>
+    <div class="tb-end"><span id="tbInstall" class="install-holder"></span>${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button>
     ${portal?'':`<button class="iconbtn" data-act="logout" type="button" title="Sign out" aria-label="Sign out">${ICON_OUT}</button>`}</div></div>
-    <div id="page"></div></main>
+    <div id="installSlot" class="install-holder"></div><div id="page"></div></main>
    ${portal?`<nav class="btabs" id="btabs" aria-label="Student menu"></nav>`:''}</div>`;
   renderNav();renderPage();playEnter('enter');
-  if(portal&&typeof installBanner==='function')installBanner();
+  if(typeof renderInstallUI==='function')renderInstallUI();
   if(userDriven&&(!document.activeElement||document.activeElement===document.body))focusH1();
 }
 function renderNav(){
@@ -2224,7 +2235,7 @@ function accountPanel(){return`<form class="panel" data-form="myPw"><h2>Change p
 FORM.myPw=(f,d)=>{const u=cur();if(d.old!==u.password)throw new Error('Current password is wrong');if(!pwOk(d.p1))throw new Error('Use at least 8 characters with a letter and a number');if(d.p1!==d.p2)throw new Error('The two new passwords are not the same');u.password=d.p1;log('Password changed','User',u.username);save();f.reset();toast('Password changed')};
 function staffProfileHtml(){const u=cur();const L=(k,v)=>`<div class="rline"><span>${k}</span><b style="font-weight:500;text-align:right;overflow-wrap:anywhere">${E(v||'-')}</b></div>`;
   return`<button class="btn x" data-act="close">Close</button><div class="who" style="margin:4px 0 14px"><div class="av lg">${E(initials(u.name))}</div><div><h2 style="margin:0">${E(u.name)}</h2><small class="muted">${E(u.role)}</small></div></div>
-  <div class="panel">${L('Username',u.username)}${L('Email',u.email)}${L('Last sign-in',fmtT(u.lastLoginAt))}</div><div class="panel" style="margin-top:12px"><h2>What you can open</h2><div class="actions">${navFor(u).map(n=>pill(n[1])).join('')}</div></div><div style="margin-top:12px">${accountPanel()}</div>`}
+  <div class="panel">${L('Username',u.username)}${L('Email',u.email)}${L('Last sign-in',fmtT(u.lastLoginAt))}</div><div class="panel" style="margin-top:12px"><h2>What you can open</h2><div class="actions">${navFor(u).map(n=>pill(n[1])).join('')}</div></div><div class="panel" style="margin-top:12px"><h2>App</h2><div id="profileInstall">${installPanelHtml()}</div></div><div style="margin-top:12px">${accountPanel()}</div>`}
 /* =====================================================================
    Student portal (spec §9): Home · Fees · Notices · Profile, installable PWA
    ===================================================================== */
@@ -2234,7 +2245,6 @@ function viewStudentHome(){
   const s=me(),u=cur();const sm=feeSum(s);const nn=studentNotices(s).slice(0,3);const r=new Set(u.readNotices||[]);const alerts=ntMine(u).filter(n=>!n.read).slice(0,3);
   const next=sm.sems.find(x=>x.started&&x.due>0);
   return`<div class="hello"><div class="who">${avatar(s)}<div><h1>Hi ${E(firstName(s.name))}</h1><p class="muted" style="margin:0">${E(s.enrol)} · ${E(classLabel(s))}</p></div></div></div>
-  <div id="installSlot"></div>
   <div class="duecard ${sm.payable?(sm.overdue?'bad':'warn'):'good'}"><span class="label">Fee due now</span><div class="v">${inr(sm.payable)}</div>
    <small>${sm.payable?(next?`Semester ${next.sem}${next.dueDate?' · due '+fmtD(next.dueDate):''}${next.overdue?' · overdue':''}`:''):'You have no pending fee. Thank you!'}</small>
    ${next?`<button class="btn primary big" data-act="payNow" data-sem="${next.sem}">Pay ${inr(next.due)} with UPI</button>`:''}</div>
@@ -2271,33 +2281,78 @@ function viewStudentProfile(){
      <div class="rline"><span>Phone popups</span><b>${perm==='granted'?'On':perm==='denied'?'Blocked in browser settings':perm==='unsupported'?'Not supported here':'Off'}</b></div>
      ${perm==='default'?'<button class="btn primary" data-act="askNotify">Turn on notifications</button>':''}
      <label class="chk" style="margin-top:8px"><input type="checkbox" data-change="mute" ${muted()?'':'checked'}> Sound for live notifications</label></div>
-    <div class="panel"><h2>App</h2><p class="note" style="margin:0 0 8px">Install NPCTE on your home screen to open it like an app.</p><button class="btn" data-act="installApp">Install as app</button></div>
+    <div class="panel"><h2>App</h2><div id="profileInstall">${installPanelHtml()}</div></div>
     <button class="btn danger" data-act="logout">Sign out</button></div></div>`;
 }
 FORM.myPhone=(f,d)=>{const s=me();const ph=String(d.phone||'').replace(/\D/g,'');if(!/^[6-9]\d{9}$/.test(ph))throw new Error('Enter a 10-digit mobile number');const old=s.phone;s.phone=ph;const u=cur();u.phone=ph;log('Student changed mobile','Student',s.enrol,{phone:old},{phone:ph});
   notify('system',`${s.name} changed mobile`,`${old} → ${ph}`,{roles:['Principal','Clerk'],staff:'students'});save();renderPage();toast('Mobile updated')};
 
-/* ---------- PWA: install prompt + notification permission ---------- */
-let deferredInstall=null;
-addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;installBanner()});
-addEventListener('appinstalled',()=>{deferredInstall=null;lsSet('npcte_installed','1');installBanner();toast('NPCTE app installed');setTimeout(askNotifyGently,800)});
-const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
-const isIOS=()=>/iPhone|iPad|iPod/i.test(navigator.userAgent)&&!/CriOS|FxiOS/.test(navigator.userAgent);
-function installBanner(){
-  const slot=$('#installSlot');if(!slot)return;const u=cur();if(!isStudentUser(u)||isStandalone()||lsGet('npcte_install_hide')==='1'){slot.innerHTML='';return}
-  if(!deferredInstall&&!isIOS()){slot.innerHTML='';return}
-  slot.innerHTML=`<div class="installbar" role="region" aria-label="Install the app"><div class="seal" aria-hidden="true">N</div><div><b>Install the NPCTE app</b><small>Open your fees and notices from the home screen, like any app.</small></div><button class="btn primary sm" data-act="installApp">Install</button><button class="iconbtn" data-act="installHide" aria-label="Hide">${ICON_X}</button></div>`;
-}
-ACT.installHide=()=>{lsSet('npcte_install_hide','1');installBanner()};
-ACT.installApp=async()=>{
-  if(isStandalone()){toast('You are already using the app');return}
-  if(deferredInstall){deferredInstall.prompt();const r=await deferredInstall.userChoice.catch(()=>({}));deferredInstall=null;installBanner();if(r&&r.outcome==='accepted')toast('Installing…');return}
-  dialog(`<h3>Install on your phone</h3>${isIOS()?`<ol class="steps-ol"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button (square with an arrow).</li><li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li></ol>`:`<ol class="steps-ol"><li>Open this page in <b>Chrome</b> on Android.</li><li>Tap the <b>⋮</b> menu at the top right.</li><li>Tap <b>Install app</b> (or <b>Add to Home screen</b>).</li></ol>`}<p class="note">After installing, open NPCTE from your home screen and sign in once.</p><div class="actions" style="justify-content:flex-end;margin-top:10px"><button class="btn primary" data-act="closeDialog">OK</button></div>`,'Install the app')};
-function askInstall(){installBanner();askNotifyGently()}
+/* ---------- notification permission (install logic lives in p7_pwa.js) ---------- */
 function askNotifyGently(){if(!('Notification' in window)||Notification.permission!=='default'||lsGet('npcte_ask_notify')==='1')return;lsSet('npcte_ask_notify','1');
   dialog(`<h3>Get fee alerts and notices?</h3><p class="muted" style="margin:0 0 12px">NPCTE can show a popup on this device when a payment is received, a fee is due, or the college posts a notice. You can turn this off any time.</p><div class="actions" style="justify-content:flex-end"><button class="btn" data-act="closeDialog">Not now</button><button class="btn primary" data-act="askNotify">Allow notifications</button></div>`,'Notifications')}
 ACT.askNotify=async()=>{closeDialog();if(!('Notification' in window))throw new Error('This browser does not support notifications');const r=await Notification.requestPermission();
   if(r==='granted'){toast('Notifications on');try{const reg=navigator.serviceWorker&&await navigator.serviceWorker.ready;if(reg)reg.showNotification('Notifications are on',{body:'You will get NPCTE fee alerts and notices here.',icon:'/icons/icon-192.png'})}catch(e){}}else toast('Notifications not allowed',true);if(ui.route==='sprofile')renderPage()};
+if('serviceWorker' in navigator&&location.protocol!=='file:')addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+/* =====================================================================
+   Install as an app (PWA) — for every login and on the sign-in screen.
+   Phone: a banner + a button in the top bar. Computer (Chrome / Edge): an
+   "Install app" button that adds a desktop icon; the app then opens in its
+   own window and keeps working offline (data is in this browser).
+   ===================================================================== */
+let deferredInstall=null;
+const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: window-controls-overlay)').matches||navigator.standalone===true;
+const isIOS=()=>/iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const isAndroid=()=>/Android/i.test(navigator.userAgent);
+const isMobileDevice=()=>isIOS()||isAndroid()||/Mobi/i.test(navigator.userAgent);
+const isMacSafari=()=>/Macintosh/.test(navigator.userAgent)&&/Safari\//.test(navigator.userAgent)&&!/Chrome|Chromium|Edg\//.test(navigator.userAgent)&&!isIOS();
+const isEdge=()=>/Edg\//.test(navigator.userAgent);
+/* how this browser can install: prompt (one tap) | ios | android-manual | mac-safari | none */
+function installMode(){
+  if(isStandalone())return'none';
+  if(deferredInstall)return'prompt';
+  if(isIOS())return'ios';
+  if(isMobileDevice())return'android-manual';
+  if(isMacSafari())return'mac-safari';
+  return'none'; /* desktop Chrome / Edge show the button as soon as the browser says the app can be installed */
+}
+const HIDE_KEY='npcte_install_hide_until';
+const bannerHidden=()=>+(lsGet(HIDE_KEY)||0)>Date.now();
+const ICON_INSTALL=IC('<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/>');
+function installCard(where){
+  const mob=isMobileDevice();
+  const title=mob?'Install the NPCTE app':'Install NPCTE on this computer';
+  const sub=mob?'Home-screen app, full screen, with alerts.':'Adds a desktop icon. Opens in its own window and works offline.';
+  return`<div class="installbar ib-${where}" role="region" aria-label="Install the app"><div class="seal" aria-hidden="true">N</div><div><b>${title}</b><small>${sub}</small></div>
+   <button class="btn primary sm" type="button" data-act="installApp">${ICON_INSTALL}<span>Install</span></button>${where==='login'?'':`<button class="iconbtn" type="button" data-act="installHide" aria-label="Hide for a week" title="Hide">${ICON_X}</button>`}</div>`;
+}
+function renderInstallUI(){
+  const mode=installMode(),can_=mode!=='none';
+  const tb=$('#tbInstall');if(tb)tb.innerHTML=can_?`<button class="iconbtn instbtn" type="button" data-act="installApp" title="Install app" aria-label="Install app">${ICON_INSTALL}<span class="lbl">Install app</span></button>`:'';
+  const lg=$('#loginInstall');if(lg)lg.innerHTML=can_?installCard('login'):'';
+  /* inside the app the banner shows on phones only (the top-bar button is there on every screen) */
+  const sl=$('#installSlot');if(sl)sl.innerHTML=can_&&isMobileDevice()&&!bannerHidden()?installCard('app'):'';
+  const pf=$('#profileInstall');if(pf)pf.innerHTML=installPanelHtml();
+}
+function installPanelHtml(){
+  if(isStandalone())return`<p class="note" style="margin:0">You are using the installed app.</p>`;
+  return`<p class="note" style="margin:0 0 8px">${isMobileDevice()?'Put NPCTE on your home screen to open it like an app.':'Add NPCTE to this computer: desktop icon, its own window, works offline.'}</p><button class="btn" type="button" data-act="installApp">${ICON_INSTALL} Install as app</button>`;
+}
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;renderInstallUI()});
+addEventListener('appinstalled',()=>{deferredInstall=null;renderInstallUI();toast('NPCTE app installed. Open it from your '+(isMobileDevice()?'home screen':'desktop or Start menu')+'.');if(cur())setTimeout(()=>typeof askNotifyGently==='function'&&askNotifyGently(),800)});
+try{matchMedia('(display-mode: standalone)').addEventListener('change',renderInstallUI)}catch(e){}
+ACT.installHide=()=>{lsSet(HIDE_KEY,String(Date.now()+7*864e5));renderInstallUI();toast('Hidden. The Install button stays in the top bar.')};
+ACT.installApp=async()=>{
+  if(isStandalone()){toast('You are already using the installed app');return}
+  if(deferredInstall){const ev_=deferredInstall;deferredInstall=null;ev_.prompt();const r=await ev_.userChoice.catch(()=>({}));renderInstallUI();if(r&&r.outcome==='accepted')toast('Installing NPCTE…');return}
+  const mode=installMode();
+  const steps=mode==='ios'?`<ol class="steps-ol"><li>Open this page in <b>Safari</b> (on iPhone 16.4+ Chrome also works).</li><li>Tap the <b>Share</b> button (square with an arrow).</li><li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li></ol>`
+   :mode==='android-manual'?`<ol class="steps-ol"><li><b>Chrome:</b> tap <b>⋮</b> at the top right → <b>Install app</b> (or <b>Add to Home screen</b>).</li><li><b>Samsung Internet:</b> tap <b>☰</b> → <b>Add page to</b> → <b>Home screen</b>.</li></ol>`
+   :mode==='mac-safari'?`<ol class="steps-ol"><li>In the Safari menu bar choose <b>File → Add to Dock</b>.</li><li>Click <b>Add</b>. NPCTE opens from the Dock in its own window.</li></ol>`
+   :isEdge()?`<ol class="steps-ol"><li>Click <b>…</b> at the top right → <b>Apps</b> → <b>Install this site as an app</b>.</li><li>Tick <b>Create desktop shortcut</b> if asked.</li></ol>`
+   :`<ol class="steps-ol"><li><b>Chrome:</b> click the install icon at the right end of the address bar, or <b>⋮</b> → <b>Cast, save and share</b> → <b>Install page as app</b>.</li><li><b>Edge:</b> <b>…</b> → <b>Apps</b> → <b>Install this site as an app</b>.</li><li>Firefox cannot install apps; use Chrome or Edge.</li></ol>`;
+  dialog(`<h3>Install NPCTE</h3>${steps}<p class="note">After installing, open NPCTE from your ${isMobileDevice()?'home screen':'desktop, Start menu or Dock'} and sign in once.</p><div class="actions" style="justify-content:flex-end;margin-top:10px"><button class="btn primary" data-act="closeDialog">OK</button></div>`,'Install the app');
+};
+function askInstall(){renderInstallUI();if(typeof askNotifyGently==='function')askNotifyGently()}
 if('serviceWorker' in navigator&&location.protocol!=='file:')addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 /* =====================================================================
    Dashboard (spec §4): KPI cards, 4 charts, lists. Every card and chart links to the list behind it.

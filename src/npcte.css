@@ -155,3 +155,12 @@ table.dense th,table.dense td{padding:7px 8px;font-size:13px}
   #printArea .pt{margin-top:10px;font-weight:700}#printArea .receipt{border:1px solid #999}
 }
 @media (max-width:420px){button.kpi .v{font-size:18px}button.kpi{padding:12px}.duecard .v{font-size:26px}.hb{grid-template-columns:90px 1fr 56px}}
+/* install as app */
+.install-holder:empty{display:none}
+.installbar .btn{display:inline-flex;align-items:center;gap:6px}.installbar .btn .ic{width:16px;height:16px}
+.installbar.ib-app{margin:0 0 14px}
+.installbar.ib-login{margin:0}
+#installSlot{max-width:1560px;margin-inline:auto}
+.instbtn{display:inline-flex;align-items:center;gap:6px;width:auto!important;padding:0 10px;border:1px solid color-mix(in srgb,var(--gold) 60%,var(--line))!important;color:var(--fg);font-weight:600;font-size:13px}
+.instbtn .lbl{white-space:nowrap}
+@media (max-width:560px){.instbtn .lbl{display:none}.instbtn{padding:0;width:40px!important;justify-content:center}}

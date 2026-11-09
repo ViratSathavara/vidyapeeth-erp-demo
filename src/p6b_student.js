@@ -7,7 +7,6 @@ function viewStudentHome(){
   const s=me(),u=cur();const sm=feeSum(s);const nn=studentNotices(s).slice(0,3);const r=new Set(u.readNotices||[]);const alerts=ntMine(u).filter(n=>!n.read).slice(0,3);
   const next=sm.sems.find(x=>x.started&&x.due>0);
   return`<div class="hello"><div class="who">${avatar(s)}<div><h1>Hi ${E(firstName(s.name))}</h1><p class="muted" style="margin:0">${E(s.enrol)} · ${E(classLabel(s))}</p></div></div></div>
-  <div id="installSlot"></div>
   <div class="duecard ${sm.payable?(sm.overdue?'bad':'warn'):'good'}"><span class="label">Fee due now</span><div class="v">${inr(sm.payable)}</div>
    <small>${sm.payable?(next?`Semester ${next.sem}${next.dueDate?' · due '+fmtD(next.dueDate):''}${next.overdue?' · overdue':''}`:''):'You have no pending fee. Thank you!'}</small>
    ${next?`<button class="btn primary big" data-act="payNow" data-sem="${next.sem}">Pay ${inr(next.due)} with UPI</button>`:''}</div>
@@ -44,29 +43,13 @@ function viewStudentProfile(){
      <div class="rline"><span>Phone popups</span><b>${perm==='granted'?'On':perm==='denied'?'Blocked in browser settings':perm==='unsupported'?'Not supported here':'Off'}</b></div>
      ${perm==='default'?'<button class="btn primary" data-act="askNotify">Turn on notifications</button>':''}
      <label class="chk" style="margin-top:8px"><input type="checkbox" data-change="mute" ${muted()?'':'checked'}> Sound for live notifications</label></div>
-    <div class="panel"><h2>App</h2><p class="note" style="margin:0 0 8px">Install NPCTE on your home screen to open it like an app.</p><button class="btn" data-act="installApp">Install as app</button></div>
+    <div class="panel"><h2>App</h2><div id="profileInstall">${installPanelHtml()}</div></div>
     <button class="btn danger" data-act="logout">Sign out</button></div></div>`;
 }
 FORM.myPhone=(f,d)=>{const s=me();const ph=String(d.phone||'').replace(/\D/g,'');if(!/^[6-9]\d{9}$/.test(ph))throw new Error('Enter a 10-digit mobile number');const old=s.phone;s.phone=ph;const u=cur();u.phone=ph;log('Student changed mobile','Student',s.enrol,{phone:old},{phone:ph});
   notify('system',`${s.name} changed mobile`,`${old} → ${ph}`,{roles:['Principal','Clerk'],staff:'students'});save();renderPage();toast('Mobile updated')};
 
-/* ---------- PWA: install prompt + notification permission ---------- */
-let deferredInstall=null;
-addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;installBanner()});
-addEventListener('appinstalled',()=>{deferredInstall=null;lsSet('npcte_installed','1');installBanner();toast('NPCTE app installed');setTimeout(askNotifyGently,800)});
-const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
-const isIOS=()=>/iPhone|iPad|iPod/i.test(navigator.userAgent)&&!/CriOS|FxiOS/.test(navigator.userAgent);
-function installBanner(){
-  const slot=$('#installSlot');if(!slot)return;const u=cur();if(!isStudentUser(u)||isStandalone()||lsGet('npcte_install_hide')==='1'){slot.innerHTML='';return}
-  if(!deferredInstall&&!isIOS()){slot.innerHTML='';return}
-  slot.innerHTML=`<div class="installbar" role="region" aria-label="Install the app"><div class="seal" aria-hidden="true">N</div><div><b>Install the NPCTE app</b><small>Open your fees and notices from the home screen, like any app.</small></div><button class="btn primary sm" data-act="installApp">Install</button><button class="iconbtn" data-act="installHide" aria-label="Hide">${ICON_X}</button></div>`;
-}
-ACT.installHide=()=>{lsSet('npcte_install_hide','1');installBanner()};
-ACT.installApp=async()=>{
-  if(isStandalone()){toast('You are already using the app');return}
-  if(deferredInstall){deferredInstall.prompt();const r=await deferredInstall.userChoice.catch(()=>({}));deferredInstall=null;installBanner();if(r&&r.outcome==='accepted')toast('Installing…');return}
-  dialog(`<h3>Install on your phone</h3>${isIOS()?`<ol class="steps-ol"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button (square with an arrow).</li><li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li></ol>`:`<ol class="steps-ol"><li>Open this page in <b>Chrome</b> on Android.</li><li>Tap the <b>⋮</b> menu at the top right.</li><li>Tap <b>Install app</b> (or <b>Add to Home screen</b>).</li></ol>`}<p class="note">After installing, open NPCTE from your home screen and sign in once.</p><div class="actions" style="justify-content:flex-end;margin-top:10px"><button class="btn primary" data-act="closeDialog">OK</button></div>`,'Install the app')};
-function askInstall(){installBanner();askNotifyGently()}
+/* ---------- notification permission (install logic lives in p7_pwa.js) ---------- */
 function askNotifyGently(){if(!('Notification' in window)||Notification.permission!=='default'||lsGet('npcte_ask_notify')==='1')return;lsSet('npcte_ask_notify','1');
   dialog(`<h3>Get fee alerts and notices?</h3><p class="muted" style="margin:0 0 12px">NPCTE can show a popup on this device when a payment is received, a fee is due, or the college posts a notice. You can turn this off any time.</p><div class="actions" style="justify-content:flex-end"><button class="btn" data-act="closeDialog">Not now</button><button class="btn primary" data-act="askNotify">Allow notifications</button></div>`,'Notifications')}
 ACT.askNotify=async()=>{closeDialog();if(!('Notification' in window))throw new Error('This browser does not support notifications');const r=await Notification.requestPermission();
