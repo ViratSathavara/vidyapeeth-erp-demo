@@ -51,8 +51,8 @@ function saveBanner(on){
 function save(){const ok=lsSet(LS_KEY,JSON.stringify(db));saveBad=!ok;if(!ok){saveTick=true;Promise.resolve().then(()=>{saveTick=false})}saveBanner(!ok);return ok}
 function load(){const raw=lsGet(LS_KEY);if(raw){try{db=JSON.parse(raw);if(db&&db.ver===DB_VER){migrate();return}}catch(e){}}seed();save()}
 function migrate(){
-  const s=db.settings;s.flags=Object.assign({expenseReducesDue:false,fundingAllCategories:false,lateFee:false},s.flags||{});
-  if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];if(!db.expenses)db.expenses=[];
+  const s=db.settings;s.flags=Object.assign({fundingAllCategories:false,lateFee:false},s.flags||{});delete s.flags.expenseReducesDue;delete s.expenseCats;
+  if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no separate expense ledger: an expense is a fee taken By Expense */
   if(!db.enquiries)db.enquiries=[];
 }
 const NAME_MAX=80;
@@ -63,7 +63,7 @@ const PERMS=[
  ['dashboard.view','See the dashboard'],
  ['students.view','View students'],['students.edit','Add and edit students, resend logins'],
  ['fees.view','Open Fee Collection'],['fees.collect','Collect payments (Cash, Cheque, UPI)'],['fees.cancel','Cancel a receipt (with reason)'],
- ['fees.editdate','Edit invoice date of Cash / Cheque / Expense'],['expenses.manage','Add expenses'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
+ ['fees.editdate','Edit invoice date of Cash / Cheque / Expense'],['expenses.manage','Collect fee By Expense'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
  ['audit.view','Transactions audit and exports'],['audit.deposit','Mark cash / cheque as deposited'],['activity.view','Activity log (every action)'],
  ['notices.post','Post notices and fee reminders'],['enquiries.view','Admission enquiries'],
  ['settings.manage','College settings'],['roles.manage','Roles and permissions']];
@@ -108,7 +108,7 @@ const okPays=s=>db.payments.filter(p=>p.studentId===s.id&&p.status==='SUCCESS');
 function semSummary(s,n){
   const f=semFee(s,n);const amount=f?f.amount:0;
   const paid=sum(okPays(s).filter(p=>p.sem===n),p=>p.amount);
-  const adj=db.settings.flags.expenseReducesDue?sum(db.expenses.filter(x=>x.studentId===s.id&&x.sem===n),x=>x.amount):0;
+  const adj=0;
   const due=Math.max(0,amount-paid-adj);const dueDate=f&&f.due||'';
   const started=n<=s.sem;
   const T=today();const overdue=started&&due>0&&dueDate&&dueDate<T;
@@ -125,6 +125,13 @@ function feeSum(s){
    UPI -> payment date in India + 1 day, never editable */
 const upiInvoiceDate=paidAt=>addDays(istDate(paidAt),1);
 function nextReceiptNo(){const c=db.college;const n=c.nextReceipt++;return`${c.receiptPrefix}${pad(n,4)}`}
+/* batch = the student's 2-year course batch, typed by the clerk on every receipt, e.g. 2025-27 */
+const defaultBatch=s=>s&&s.admissionYear?`${s.admissionYear}-${String(s.admissionYear+2).slice(2)}`:'';
+const batchOf=p=>p.batch||defaultBatch(stu(p.studentId));
+function cleanBatch(v){const t=String(v||'').replace(/\s+/g,'').replace(/[–—\/]/g,'-');
+  const m=t.match(/^(20\d{2})-(\d{2}|20\d{2})$/);if(!m)throw new Error('Enter the batch like 2025-27');
+  const a=+m[1],b=m[2].length===4?+m[2]:Math.floor(a/100)*100+(+m[2]);if(!(b>a&&b-a<=5))throw new Error('Batch end year must be after the start year, e.g. 2025-27');
+  return`${a}-${String(b).slice(2)}`}
 function recordPayment(s,o){
   /* o: {sem, mode, amount(paise), invoiceDate?, chequeNo?, bank?, chequeDate?, upiRef?, providerTxnId?, note?, paidAt?} */
   const sm=semSummary(s,o.sem);
@@ -136,9 +143,9 @@ function recordPayment(s,o){
   const u=cur();
   const p={id:uid('p'),studentId:s.id,sem:o.sem,mode:o.mode,amount:o.amount,invoiceDate,entryAt,paidAt:o.paidAt||entryAt,
     chequeNo:o.chequeNo||'',bank:o.bank||'',chequeDate:o.chequeDate||'',upiRef:o.upiRef||'',providerTxnId:o.providerTxnId||'',note:o.note||'',
-    status:'SUCCESS',cancelReason:'',rc:nextReceiptNo(),depositId:'',by:u?u.name:'Payment gateway',byId:u?u.id:'',dateEdits:[]};
+    batch:o.batch||defaultBatch(s),reason:o.reason||'',category:o.category||'',status:'SUCCESS',cancelReason:'',rc:nextReceiptNo(),depositId:'',by:u?u.name:'Payment gateway',byId:u?u.id:'',dateEdits:[]};
   db.payments.push(p);
-  log('Payment recorded','Payment',p.rc,null,{student:s.enrol,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate)});
+  log('Payment recorded','Payment',p.rc,null,{student:s.enrol,batch:p.batch,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate)});
   return p;
 }
 function cancelPayment(p,reason){
@@ -186,17 +193,17 @@ function seed(){
     college:{name:"The New Progressive College of Teachers' Education",short:'NPCTE',trust:'Karve Trust',address:"'PRASAD' Building, Karve Campus, Mahesana 384001",phone:'02762 220395',email:'npcte@yahoo.co.in',website:'https://npcte.org',receiptPrefix:'NPCTE/'+String(yNow).slice(2)+'-',nextReceipt:1,year:`${yNow}-${String(yNow+1).slice(2)}`},
     settings:{feeDefault:{BED:[3000000,3000000,3000000,3000000],MED:[3000000,3000000,3000000,3000000]},
       dueDates:{BED:['11-15','04-30','11-15','04-30'],MED:['11-15','04-30','11-15','04-30']},reminderDays:7,
-      flags:{expenseReducesDue:false,fundingAllCategories:false,lateFee:false},
+      flags:{fundingAllCategories:false,lateFee:false},
       upi:{provider:'Razorpay',vpa:'npcte@okaxis',mode:'Sandbox',googlePay:false},
       mail:{mode:'demo',fromName:"NPCTE Accounts",replyTo:'npcte@yahoo.co.in',sendReceipts:true,sendCredentials:true},
-      sound:true,expenseCats:['Purchase','Fee adjustment','Maintenance','Other']},
+      sound:true},
     courses:[{id:'BED',name:'B.Ed',semesters:4},{id:'MED',name:'M.Ed',semesters:4}],
     roles:DEFAULT_ROLES(),
     users:[
       {id:'u_admin',role:'Super Admin',name:'Virat Sathavara',username:'admin',email:'admin@npcte.org',phone:'',password:'admin123',mustChange:false,active:true,lastLoginAt:0},
       {id:'u_prin',role:'Principal',name:'Principal, NPCTE',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0}],
-    students:[],payments:[],expenses:[],deposits:[],notices:[],notifs:[],audit:[],outbox:[],upiOrders:[],enquiries:[],
+    students:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],outbox:[],upiOrders:[],enquiries:[],
     counters:{enrol:{},exp:1}};
   /* sample names only (demo) */
   const names=[['Riya Joshi','F'],['Hardik Patel','M'],['Kinjal Prajapati','F'],['Mehul Chaudhary','M'],['Nirali Desai','F'],['Jignesh Rabari','M'],['Pooja Solanki','F'],['Ankit Thakor','M'],['Bhumi Modi','F'],['Kaushal Vaghela','M'],
@@ -212,7 +219,7 @@ function seed(){
   });
   /* payments in all 4 modes, dated in the last few weeks */
   const by=db.users[2];const mk=(s,sem,mode,amt,dAgo,extra={})=>{const ts=Date.now()-dAgo*864e5-3600e3*(1+(dAgo%5));const inv=mode==='UPI'?upiInvoiceDate(ts):addDays(today(),-dAgo-(extra.back||0));
-    db.payments.push(Object.assign({id:uid('p'),studentId:s.id,sem,mode,amount:amt,invoiceDate:inv,entryAt:ts,paidAt:ts,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'SUCCESS',cancelReason:'',rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:mode==='UPI'?'Payment gateway':by.name,byId:mode==='UPI'?'':by.id,dateEdits:[]},extra.f||{}))};
+    db.payments.push(Object.assign({id:uid('p'),studentId:s.id,sem,mode,amount:amt,invoiceDate:inv,entryAt:ts,paidAt:ts,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'SUCCESS',cancelReason:'',rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:mode==='UPI'?'Payment gateway':by.name,byId:mode==='UPI'?'':by.id,dateEdits:[],batch:defaultBatch(s),reason:'',category:''},extra.f||{}))};
   const S=db.students;
   S.forEach((s,i)=>{
     const f1=semFee(s,1).amount;
@@ -220,14 +227,12 @@ function seed(){
     else if(i%5===1)mk(s,1,'CASH',f1,3+i,{back:i%3});
     else if(i%5===2)mk(s,1,'CHEQUE',Math.round(f1/2),4+i,{f:{chequeNo:String(100200+i),bank:['SBI','Bank of Baroda','Mehsana Urban Co-op Bank'][i%3],chequeDate:addDays(today(),-6-i)}});
     else if(i%5===3)mk(s,1,'CASH',1500000,1+i);
+    else if(i%10===4)mk(s,1,'EXPENSE',1000000,5+i,{f:{reason:['Exam form fees paid to the university','Practice-teaching school material'][i%2]}});
     if(s.sem===3){mk(s,2,i%2?'UPI':'CASH',semFee(s,2).amount,60+i);mk(s,1,'CASH',f1,200+i)}
   });
   /* one cancelled receipt */
   const pc=db.payments.find(p=>p.mode==='CASH');if(pc){const s=stu(pc.studentId);const extra={id:uid('p'),studentId:s.id,sem:pc.sem,mode:'CASH',amount:500000,invoiceDate:addDays(today(),-9),entryAt:Date.now()-9*864e5,paidAt:Date.now()-9*864e5,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'CANCELLED',cancelReason:'Entered twice by mistake',cancelledAt:Date.now()-9*864e5+6e5,cancelledBy:by.name,rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:by.name,byId:by.id,dateEdits:[]};db.payments.push(extra)}
   db.payments.forEach(p=>{if(p.mode==='UPI'){p.upiRef='UTR'+String(400000000000+Math.floor(rnd()*9e10));p.providerTxnId='pay_'+Math.floor(rnd()*1e12).toString(36)}});
-  /* expenses */
-  [['Library books purchase','Purchase',350000,5,null],['Fee adjustment – sem 1 duplicate entry','Fee adjustment',200000,8,S[3]],['Projector repair','Maintenance',180000,12,null],['Stationery for exam cell','Purchase',95000,20,null]]
-    .forEach(([r,c,a,d,s])=>db.expenses.push({id:uid('x'),ref:'EXP-'+pad(db.counters.exp++,4),studentId:s?s.id:'',sem:s?1:null,amount:a,reason:r,category:c,date:addDays(today(),-d),entryAt:Date.now()-d*864e5,by:by.name,byId:by.id,dateEdits:[]}));
   /* an older deposit so the report shows both deposited and pending money */
   const old=db.payments.filter(p=>p.status==='SUCCESS'&&(p.mode==='CASH'||p.mode==='CHEQUE')&&diffDays(today(),p.invoiceDate)>40);
   if(old.length){const dp={id:uid('d'),type:'CASH+CHEQUE',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,p=>p.amount),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}

@@ -5,7 +5,7 @@ const login=un=>{const u=db.users.find(x=>x.username===un);A.sesSet(u.id);return
 login('clerk');
 // render every staff view without throwing
 for(const [n,f] of [['dash',A.viewDashboard],['stu',A.viewStudents],['fees',A.viewFees],['audit',A.viewAudit],['notices',A.viewNotices]]){
-  for(const t of n==='fees'?['collect','expenses','dues','receipts']:n==='audit'?['tx','deposit']:[null]){if(t)A.ui.tab[n==='fees'?'fees':'audit']=t;try{const h=f();ok(typeof h==='string'&&h.length>100,n+' '+t)}catch(e){fail++;console.log('THROW',n,t,e.message,e.stack.split('\n')[1])}}}
+  for(const t of n==='fees'?['collect','dues','receipts']:n==='audit'?['tx','deposit']:[null]){if(t)A.ui.tab[n==='fees'?'fees':'audit']=t;try{const h=f();ok(typeof h==='string'&&h.length>100,n+' '+t)}catch(e){fail++;console.log('THROW',n,t,e.message,e.stack.split('\n')[1])}}}
 // clerk cannot see settings/activity
 ok(!A.can('roles.manage')&&!A.can('activity.view')&&!A.can('settings.manage'),'clerk perms');
 try{A.ui.tab.audit='activity';const h=A.viewAudit();ok(!/Activity log \</.test(h)||true,'clerk activity hidden')}catch(e){ok(true,'')}
@@ -49,4 +49,19 @@ const aud=A.audienceStudents({type:'sem',course:'BED',sem:1});ok(aud.length&&aud
 login('admin');for(const t of ['college','fees','roles','users','mail','flags','data']){A.ui.tab.settings=t;try{ok(A.viewSettings().length>100,'settings '+t)}catch(e){fail++;console.log('THROW settings',t,e.message,e.stack.split('\n')[1])}}
 A.ui.tab.audit='activity';try{ok(A.viewAudit().length>100,'activity')}catch(e){fail++;console.log('THROW activity',e.message)}
 try{ok(A.receiptPdf(db.payments[0]).startsWith('%PDF'),'pdf')}catch(e){fail++;console.log('THROW pdf',e.message)}
+// batch (manual, required on the clerk's payment form)
+ok(A.cleanBatch('2025-27')==='2025-27'&&A.cleanBatch(' 2025 - 2027 ')==='2025-27'&&A.cleanBatch('2025/27')==='2025-27','batch normalise');
+for(const bad of ['','2025','25-27','2027-25','2025-2035','abcd-ef']){threw=false;try{A.cleanBatch(bad)}catch(e){threw=true}ok(threw,'batch rejects '+JSON.stringify(bad))}
+login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).payable>=2000000);const m2=A.feeSum(s2).sems.find(x=>x.due>=1000000);
+ A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'CASH'};const n0=db.payments.length;
+ threw=false;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'1000',batch:'',invoiceDate:'2026-11-08'})}catch(e){threw=/batch/i.test(e.message)}ok(threw&&db.payments.length===n0,'cash without batch refused');
+ A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'EXPENSE'};const due0=A.semSummary(s2,m2.sem).due;
+ threw=false;try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'1000',batch:'2025-27',invoiceDate:'2026-11-08',reason:''})}catch(e){threw=true}ok(threw,'expense needs reason');
+ A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'EXPENSE'};
+ try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08',reason:'Exam fees paid to university',category:''})}catch(e){if(!/showReceipt|not defined|drawer/.test(e.message))console.log('collect err',e.message)}
+ const pe=db.payments.at(-1);ok(pe.mode==='EXPENSE'&&pe.batch==='2025-27'&&pe.reason==='Exam fees paid to university'&&pe.invoiceDate==='2026-11-08','expense payment saved');
+ ok(A.semSummary(s2,m2.sem).due===due0-1000000,'expense reduces due');ok(!A.db.expenses&&!A.feeTabs().some(t=>t[0]==='expenses'),'no separate expense section');
+ ok(/2025-27/.test(A.receiptHtml(pe))&&/Exam fees/.test(A.receiptHtml(pe)),'receipt shows batch + reason');
+ A.ui.f['audit.tx']={modes:['EXPENSE']};ok(A.txFiltered().some(r=>r.id===pe.id&&r.batch==='2025-27'),'audit has expense fee');
+ ok(A.receiptPdf(pe).startsWith('%PDF'),'expense pdf');}
 console.log('pass',pass,'fail',fail);

@@ -1,18 +1,18 @@
 /* =====================================================================
    Fee Collection (spec §5): 5 tabs
-   Collect payment · Expenses · Pending dues · Receipts · Fee setup
+   Collect payment (Cash / Cheque / UPI / Expense) · Pending dues · Receipts · Fee setup
    ===================================================================== */
 const MODES=[['CASH','By Cash'],['CHEQUE','By Cheque'],['UPI','By UPI'],['EXPENSE','By Expense']];
 const modeName=m=>({CASH:'Cash',CHEQUE:'Cheque',UPI:'UPI',EXPENSE:'Expense'}[m]||m);
 const MODE_TONE={CASH:'m-cash',CHEQUE:'m-cheque',UPI:'m-upi',EXPENSE:'m-exp'};
 const modePill=m=>`<span class="pill ${MODE_TONE[m]||''}">${E(modeName(m))}</span>`;
 const payPill=st=>st==='SUCCESS'?pill('Success','good'):st==='CANCELLED'?pill('Cancelled','bad'):st==='FAILED'?pill('Failed','bad'):pill('Pending','warn');
-function feeTabs(){const t=[['collect','Collect payment']];if(can('expenses.manage')||can('audit.view'))t.push(['expenses','Expenses']);t.push(['dues','Pending dues'],['receipts','Receipts']);if(can('fees.setup'))t.push(['setup','Fee setup']);return t}
+function feeTabs(){const t=[['collect','Collect payment']];t.push(['dues','Pending dues'],['receipts','Receipts']);if(can('fees.setup'))t.push(['setup','Fee setup']);return t}
 function viewFees(){
   const tabs=feeTabs();let t=ui.tab.fees||'collect';if(!tabs.some(x=>x[0]===t))t='collect';ui.tab.fees=t;
   const T=today();const tp=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);
   return head('Fee Collection',`Today: ${inr(sum(tp,p=>p.amount))} in ${tp.length} receipt${tp.length===1?'':'s'} · ${fmtD(T)}`,'')+tabsBar('fees',tabs,t)+
-   ({collect:feeCollect,expenses:feeExpenses,dues:feeDues,receipts:feeReceipts,setup:feeSetup}[t])();
+   ({collect:feeCollect,dues:feeDues,receipts:feeReceipts,setup:feeSetup}[t])();
 }
 
 /* ---------- 1. collect ---------- */
@@ -32,11 +32,11 @@ function feeCollect(){
   }
   return`<div class="grid two-col">${body}<div class="panel"><h2>Today's collection</h2>${todayBox()}</div></div>`;
 }
-function todayBox(){const T=today();const ok=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);const ex=db.expenses.filter(x=>x.date===T);
+function todayBox(){const T=today();const ok=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);const ex=ok.filter(p=>p.mode==='EXPENSE');
   return`<div class="list">${['CASH','CHEQUE','UPI'].map(m=>`<div class="li"><span>${modePill(m)}</span><b class="amt">${inr(sum(ok.filter(p=>p.mode===m),p=>p.amount))}</b></div>`).join('')}<div class="li"><span>${modePill('EXPENSE')}</span><b class="amt">${inr(sum(ex,x=>x.amount))}</b></div></div>
   <h3>Latest receipts</h3><div class="list">${db.payments.filter(p=>p.status==='SUCCESS').sort((a,b)=>b.entryAt-a.entryAt).slice(0,6).map(p=>`<button class="li pick" data-act="viewReceipt" data-id="${E(p.id)}"><div><b>${E(stu(p.studentId).name)}</b><small>${E(p.rc)} · ${modeName(p.mode)} · invoice ${fmtD(p.invoiceDate)}</small></div><b class="amt">${inr(p.amount)}</b></button>`).join('')||'<p class="note">None yet.</p>'}</div>`}
 function collectForm(s,m,mode){
-  const T=today();const amt=F('amount','Amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}"`});
+  const T=today();const amt=F('amount','Amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}"`})+F('batch','Batch (e.g. 2025-27)',{req:true,ph:'2025-27',attrs:'maxlength="11" autocomplete="off"'});
   if(mode==='CASH')return`<form data-form="collect" data-mode="CASH" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true})}${F('note','Note (optional)',{span:1,attrs:'maxlength="120"'})}
    <p class="note span">Invoice date = the date you enter here (default today). The receipt uses this date. You can change it later in Receipts.</p><div class="actions span"><button class="btn primary big">Save cash payment · issue receipt</button></div></form>`;
   if(mode==='CHEQUE')return`<form data-form="collect" data-mode="CHEQUE" class="form">${amt}${F('chequeNo','Cheque no.',{req:true,attrs:'inputmode="numeric" maxlength="10"'})}${F('bank','Bank',{req:true,attrs:'maxlength="60" list="banks"'})}<datalist id="banks"><option>State Bank of India</option><option>Bank of Baroda</option><option>Mehsana Urban Co-op Bank</option><option>HDFC Bank</option><option>ICICI Bank</option></datalist>
@@ -44,7 +44,10 @@ function collectForm(s,m,mode){
   if(mode==='UPI'){const pv=upiInvoiceDate(Date.now());return`<form data-form="upiPay" class="form">${amt}<div class="field"><span class="label">Invoice date</span><div class="ro">${fmtD(pv)} <small class="muted">(payment date + 1 day, set automatically)</small></div></div>
    <p class="note span">A UPI order is created with ${E(db.settings.upi.provider)} (${E(db.settings.upi.mode)}). The student scans the QR with Google Pay or any UPI app. The payment becomes Success only when the gateway's verified webhook arrives — never from this screen.</p>
    <div class="actions span"><button class="btn primary big">Create UPI request · show QR</button></div></form>`}
-  return`<div class="flow"><div><b>Expense</b><p class="note" style="margin:4px 0 0">Expenses are kept in their own ledger${db.settings.flags.expenseReducesDue?' and reduce this student\'s due':' and do not change this student\'s due'}.</p></div><button class="btn primary" data-act="newExpense" data-sid="${E(s.id)}" data-sem="${m.sem}">Open expense form</button></div>`;
+  return`<form data-form="collect" data-mode="EXPENSE" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}
+   ${F('reason','Expense: what was this fee used for?',{req:true,span:1,attrs:'maxlength="160" minlength="3"'})}
+   <p class="note span">By Expense: this student's fee was used directly for a college expense. The fee counts as paid: a receipt is issued and the due goes down. It shows as Expense in Receipts, Audit and the Dashboard. Invoice date works like Cash and can be edited later.</p>
+   <div class="actions span"><button class="btn primary big">Save fee by expense · issue receipt</button></div></form>`;
 }
 LIVE.colQ=el=>{ui.col.q=el.value;clearTimeout(LIVE._c);LIVE._c=setTimeout(()=>{renderPage();const i=$('#colQ');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}},150)};
 ACT.colPick=el=>{const s=stu(el.dataset.id);const sm=feeSum(s);const first=sm.sems.find(x=>x.started&&x.due>0)||sm.sems.find(x=>x.due>0);ui.col={q:'',sid:s.id,sem:first?first.sem:0,mode:ui.col.mode||'CASH'};renderPage()};
@@ -54,8 +57,10 @@ ACT.colMode=el=>{ui.col.mode=el.dataset.m;renderPage();if(el.dataset.m==='EXPENS
 ACT.collectFor=el=>{need('fees.collect','collect fees');closeLayer();ui.col={q:'',sid:el.dataset.id,sem:+el.dataset.sem||0,mode:'CASH'};if(!ui.col.sem){const f=feeSum(stu(el.dataset.id)).sems.find(x=>x.started&&x.due>0);ui.col.sem=f?f.sem:0}go('fees','collect')};
 function amountOf(d,m){const a=toPaise(d.amount);if(!(a>0))throw new Error('Enter the amount');if(a>m.due)throw new Error(`Amount is more than the semester ${m.sem} due (${inr(m.due)})`);return a}
 FORM.collect=(f,d)=>{
-  need('fees.collect','collect fees');const c=ui.col;const s=stu(c.sid);if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');const m=semSummary(s,c.sem);const mode=f.dataset.mode;
-  const o={sem:c.sem,mode,amount:amountOf(d,m),invoiceDate:d.invoiceDate,note:capText(d.note,'Note',120)};
+  const mode=f.dataset.mode;if(mode==='EXPENSE')need('expenses.manage','add expenses');else need('fees.collect','collect fees');
+  const c=ui.col;const s=stu(c.sid);if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');const m=semSummary(s,c.sem);
+  const o={sem:c.sem,mode,amount:amountOf(d,m),batch:cleanBatch(d.batch),invoiceDate:d.invoiceDate,note:capText(d.note,'Note',120)};
+  if(mode==='EXPENSE'){o.reason=capText(d.reason,'Reason',160);if(o.reason.length<3)throw new Error('Write what the money was used for');if(!validIso(o.invoiceDate))throw new Error('Choose a valid invoice date')}
   if(mode==='CHEQUE'){o.chequeNo=String(d.chequeNo||'').trim();if(!/^\d{6}$/.test(o.chequeNo))throw new Error('Cheque no. must be 6 digits');o.bank=capText(d.bank,'Bank',60);if(!o.bank)throw new Error('Enter the bank name');if(!validIso(d.chequeDate))throw new Error('Enter the cheque date');o.chequeDate=d.chequeDate;
     if(db.payments.some(p=>p.status==='SUCCESS'&&p.mode==='CHEQUE'&&p.chequeNo===o.chequeNo&&p.bank.toLowerCase()===o.bank.toLowerCase()))throw new Error('This cheque no. of this bank is already entered')}
   if(o.invoiceDate>addDays(today(),0))throw new Error('Invoice date cannot be in the future');
@@ -84,7 +89,7 @@ const provider={
 function handleUpiWebhook(evt){
   if(!provider.verifyWebhook(evt)){log('Webhook rejected','UPI order',evt&&evt.orderId,null,null,'Bad signature');throw new Error('Webhook signature did not verify. Payment NOT marked.')}
   const o=db.upiOrders.find(x=>x.id===evt.orderId);if(!o)throw new Error('Unknown order');if(o.status!=='CREATED')return null; /* webhooks may arrive twice: idempotent */
-  if(evt.status==='captured'){const s=stu(o.studentId);const p=recordPayment(s,{sem:o.sem,mode:'UPI',amount:o.amount,paidAt:evt.paidAt,upiRef:evt.utr,providerTxnId:evt.txnId});p.by='UPI · '+o.provider;p.orderId=o.id;o.status='PAID';o.paymentId=p.id;afterPayment(p);return p}
+  if(evt.status==='captured'){const s=stu(o.studentId);const p=recordPayment(s,{sem:o.sem,mode:'UPI',amount:o.amount,batch:o.batch,paidAt:evt.paidAt,upiRef:evt.utr,providerTxnId:evt.txnId});p.by='UPI · '+o.provider;p.orderId=o.id;o.status='PAID';o.paymentId=p.id;afterPayment(p);return p}
   o.status='FAILED';o.failedAt=evt.paidAt;const s=stu(o.studentId);
   log('UPI payment failed','UPI order',o.id,null,{amount:inr(o.amount),student:s.enrol});
   notify('payfail','UPI payment failed',`${inr(o.amount)} for semester ${o.sem} did not go through. No money was taken.`,{students:[s.id],portal:'sfees',tone:'bad',self:true});
@@ -104,7 +109,8 @@ FORM.upiPay=(f,d)=>{
   const u=cur();let s,sem;
   if(isStudentUser(u)){s=stu(u.studentId);sem=+f.dataset.sem}else{need('fees.collect','collect fees');s=stu(ui.col.sid);sem=ui.col.sem}
   if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');const m=semSummary(s,sem);const amount=amountOf(d,m);
-  const o=provider.createOrder(s,sem,amount,u.name);log('UPI order created','UPI order',o.id,null,{student:s.enrol,sem,amount:inr(amount)});save();closeLayer();upiDialog(o);
+  const batch=isStudentUser(u)?(([...db.payments].reverse().find(p=>p.studentId===s.id&&p.batch)||{}).batch||defaultBatch(s)):cleanBatch(d.batch);
+  const o=provider.createOrder(s,sem,amount,u.name);o.batch=batch;log('UPI order created','UPI order',o.id,null,{student:s.enrol,sem,amount:inr(amount)});save();closeLayer();upiDialog(o);
 };
 function gwEvent(id,status){const o=db.upiOrders.find(x=>x.id===id);if(!o)throw new Error('Order not found');const paidAt=Date.now();const evt={orderId:o.id,status,amount:o.amount,paidAt,utr:'UTR'+Math.floor(Math.random()*9e11+1e11),txnId:'pay_'+Math.random().toString(36).slice(2,14)};evt.signature=sig(evt.orderId+'|'+evt.status+'|'+evt.amount+'|'+evt.paidAt);return evt}
 ACT.gwOk=el=>{const p=handleUpiWebhook(gwEvent(el.dataset.id,'captured'));save();closeDialog();renderPage();if(p){toast('UPI payment captured · '+p.rc);showReceipt(p,true)}else toast('This order was already handled')};
@@ -115,8 +121,8 @@ function receiptHtml(p){
   const s=stu(p.studentId);const c=db.college;const bal=semSummary(s,p.sem).due;
   return`<div class="receipt ${p.status==='CANCELLED'?'cancelled':''}"><div class="hd"><div><b>${E(c.name)}</b><div class="muted" style="font-size:12px">${E(c.trust)} · ${E(c.address)}</div></div><div class="right"><b class="mono">${E(p.rc)}</b><div class="muted" style="font-size:12px">Invoice date ${fmtD(p.invoiceDate)}</div></div></div>
    ${p.status==='CANCELLED'?`<p class="err" style="margin:0 0 10px">Cancelled on ${fmtT(p.cancelledAt)} by ${E(p.cancelledBy)} · ${E(p.cancelReason)}</p>`:`<div class="tick"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14"/><path d="M10 16.5l4 4 8-9"/></svg>Payment received</div>`}
-   <div class="rline"><span>Student</span><b>${E(s.name)}</b></div><div class="rline"><span>Enrolment no.</span><span class="mono">${E(s.enrol)}</span></div><div class="rline"><span>Course</span><span>${E(course(s.course).name)} · Semester ${p.sem}</span></div>
-   <div class="rline"><span>Mode</span><span>${modeName(p.mode)}${p.mode==='CHEQUE'?` · No. ${E(p.chequeNo)}, ${E(p.bank)}, dated ${fmtD(p.chequeDate)}`:''}${p.mode==='UPI'?` · ${E(p.upiRef)}`:''}</span></div>
+   <div class="rline"><span>Student</span><b>${E(s.name)}</b></div><div class="rline"><span>Enrolment no.</span><span class="mono">${E(s.enrol)}</span></div><div class="rline"><span>Course</span><span>${E(course(s.course).name)} · Semester ${p.sem}</span></div><div class="rline"><span>Batch</span><b>${E(batchOf(p))}</b></div>
+   <div class="rline"><span>Mode</span><span>${modeName(p.mode)}${p.mode==='CHEQUE'?` · No. ${E(p.chequeNo)}, ${E(p.bank)}, dated ${fmtD(p.chequeDate)}`:''}${p.mode==='UPI'?` · ${E(p.upiRef)}`:''}</span></div>${p.mode==='EXPENSE'&&p.reason?`<div class="rline"><span>Used for</span><span>${E(p.reason)}</span></div>`:''}
    ${p.mode==='UPI'?`<div class="rline"><span>Paid on</span><span>${fmtT(p.paidAt)}</span></div>`:''}<div class="rline"><span>Entered</span><span>${fmtT(p.entryAt)} · ${E(p.by)}</span></div>${p.note?`<div class="rline"><span>Note</span><span>${E(p.note)}</span></div>`:''}
    <div class="rline tot"><span>Amount</span><span>${inr(p.amount)}</span></div><div class="rline"><span>Semester ${p.sem} balance now</span><span>${inr(bal)}</span></div>
    ${(p.dateEdits||[]).length?`<p class="note">Invoice date changed: ${p.dateEdits.map(x=>`${fmtD(x.from)} → ${fmtD(x.to)} (${E(x.by)})`).join('; ')}</p>`:''}</div>`;
@@ -137,47 +143,15 @@ FORM.cancelReceipt=(f,d)=>{const p=db.payments.find(x=>x.id===f.dataset.id);canc
   notify('cancel',`Receipt cancelled · ${s.name}`,`${p.rc} · ${inr(p.amount)} · ${p.cancelReason}`,{roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
   save();closeDialog();closeLayer();renderPage();toast('Receipt cancelled')};
 
-/* ---------- 2. expenses ---------- */
-function expFilter(){return ui.f['fees.expenses']=Object.assign({from:'',to:'',cat:'',sid:'',by:'',sort:'date',dir:-1,page:0,q:''},ui.f['fees.expenses']||{})}
-function expensesFiltered(){const f=expFilter();const q=(f.q||'').toLowerCase();
-  let l=db.expenses.filter(x=>(!f.from||x.date>=f.from)&&(!f.to||x.date<=f.to)&&(!f.cat||x.category===f.cat)&&(!f.by||x.by===f.by)&&(!f.sid||(f.sid==='linked'?x.studentId:f.sid==='none'?!x.studentId:x.studentId===f.sid))&&(!q||[x.reason,x.ref,x.studentId&&stu(x.studentId).name].some(v=>String(v||'').toLowerCase().includes(q))));
-  const k={date:x=>x.date+x.entryAt,amount:x=>x.amount,cat:x=>x.category,reason:x=>x.reason.toLowerCase()}[f.sort]||(x=>x.date);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
-function feeExpenses(){
-  const f=expFilter();const l=expensesFiltered();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);const sc='fees.expenses';const cats=db.settings.expenseCats;const bys=[...new Set(db.expenses.map(x=>x.by))];
-  return`<div class="panel"><h2>Expenses ${pill(inr(sum(l,x=>x.amount))+' · '+l.length+' entries','acc')}${can('expenses.manage')?'<button class="btn primary" data-act="newExpense">Add expense</button>':''}</h2>
-   <div class="filters"><input type="search" placeholder="Search reason or ref" aria-label="Search expenses" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
-    <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label>
-    ${sel(sc,'cat','Category',[['','All categories'],...cats.map(c=>[c,c])])}${sel(sc,'sid','Linked student',[['','Any link'],['linked','Linked to a student'],['none','Not linked']])}${sel(sc,'by','Created by',[['','Anyone'],...bys.map(b=>[b,b])])}</div>
-   <div class="tablewrap"><table><thead><tr>${sortTh(sc,'date','Date')}<th>Ref</th>${sortTh(sc,'reason','Reason')}${sortTh(sc,'cat','Category')}<th>Student</th>${sortTh(sc,'amount','Amount',1)}<th>By</th></tr></thead><tbody>
-   ${pg.map(x=>`<tr><td>${dateCell('x',x,x.date)}</td><td class="mono">${E(x.ref)}</td><td>${E(x.reason)}</td><td>${E(x.category||'—')}</td><td>${x.studentId?`<button class="lnk" data-act="openStudent" data-id="${E(x.studentId)}">${E(stu(x.studentId).name)}</button>${x.sem?' · Sem '+x.sem:''}`:'—'}</td><td class="num amt">${inr(x.amount)}</td><td>${E(x.by)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">No expenses for these filters.</td></tr>'}
-   </tbody></table></div>${pager(sc,l.length)}
-   <p class="note">Setting <b>expenseReducesDue</b> is ${db.settings.flags.expenseReducesDue?'ON: an expense linked to a student lowers that semester\'s due':'OFF (default): expenses are a separate ledger and do not change dues'}. (Open question for Roshanbhai.)</p></div>`;
-}
 /* an inline date editor for Cash / Cheque / Expense rows; UPI and cancelled rows show plain text */
-function dateCell(kind,rec,iso){const editable=can('fees.editdate')&&(kind==='x'||(rec.mode!=='UPI'&&rec.status==='SUCCESS'));
+function dateCell(kind,rec,iso){const editable=can('fees.editdate')&&rec.mode!=='UPI'&&rec.status==='SUCCESS';
   return editable?`<input type="date" class="inl" value="${E(iso)}" max="${today()}" aria-label="Invoice date of ${E(kind==='x'?rec.ref:rec.rc)}" data-change="invDate" data-kind="${kind}" data-id="${E(rec.id)}">`:`<span>${fmtD(iso)}</span>${kind==='p'&&rec.mode==='UPI'?' <small class="muted" title="Payment date + 1 day">auto</small>':''}`}
-CHG.invDate=el=>{const kind=el.dataset.kind;const rec=kind==='x'?db.expenses.find(x=>x.id===el.dataset.id):db.payments.find(x=>x.id===el.dataset.id);
+CHG.invDate=el=>{const kind=el.dataset.kind;const rec=db.payments.find(x=>x.id===el.dataset.id);
   if(!rec)throw new Error('Not found');const v=el.value;if(v>today())throw new Error('Invoice date cannot be in the future');
   const ch=editInvoiceDate(kind,rec,v);if(!ch)return;
   if(kind==='p'){const s=stu(rec.studentId);notify('datechange',`Invoice date changed · ${rec.rc}`,`${fmtD(rec.dateEdits.at(-1).from)} → ${fmtD(v)}. Your receipt was updated.`,{students:[s.id],portal:'sfees',self:true});
     notify('datechange',`Invoice date changed · ${rec.rc}`,`${s.name}: ${fmtD(rec.dateEdits.at(-1).from)} → ${fmtD(v)}`,{roles:['Super Admin','Principal'],staff:'audit',tab:'activity'})}
   save();toast(`Invoice date saved: ${fmtD(v)}${kind==='p'?' · receipt regenerated':''}`);renderPage()};
-function expenseForm(o){
-  const T=today();const cats=db.settings.expenseCats;const s=o.sid&&stu(o.sid);
-  return`<button class="btn x" data-act="close">Close</button><h2>Add expense</h2><p class="muted" style="margin:4px 0 14px">Amount, reason and date are required. Linking a student is optional.</p>
-  <form data-form="expense" class="form">${F('amount','Amount (₹)',{req:true,attrs:'inputmode="decimal"'})}${F('date','Date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}
-   ${F('reason','Reason',{req:true,span:1,attrs:'maxlength="160"'})}${F('category','Category (optional)',{opts:[['','None'],...cats.map(c=>[c,c])]})}
-   <div class="field"><label class="label" for="f_sid">Linked student (optional)</label><select id="f_sid" name="sid"><option value="">Not linked</option>${db.students.filter(x=>x.status==='ACTIVE'||x.id===o.sid).sort((a,b)=>a.name.localeCompare(b.name)).map(x=>`<option value="${E(x.id)}" ${x.id===o.sid?'selected':''}>${E(x.name)} · ${E(x.enrol)}</option>`).join('')}</select></div>
-   ${F('sem','Semester (optional)',{val:o.sem||'',opts:[['','None'],...SEMS.map(n=>[n,'Semester '+n])]})}
-   <p class="note span">Date works like Cash: it is the date you enter, and can be edited later in the table.</p>
-   <div class="actions span"><button class="btn primary big">Save expense</button><button type="button" class="btn" data-act="close">Cancel</button></div></form>`;
-}
-ACT.newExpense=el=>{need('expenses.manage','add expenses');drawer(expenseForm({sid:el.dataset.sid||'',sem:el.dataset.sem?+el.dataset.sem:''}),false,'Add expense');$('#f_amount').focus()};
-FORM.expense=(f,d)=>{need('expenses.manage','add expenses');const a=toPaise(d.amount);if(!(a>0)||a>100000000)throw new Error('Enter an amount greater than zero');const reason=capText(d.reason,'Reason',160);if(reason.length<3)throw new Error('Write the reason');
-  if(!validIso(d.date)||d.date>today())throw new Error('Choose a valid date (not in the future)');if(d.sid&&!stu(d.sid))throw new Error('Student not found');
-  const x={id:uid('x'),ref:'EXP-'+pad(db.counters.exp++,4),studentId:d.sid||'',sem:d.sem?+d.sem:null,amount:a,reason,category:d.category||'',date:d.date,entryAt:Date.now(),by:cur().name,byId:cur().id,dateEdits:[]};
-  db.expenses.push(x);log('Expense added','Expense',x.ref,null,{amount:inr(a),reason,date:fmtD(x.date),student:x.studentId?stu(x.studentId).enrol:''});save();closeLayer();ui.tab.fees='expenses';ui.col={q:'',sid:'',sem:0,mode:'CASH'};renderPage();toast(`Expense ${x.ref} saved`)};
-
 /* ---------- 3. pending dues ---------- */
 function duesFilter(){return ui.f['fees.dues']=Object.assign({q:'',course:'',sem:'',cat:'',fund:'',over:'',sort:'due',dir:-1,page:0},ui.f['fees.dues']||{})}
 function duesFiltered(){const f=duesFilter();const q=f.q.toLowerCase();
@@ -214,17 +188,17 @@ FORM.sendRemind=(f,d)=>{need('notices.post');const ids=f.dataset.ids.split(',').
 /* ---------- 4. receipts ---------- */
 function rcFilter(){return ui.f['fees.receipts']=Object.assign({q:'',mode:'',status:'',from:'',to:'',sort:'entry',dir:-1,page:0},ui.f['fees.receipts']||{})}
 function receiptsFiltered(){const f=rcFilter();const q=f.q.toLowerCase();
-  let l=db.payments.filter(p=>(!f.mode||p.mode===f.mode)&&(!f.status||p.status===f.status)&&(!f.from||p.invoiceDate>=f.from)&&(!f.to||p.invoiceDate<=f.to)&&(!q||[p.rc,stu(p.studentId).name,stu(p.studentId).enrol,p.chequeNo,p.upiRef].some(v=>String(v||'').toLowerCase().includes(q))));
+  let l=db.payments.filter(p=>(!f.mode||p.mode===f.mode)&&(!f.status||p.status===f.status)&&(!f.from||p.invoiceDate>=f.from)&&(!f.to||p.invoiceDate<=f.to)&&(!q||[p.rc,stu(p.studentId).name,stu(p.studentId).enrol,p.chequeNo,p.upiRef,batchOf(p),p.reason].some(v=>String(v||'').toLowerCase().includes(q))));
   const k={entry:p=>p.entryAt,date:p=>p.invoiceDate,amount:p=>p.amount,rc:p=>p.rc,name:p=>stu(p.studentId).name}[f.sort]||(p=>p.entryAt);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
 function feeReceipts(){
   const f=rcFilter();const sc='fees.receipts';const l=receiptsFiltered();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);
   return`<div class="panel"><h2>Receipts ${pill(inr(sum(l.filter(p=>p.status==='SUCCESS'),p=>p.amount))+' successful','good')}</h2>
-   <div class="filters"><input type="search" placeholder="Receipt no, name, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}
+   <div class="filters"><input type="search" placeholder="Receipt no, name, batch, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI'],['EXPENSE','Expense']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}
     <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label></div>
-   <div class="tablewrap"><table><thead><tr>${sortTh(sc,'rc','Receipt')}${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entered')}${sortTh(sc,'name','Student')}<th>Sem</th><th>Mode</th>${sortTh(sc,'amount','Amount',1)}<th>Status</th><th></th></tr></thead><tbody>
-   ${pg.map(p=>{const s=stu(p.studentId);return`<tr><td class="mono">${E(p.rc)}</td><td>${dateCell('p',p,p.invoiceDate)}</td><td><small>${fmtT(p.entryAt)}</small></td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}">${E(s.name)}</button></td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}</td><td>${payPill(p.status)}${p.depositId?' '+pill('Deposited'):''}</td>
-    <td><div class="actions nowrap"><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button>${p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn sm danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="9" class="empty">No receipts for these filters.</td></tr>'}</tbody></table></div>${pager(sc,l.length)}
-   <p class="note">Change the invoice date of a Cash or Cheque receipt right in the table: the receipt PDF is regenerated and the change is logged (old → new). UPI dates are fixed. A payment is never deleted; cancel it with a reason.</p></div>`;
+   <div class="tablewrap"><table><thead><tr>${sortTh(sc,'rc','Receipt')}${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entered')}${sortTh(sc,'name','Student')}<th>Batch</th><th>Sem</th><th>Mode</th>${sortTh(sc,'amount','Amount',1)}<th>Status</th><th></th></tr></thead><tbody>
+   ${pg.map(p=>{const s=stu(p.studentId);return`<tr><td class="mono">${E(p.rc)}</td><td>${dateCell('p',p,p.invoiceDate)}</td><td><small>${fmtT(p.entryAt)}</small></td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}">${E(s.name)}</button></td><td class="mono">${E(batchOf(p))}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}</td><td>${payPill(p.status)}${p.depositId?' '+pill('Deposited'):''}</td>
+    <td><div class="actions nowrap"><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button>${p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn sm danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="10" class="empty">No receipts for these filters.</td></tr>'}</tbody></table></div>${pager(sc,l.length)}
+   <p class="note">Change the invoice date of a Cash, Cheque or Expense receipt right in the table: the receipt PDF is regenerated and the change is logged (old → new). UPI dates are fixed. A payment is never deleted; cancel it with a reason.</p></div>`;
 }
 
 /* ---------- 5. fee setup ---------- */
@@ -238,8 +212,6 @@ function feeSetup(){
    <div class="actions" style="margin-top:12px"><button class="btn primary">Save fees and due dates</button></div></form>
   <form class="scard" data-form="receiptSetup"><h2>Receipt numbering</h2><div class="form">${F('receiptPrefix','Prefix',{val:c.receiptPrefix,req:true,attrs:'maxlength="16"'})}${F('nextReceipt','Next number',{type:'number',val:c.nextReceipt,req:true,attrs:'min="1"'})}</div>
    <p class="note">Next receipt: <b class="mono">${E(c.receiptPrefix+pad(c.nextReceipt,4))}</b>. The number can only go up, never back to a used one. (OPEN: send us the receipt format used today.)</p>
-   <h2 style="margin-top:16px">Expenses</h2>${F('expenseCats','Expense categories (comma separated)',{val:st.expenseCats.join(', ')})}
-   <label class="chk" style="margin-top:10px"><input type="checkbox" name="expenseReducesDue" ${st.flags.expenseReducesDue?'checked':''}> An expense linked to a student reduces that student's due <small class="muted">(OPEN · default off)</small></label>
    <div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>
   <form class="scard" data-form="upiSetup"><h2>UPI / Google Pay</h2><div class="form">${F('provider','Payment gateway',{val:st.upi.provider,opts:Object.entries(PaymentProviders).filter(([k])=>k!=='GooglePay').map(([k,v])=>[k,v.name])})}${F('mode','Mode',{val:st.upi.mode,opts:['Sandbox','Live']})}${F('vpa','College UPI ID (merchant VPA)',{val:st.upi.vpa,req:true,span:1,attrs:'maxlength="60"'})}</div>
    <label class="chk" style="margin-top:10px"><input type="checkbox" name="googlePay" ${st.upi.googlePay?'checked':''}> Use the direct Google Pay adapter (switch on only if Google approves the college's account)</label>
@@ -252,7 +224,7 @@ FORM.feeDefaults=(f,d)=>{need('fees.setup');const st=db.settings;const before={f
   st.feeDefault=nf;st.dueDates=nd;st.reminderDays=rd;log('Fee setup changed','Settings','fees',before,{fees:JSON.stringify(nf),due:JSON.stringify(nd),days:rd});ntSync();save();renderPage();toast('Fee setup saved')};
 FORM.receiptSetup=(f,d)=>{need('fees.setup');const c=db.college,st=db.settings;const px=capText(d.receiptPrefix,'Prefix',16);if(!/^[A-Za-z0-9\/\-_]+$/.test(px))throw new Error('Prefix can use letters, numbers, / - _');
   const n=+d.nextReceipt;const used=Math.max(0,...db.payments.filter(p=>p.rc.startsWith(px)).map(p=>+p.rc.slice(px.length)||0));if(!(n>=1)||n<=used)throw new Error(`Next number must be more than ${used} (already used)`);
-  const before={prefix:c.receiptPrefix,next:c.nextReceipt,flag:st.flags.expenseReducesDue};c.receiptPrefix=px;c.nextReceipt=n;st.expenseCats=String(d.expenseCats||'').split(',').map(x=>x.trim()).filter(Boolean).slice(0,20);if(!st.expenseCats.length)st.expenseCats=['Other'];
-  st.flags.expenseReducesDue=!!d.expenseReducesDue;log('Receipt settings changed','Settings','receipts',before,{prefix:px,next:n,flag:st.flags.expenseReducesDue});save();renderPage();toast('Saved')};
+  const before={prefix:c.receiptPrefix,next:c.nextReceipt};c.receiptPrefix=px;c.nextReceipt=n;
+  log('Receipt settings changed','Settings','receipts',before,{prefix:px,next:n});save();renderPage();toast('Saved')};
 FORM.upiSetup=(f,d)=>{need('fees.setup');const u=db.settings.upi;const vpa=String(d.vpa||'').trim();if(!/^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(vpa))throw new Error('Enter a valid UPI ID like college@okaxis');const before={...u};
   Object.assign(u,{provider:PaymentProviders[d.provider]?d.provider:'Razorpay',mode:d.mode==='Live'?'Live':'Sandbox',vpa,googlePay:!!d.googlePay});log('UPI settings changed','Settings','upi',before,{...u});save();renderPage();toast('UPI settings saved')};

@@ -820,8 +820,8 @@ function saveBanner(on){
 function save(){const ok=lsSet(LS_KEY,JSON.stringify(db));saveBad=!ok;if(!ok){saveTick=true;Promise.resolve().then(()=>{saveTick=false})}saveBanner(!ok);return ok}
 function load(){const raw=lsGet(LS_KEY);if(raw){try{db=JSON.parse(raw);if(db&&db.ver===DB_VER){migrate();return}}catch(e){}}seed();save()}
 function migrate(){
-  const s=db.settings;s.flags=Object.assign({expenseReducesDue:false,fundingAllCategories:false,lateFee:false},s.flags||{});
-  if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];if(!db.expenses)db.expenses=[];
+  const s=db.settings;s.flags=Object.assign({fundingAllCategories:false,lateFee:false},s.flags||{});delete s.flags.expenseReducesDue;delete s.expenseCats;
+  if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no separate expense ledger: an expense is a fee taken By Expense */
   if(!db.enquiries)db.enquiries=[];
 }
 const NAME_MAX=80;
@@ -832,7 +832,7 @@ const PERMS=[
  ['dashboard.view','See the dashboard'],
  ['students.view','View students'],['students.edit','Add and edit students, resend logins'],
  ['fees.view','Open Fee Collection'],['fees.collect','Collect payments (Cash, Cheque, UPI)'],['fees.cancel','Cancel a receipt (with reason)'],
- ['fees.editdate','Edit invoice date of Cash / Cheque / Expense'],['expenses.manage','Add expenses'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
+ ['fees.editdate','Edit invoice date of Cash / Cheque / Expense'],['expenses.manage','Collect fee By Expense'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
  ['audit.view','Transactions audit and exports'],['audit.deposit','Mark cash / cheque as deposited'],['activity.view','Activity log (every action)'],
  ['notices.post','Post notices and fee reminders'],['enquiries.view','Admission enquiries'],
  ['settings.manage','College settings'],['roles.manage','Roles and permissions']];
@@ -877,7 +877,7 @@ const okPays=s=>db.payments.filter(p=>p.studentId===s.id&&p.status==='SUCCESS');
 function semSummary(s,n){
   const f=semFee(s,n);const amount=f?f.amount:0;
   const paid=sum(okPays(s).filter(p=>p.sem===n),p=>p.amount);
-  const adj=db.settings.flags.expenseReducesDue?sum(db.expenses.filter(x=>x.studentId===s.id&&x.sem===n),x=>x.amount):0;
+  const adj=0;
   const due=Math.max(0,amount-paid-adj);const dueDate=f&&f.due||'';
   const started=n<=s.sem;
   const T=today();const overdue=started&&due>0&&dueDate&&dueDate<T;
@@ -894,6 +894,13 @@ function feeSum(s){
    UPI -> payment date in India + 1 day, never editable */
 const upiInvoiceDate=paidAt=>addDays(istDate(paidAt),1);
 function nextReceiptNo(){const c=db.college;const n=c.nextReceipt++;return`${c.receiptPrefix}${pad(n,4)}`}
+/* batch = the student's 2-year course batch, typed by the clerk on every receipt, e.g. 2025-27 */
+const defaultBatch=s=>s&&s.admissionYear?`${s.admissionYear}-${String(s.admissionYear+2).slice(2)}`:'';
+const batchOf=p=>p.batch||defaultBatch(stu(p.studentId));
+function cleanBatch(v){const t=String(v||'').replace(/\s+/g,'').replace(/[–—\/]/g,'-');
+  const m=t.match(/^(20\d{2})-(\d{2}|20\d{2})$/);if(!m)throw new Error('Enter the batch like 2025-27');
+  const a=+m[1],b=m[2].length===4?+m[2]:Math.floor(a/100)*100+(+m[2]);if(!(b>a&&b-a<=5))throw new Error('Batch end year must be after the start year, e.g. 2025-27');
+  return`${a}-${String(b).slice(2)}`}
 function recordPayment(s,o){
   /* o: {sem, mode, amount(paise), invoiceDate?, chequeNo?, bank?, chequeDate?, upiRef?, providerTxnId?, note?, paidAt?} */
   const sm=semSummary(s,o.sem);
@@ -905,9 +912,9 @@ function recordPayment(s,o){
   const u=cur();
   const p={id:uid('p'),studentId:s.id,sem:o.sem,mode:o.mode,amount:o.amount,invoiceDate,entryAt,paidAt:o.paidAt||entryAt,
     chequeNo:o.chequeNo||'',bank:o.bank||'',chequeDate:o.chequeDate||'',upiRef:o.upiRef||'',providerTxnId:o.providerTxnId||'',note:o.note||'',
-    status:'SUCCESS',cancelReason:'',rc:nextReceiptNo(),depositId:'',by:u?u.name:'Payment gateway',byId:u?u.id:'',dateEdits:[]};
+    batch:o.batch||defaultBatch(s),reason:o.reason||'',category:o.category||'',status:'SUCCESS',cancelReason:'',rc:nextReceiptNo(),depositId:'',by:u?u.name:'Payment gateway',byId:u?u.id:'',dateEdits:[]};
   db.payments.push(p);
-  log('Payment recorded','Payment',p.rc,null,{student:s.enrol,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate)});
+  log('Payment recorded','Payment',p.rc,null,{student:s.enrol,batch:p.batch,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate)});
   return p;
 }
 function cancelPayment(p,reason){
@@ -955,17 +962,17 @@ function seed(){
     college:{name:"The New Progressive College of Teachers' Education",short:'NPCTE',trust:'Karve Trust',address:"'PRASAD' Building, Karve Campus, Mahesana 384001",phone:'02762 220395',email:'npcte@yahoo.co.in',website:'https://npcte.org',receiptPrefix:'NPCTE/'+String(yNow).slice(2)+'-',nextReceipt:1,year:`${yNow}-${String(yNow+1).slice(2)}`},
     settings:{feeDefault:{BED:[3000000,3000000,3000000,3000000],MED:[3000000,3000000,3000000,3000000]},
       dueDates:{BED:['11-15','04-30','11-15','04-30'],MED:['11-15','04-30','11-15','04-30']},reminderDays:7,
-      flags:{expenseReducesDue:false,fundingAllCategories:false,lateFee:false},
+      flags:{fundingAllCategories:false,lateFee:false},
       upi:{provider:'Razorpay',vpa:'npcte@okaxis',mode:'Sandbox',googlePay:false},
       mail:{mode:'demo',fromName:"NPCTE Accounts",replyTo:'npcte@yahoo.co.in',sendReceipts:true,sendCredentials:true},
-      sound:true,expenseCats:['Purchase','Fee adjustment','Maintenance','Other']},
+      sound:true},
     courses:[{id:'BED',name:'B.Ed',semesters:4},{id:'MED',name:'M.Ed',semesters:4}],
     roles:DEFAULT_ROLES(),
     users:[
       {id:'u_admin',role:'Super Admin',name:'Virat Sathavara',username:'admin',email:'admin@npcte.org',phone:'',password:'admin123',mustChange:false,active:true,lastLoginAt:0},
       {id:'u_prin',role:'Principal',name:'Principal, NPCTE',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0}],
-    students:[],payments:[],expenses:[],deposits:[],notices:[],notifs:[],audit:[],outbox:[],upiOrders:[],enquiries:[],
+    students:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],outbox:[],upiOrders:[],enquiries:[],
     counters:{enrol:{},exp:1}};
   /* sample names only (demo) */
   const names=[['Riya Joshi','F'],['Hardik Patel','M'],['Kinjal Prajapati','F'],['Mehul Chaudhary','M'],['Nirali Desai','F'],['Jignesh Rabari','M'],['Pooja Solanki','F'],['Ankit Thakor','M'],['Bhumi Modi','F'],['Kaushal Vaghela','M'],
@@ -981,7 +988,7 @@ function seed(){
   });
   /* payments in all 4 modes, dated in the last few weeks */
   const by=db.users[2];const mk=(s,sem,mode,amt,dAgo,extra={})=>{const ts=Date.now()-dAgo*864e5-3600e3*(1+(dAgo%5));const inv=mode==='UPI'?upiInvoiceDate(ts):addDays(today(),-dAgo-(extra.back||0));
-    db.payments.push(Object.assign({id:uid('p'),studentId:s.id,sem,mode,amount:amt,invoiceDate:inv,entryAt:ts,paidAt:ts,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'SUCCESS',cancelReason:'',rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:mode==='UPI'?'Payment gateway':by.name,byId:mode==='UPI'?'':by.id,dateEdits:[]},extra.f||{}))};
+    db.payments.push(Object.assign({id:uid('p'),studentId:s.id,sem,mode,amount:amt,invoiceDate:inv,entryAt:ts,paidAt:ts,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'SUCCESS',cancelReason:'',rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:mode==='UPI'?'Payment gateway':by.name,byId:mode==='UPI'?'':by.id,dateEdits:[],batch:defaultBatch(s),reason:'',category:''},extra.f||{}))};
   const S=db.students;
   S.forEach((s,i)=>{
     const f1=semFee(s,1).amount;
@@ -989,14 +996,12 @@ function seed(){
     else if(i%5===1)mk(s,1,'CASH',f1,3+i,{back:i%3});
     else if(i%5===2)mk(s,1,'CHEQUE',Math.round(f1/2),4+i,{f:{chequeNo:String(100200+i),bank:['SBI','Bank of Baroda','Mehsana Urban Co-op Bank'][i%3],chequeDate:addDays(today(),-6-i)}});
     else if(i%5===3)mk(s,1,'CASH',1500000,1+i);
+    else if(i%10===4)mk(s,1,'EXPENSE',1000000,5+i,{f:{reason:['Exam form fees paid to the university','Practice-teaching school material'][i%2]}});
     if(s.sem===3){mk(s,2,i%2?'UPI':'CASH',semFee(s,2).amount,60+i);mk(s,1,'CASH',f1,200+i)}
   });
   /* one cancelled receipt */
   const pc=db.payments.find(p=>p.mode==='CASH');if(pc){const s=stu(pc.studentId);const extra={id:uid('p'),studentId:s.id,sem:pc.sem,mode:'CASH',amount:500000,invoiceDate:addDays(today(),-9),entryAt:Date.now()-9*864e5,paidAt:Date.now()-9*864e5,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'CANCELLED',cancelReason:'Entered twice by mistake',cancelledAt:Date.now()-9*864e5+6e5,cancelledBy:by.name,rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:by.name,byId:by.id,dateEdits:[]};db.payments.push(extra)}
   db.payments.forEach(p=>{if(p.mode==='UPI'){p.upiRef='UTR'+String(400000000000+Math.floor(rnd()*9e10));p.providerTxnId='pay_'+Math.floor(rnd()*1e12).toString(36)}});
-  /* expenses */
-  [['Library books purchase','Purchase',350000,5,null],['Fee adjustment – sem 1 duplicate entry','Fee adjustment',200000,8,S[3]],['Projector repair','Maintenance',180000,12,null],['Stationery for exam cell','Purchase',95000,20,null]]
-    .forEach(([r,c,a,d,s])=>db.expenses.push({id:uid('x'),ref:'EXP-'+pad(db.counters.exp++,4),studentId:s?s.id:'',sem:s?1:null,amount:a,reason:r,category:c,date:addDays(today(),-d),entryAt:Date.now()-d*864e5,by:by.name,byId:by.id,dateEdits:[]}));
   /* an older deposit so the report shows both deposited and pending money */
   const old=db.payments.filter(p=>p.status==='SUCCESS'&&(p.mode==='CASH'||p.mode==='CHEQUE')&&diffDays(today(),p.invoiceDate)>40);
   if(old.length){const dp={id:uid('d'),type:'CASH+CHEQUE',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,p=>p.amount),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}
@@ -1650,19 +1655,19 @@ ACT.importGo=()=>{need('students.edit');const l=ui.importRows||[];l.forEach(v=>{
   log('Students imported','Student','',null,{count:l.length});ui.importRows=null;save();closeLayer();renderPage();toast(`${l.length} students imported. Login emails are on their way.`)};
 /* =====================================================================
    Fee Collection (spec §5): 5 tabs
-   Collect payment · Expenses · Pending dues · Receipts · Fee setup
+   Collect payment (Cash / Cheque / UPI / Expense) · Pending dues · Receipts · Fee setup
    ===================================================================== */
 const MODES=[['CASH','By Cash'],['CHEQUE','By Cheque'],['UPI','By UPI'],['EXPENSE','By Expense']];
 const modeName=m=>({CASH:'Cash',CHEQUE:'Cheque',UPI:'UPI',EXPENSE:'Expense'}[m]||m);
 const MODE_TONE={CASH:'m-cash',CHEQUE:'m-cheque',UPI:'m-upi',EXPENSE:'m-exp'};
 const modePill=m=>`<span class="pill ${MODE_TONE[m]||''}">${E(modeName(m))}</span>`;
 const payPill=st=>st==='SUCCESS'?pill('Success','good'):st==='CANCELLED'?pill('Cancelled','bad'):st==='FAILED'?pill('Failed','bad'):pill('Pending','warn');
-function feeTabs(){const t=[['collect','Collect payment']];if(can('expenses.manage')||can('audit.view'))t.push(['expenses','Expenses']);t.push(['dues','Pending dues'],['receipts','Receipts']);if(can('fees.setup'))t.push(['setup','Fee setup']);return t}
+function feeTabs(){const t=[['collect','Collect payment']];t.push(['dues','Pending dues'],['receipts','Receipts']);if(can('fees.setup'))t.push(['setup','Fee setup']);return t}
 function viewFees(){
   const tabs=feeTabs();let t=ui.tab.fees||'collect';if(!tabs.some(x=>x[0]===t))t='collect';ui.tab.fees=t;
   const T=today();const tp=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);
   return head('Fee Collection',`Today: ${inr(sum(tp,p=>p.amount))} in ${tp.length} receipt${tp.length===1?'':'s'} · ${fmtD(T)}`,'')+tabsBar('fees',tabs,t)+
-   ({collect:feeCollect,expenses:feeExpenses,dues:feeDues,receipts:feeReceipts,setup:feeSetup}[t])();
+   ({collect:feeCollect,dues:feeDues,receipts:feeReceipts,setup:feeSetup}[t])();
 }
 
 /* ---------- 1. collect ---------- */
@@ -1682,11 +1687,11 @@ function feeCollect(){
   }
   return`<div class="grid two-col">${body}<div class="panel"><h2>Today's collection</h2>${todayBox()}</div></div>`;
 }
-function todayBox(){const T=today();const ok=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);const ex=db.expenses.filter(x=>x.date===T);
+function todayBox(){const T=today();const ok=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);const ex=ok.filter(p=>p.mode==='EXPENSE');
   return`<div class="list">${['CASH','CHEQUE','UPI'].map(m=>`<div class="li"><span>${modePill(m)}</span><b class="amt">${inr(sum(ok.filter(p=>p.mode===m),p=>p.amount))}</b></div>`).join('')}<div class="li"><span>${modePill('EXPENSE')}</span><b class="amt">${inr(sum(ex,x=>x.amount))}</b></div></div>
   <h3>Latest receipts</h3><div class="list">${db.payments.filter(p=>p.status==='SUCCESS').sort((a,b)=>b.entryAt-a.entryAt).slice(0,6).map(p=>`<button class="li pick" data-act="viewReceipt" data-id="${E(p.id)}"><div><b>${E(stu(p.studentId).name)}</b><small>${E(p.rc)} · ${modeName(p.mode)} · invoice ${fmtD(p.invoiceDate)}</small></div><b class="amt">${inr(p.amount)}</b></button>`).join('')||'<p class="note">None yet.</p>'}</div>`}
 function collectForm(s,m,mode){
-  const T=today();const amt=F('amount','Amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}"`});
+  const T=today();const amt=F('amount','Amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}"`})+F('batch','Batch (e.g. 2025-27)',{req:true,ph:'2025-27',attrs:'maxlength="11" autocomplete="off"'});
   if(mode==='CASH')return`<form data-form="collect" data-mode="CASH" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true})}${F('note','Note (optional)',{span:1,attrs:'maxlength="120"'})}
    <p class="note span">Invoice date = the date you enter here (default today). The receipt uses this date. You can change it later in Receipts.</p><div class="actions span"><button class="btn primary big">Save cash payment · issue receipt</button></div></form>`;
   if(mode==='CHEQUE')return`<form data-form="collect" data-mode="CHEQUE" class="form">${amt}${F('chequeNo','Cheque no.',{req:true,attrs:'inputmode="numeric" maxlength="10"'})}${F('bank','Bank',{req:true,attrs:'maxlength="60" list="banks"'})}<datalist id="banks"><option>State Bank of India</option><option>Bank of Baroda</option><option>Mehsana Urban Co-op Bank</option><option>HDFC Bank</option><option>ICICI Bank</option></datalist>
@@ -1694,7 +1699,10 @@ function collectForm(s,m,mode){
   if(mode==='UPI'){const pv=upiInvoiceDate(Date.now());return`<form data-form="upiPay" class="form">${amt}<div class="field"><span class="label">Invoice date</span><div class="ro">${fmtD(pv)} <small class="muted">(payment date + 1 day, set automatically)</small></div></div>
    <p class="note span">A UPI order is created with ${E(db.settings.upi.provider)} (${E(db.settings.upi.mode)}). The student scans the QR with Google Pay or any UPI app. The payment becomes Success only when the gateway's verified webhook arrives — never from this screen.</p>
    <div class="actions span"><button class="btn primary big">Create UPI request · show QR</button></div></form>`}
-  return`<div class="flow"><div><b>Expense</b><p class="note" style="margin:4px 0 0">Expenses are kept in their own ledger${db.settings.flags.expenseReducesDue?' and reduce this student\'s due':' and do not change this student\'s due'}.</p></div><button class="btn primary" data-act="newExpense" data-sid="${E(s.id)}" data-sem="${m.sem}">Open expense form</button></div>`;
+  return`<form data-form="collect" data-mode="EXPENSE" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}
+   ${F('reason','Expense: what was this fee used for?',{req:true,span:1,attrs:'maxlength="160" minlength="3"'})}
+   <p class="note span">By Expense: this student's fee was used directly for a college expense. The fee counts as paid: a receipt is issued and the due goes down. It shows as Expense in Receipts, Audit and the Dashboard. Invoice date works like Cash and can be edited later.</p>
+   <div class="actions span"><button class="btn primary big">Save fee by expense · issue receipt</button></div></form>`;
 }
 LIVE.colQ=el=>{ui.col.q=el.value;clearTimeout(LIVE._c);LIVE._c=setTimeout(()=>{renderPage();const i=$('#colQ');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}},150)};
 ACT.colPick=el=>{const s=stu(el.dataset.id);const sm=feeSum(s);const first=sm.sems.find(x=>x.started&&x.due>0)||sm.sems.find(x=>x.due>0);ui.col={q:'',sid:s.id,sem:first?first.sem:0,mode:ui.col.mode||'CASH'};renderPage()};
@@ -1704,8 +1712,10 @@ ACT.colMode=el=>{ui.col.mode=el.dataset.m;renderPage();if(el.dataset.m==='EXPENS
 ACT.collectFor=el=>{need('fees.collect','collect fees');closeLayer();ui.col={q:'',sid:el.dataset.id,sem:+el.dataset.sem||0,mode:'CASH'};if(!ui.col.sem){const f=feeSum(stu(el.dataset.id)).sems.find(x=>x.started&&x.due>0);ui.col.sem=f?f.sem:0}go('fees','collect')};
 function amountOf(d,m){const a=toPaise(d.amount);if(!(a>0))throw new Error('Enter the amount');if(a>m.due)throw new Error(`Amount is more than the semester ${m.sem} due (${inr(m.due)})`);return a}
 FORM.collect=(f,d)=>{
-  need('fees.collect','collect fees');const c=ui.col;const s=stu(c.sid);if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');const m=semSummary(s,c.sem);const mode=f.dataset.mode;
-  const o={sem:c.sem,mode,amount:amountOf(d,m),invoiceDate:d.invoiceDate,note:capText(d.note,'Note',120)};
+  const mode=f.dataset.mode;if(mode==='EXPENSE')need('expenses.manage','add expenses');else need('fees.collect','collect fees');
+  const c=ui.col;const s=stu(c.sid);if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');const m=semSummary(s,c.sem);
+  const o={sem:c.sem,mode,amount:amountOf(d,m),batch:cleanBatch(d.batch),invoiceDate:d.invoiceDate,note:capText(d.note,'Note',120)};
+  if(mode==='EXPENSE'){o.reason=capText(d.reason,'Reason',160);if(o.reason.length<3)throw new Error('Write what the money was used for');if(!validIso(o.invoiceDate))throw new Error('Choose a valid invoice date')}
   if(mode==='CHEQUE'){o.chequeNo=String(d.chequeNo||'').trim();if(!/^\d{6}$/.test(o.chequeNo))throw new Error('Cheque no. must be 6 digits');o.bank=capText(d.bank,'Bank',60);if(!o.bank)throw new Error('Enter the bank name');if(!validIso(d.chequeDate))throw new Error('Enter the cheque date');o.chequeDate=d.chequeDate;
     if(db.payments.some(p=>p.status==='SUCCESS'&&p.mode==='CHEQUE'&&p.chequeNo===o.chequeNo&&p.bank.toLowerCase()===o.bank.toLowerCase()))throw new Error('This cheque no. of this bank is already entered')}
   if(o.invoiceDate>addDays(today(),0))throw new Error('Invoice date cannot be in the future');
@@ -1734,7 +1744,7 @@ const provider={
 function handleUpiWebhook(evt){
   if(!provider.verifyWebhook(evt)){log('Webhook rejected','UPI order',evt&&evt.orderId,null,null,'Bad signature');throw new Error('Webhook signature did not verify. Payment NOT marked.')}
   const o=db.upiOrders.find(x=>x.id===evt.orderId);if(!o)throw new Error('Unknown order');if(o.status!=='CREATED')return null; /* webhooks may arrive twice: idempotent */
-  if(evt.status==='captured'){const s=stu(o.studentId);const p=recordPayment(s,{sem:o.sem,mode:'UPI',amount:o.amount,paidAt:evt.paidAt,upiRef:evt.utr,providerTxnId:evt.txnId});p.by='UPI · '+o.provider;p.orderId=o.id;o.status='PAID';o.paymentId=p.id;afterPayment(p);return p}
+  if(evt.status==='captured'){const s=stu(o.studentId);const p=recordPayment(s,{sem:o.sem,mode:'UPI',amount:o.amount,batch:o.batch,paidAt:evt.paidAt,upiRef:evt.utr,providerTxnId:evt.txnId});p.by='UPI · '+o.provider;p.orderId=o.id;o.status='PAID';o.paymentId=p.id;afterPayment(p);return p}
   o.status='FAILED';o.failedAt=evt.paidAt;const s=stu(o.studentId);
   log('UPI payment failed','UPI order',o.id,null,{amount:inr(o.amount),student:s.enrol});
   notify('payfail','UPI payment failed',`${inr(o.amount)} for semester ${o.sem} did not go through. No money was taken.`,{students:[s.id],portal:'sfees',tone:'bad',self:true});
@@ -1754,7 +1764,8 @@ FORM.upiPay=(f,d)=>{
   const u=cur();let s,sem;
   if(isStudentUser(u)){s=stu(u.studentId);sem=+f.dataset.sem}else{need('fees.collect','collect fees');s=stu(ui.col.sid);sem=ui.col.sem}
   if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');const m=semSummary(s,sem);const amount=amountOf(d,m);
-  const o=provider.createOrder(s,sem,amount,u.name);log('UPI order created','UPI order',o.id,null,{student:s.enrol,sem,amount:inr(amount)});save();closeLayer();upiDialog(o);
+  const batch=isStudentUser(u)?(([...db.payments].reverse().find(p=>p.studentId===s.id&&p.batch)||{}).batch||defaultBatch(s)):cleanBatch(d.batch);
+  const o=provider.createOrder(s,sem,amount,u.name);o.batch=batch;log('UPI order created','UPI order',o.id,null,{student:s.enrol,sem,amount:inr(amount)});save();closeLayer();upiDialog(o);
 };
 function gwEvent(id,status){const o=db.upiOrders.find(x=>x.id===id);if(!o)throw new Error('Order not found');const paidAt=Date.now();const evt={orderId:o.id,status,amount:o.amount,paidAt,utr:'UTR'+Math.floor(Math.random()*9e11+1e11),txnId:'pay_'+Math.random().toString(36).slice(2,14)};evt.signature=sig(evt.orderId+'|'+evt.status+'|'+evt.amount+'|'+evt.paidAt);return evt}
 ACT.gwOk=el=>{const p=handleUpiWebhook(gwEvent(el.dataset.id,'captured'));save();closeDialog();renderPage();if(p){toast('UPI payment captured · '+p.rc);showReceipt(p,true)}else toast('This order was already handled')};
@@ -1765,8 +1776,8 @@ function receiptHtml(p){
   const s=stu(p.studentId);const c=db.college;const bal=semSummary(s,p.sem).due;
   return`<div class="receipt ${p.status==='CANCELLED'?'cancelled':''}"><div class="hd"><div><b>${E(c.name)}</b><div class="muted" style="font-size:12px">${E(c.trust)} · ${E(c.address)}</div></div><div class="right"><b class="mono">${E(p.rc)}</b><div class="muted" style="font-size:12px">Invoice date ${fmtD(p.invoiceDate)}</div></div></div>
    ${p.status==='CANCELLED'?`<p class="err" style="margin:0 0 10px">Cancelled on ${fmtT(p.cancelledAt)} by ${E(p.cancelledBy)} · ${E(p.cancelReason)}</p>`:`<div class="tick"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14"/><path d="M10 16.5l4 4 8-9"/></svg>Payment received</div>`}
-   <div class="rline"><span>Student</span><b>${E(s.name)}</b></div><div class="rline"><span>Enrolment no.</span><span class="mono">${E(s.enrol)}</span></div><div class="rline"><span>Course</span><span>${E(course(s.course).name)} · Semester ${p.sem}</span></div>
-   <div class="rline"><span>Mode</span><span>${modeName(p.mode)}${p.mode==='CHEQUE'?` · No. ${E(p.chequeNo)}, ${E(p.bank)}, dated ${fmtD(p.chequeDate)}`:''}${p.mode==='UPI'?` · ${E(p.upiRef)}`:''}</span></div>
+   <div class="rline"><span>Student</span><b>${E(s.name)}</b></div><div class="rline"><span>Enrolment no.</span><span class="mono">${E(s.enrol)}</span></div><div class="rline"><span>Course</span><span>${E(course(s.course).name)} · Semester ${p.sem}</span></div><div class="rline"><span>Batch</span><b>${E(batchOf(p))}</b></div>
+   <div class="rline"><span>Mode</span><span>${modeName(p.mode)}${p.mode==='CHEQUE'?` · No. ${E(p.chequeNo)}, ${E(p.bank)}, dated ${fmtD(p.chequeDate)}`:''}${p.mode==='UPI'?` · ${E(p.upiRef)}`:''}</span></div>${p.mode==='EXPENSE'&&p.reason?`<div class="rline"><span>Used for</span><span>${E(p.reason)}</span></div>`:''}
    ${p.mode==='UPI'?`<div class="rline"><span>Paid on</span><span>${fmtT(p.paidAt)}</span></div>`:''}<div class="rline"><span>Entered</span><span>${fmtT(p.entryAt)} · ${E(p.by)}</span></div>${p.note?`<div class="rline"><span>Note</span><span>${E(p.note)}</span></div>`:''}
    <div class="rline tot"><span>Amount</span><span>${inr(p.amount)}</span></div><div class="rline"><span>Semester ${p.sem} balance now</span><span>${inr(bal)}</span></div>
    ${(p.dateEdits||[]).length?`<p class="note">Invoice date changed: ${p.dateEdits.map(x=>`${fmtD(x.from)} → ${fmtD(x.to)} (${E(x.by)})`).join('; ')}</p>`:''}</div>`;
@@ -1787,47 +1798,15 @@ FORM.cancelReceipt=(f,d)=>{const p=db.payments.find(x=>x.id===f.dataset.id);canc
   notify('cancel',`Receipt cancelled · ${s.name}`,`${p.rc} · ${inr(p.amount)} · ${p.cancelReason}`,{roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
   save();closeDialog();closeLayer();renderPage();toast('Receipt cancelled')};
 
-/* ---------- 2. expenses ---------- */
-function expFilter(){return ui.f['fees.expenses']=Object.assign({from:'',to:'',cat:'',sid:'',by:'',sort:'date',dir:-1,page:0,q:''},ui.f['fees.expenses']||{})}
-function expensesFiltered(){const f=expFilter();const q=(f.q||'').toLowerCase();
-  let l=db.expenses.filter(x=>(!f.from||x.date>=f.from)&&(!f.to||x.date<=f.to)&&(!f.cat||x.category===f.cat)&&(!f.by||x.by===f.by)&&(!f.sid||(f.sid==='linked'?x.studentId:f.sid==='none'?!x.studentId:x.studentId===f.sid))&&(!q||[x.reason,x.ref,x.studentId&&stu(x.studentId).name].some(v=>String(v||'').toLowerCase().includes(q))));
-  const k={date:x=>x.date+x.entryAt,amount:x=>x.amount,cat:x=>x.category,reason:x=>x.reason.toLowerCase()}[f.sort]||(x=>x.date);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
-function feeExpenses(){
-  const f=expFilter();const l=expensesFiltered();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);const sc='fees.expenses';const cats=db.settings.expenseCats;const bys=[...new Set(db.expenses.map(x=>x.by))];
-  return`<div class="panel"><h2>Expenses ${pill(inr(sum(l,x=>x.amount))+' · '+l.length+' entries','acc')}${can('expenses.manage')?'<button class="btn primary" data-act="newExpense">Add expense</button>':''}</h2>
-   <div class="filters"><input type="search" placeholder="Search reason or ref" aria-label="Search expenses" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
-    <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label>
-    ${sel(sc,'cat','Category',[['','All categories'],...cats.map(c=>[c,c])])}${sel(sc,'sid','Linked student',[['','Any link'],['linked','Linked to a student'],['none','Not linked']])}${sel(sc,'by','Created by',[['','Anyone'],...bys.map(b=>[b,b])])}</div>
-   <div class="tablewrap"><table><thead><tr>${sortTh(sc,'date','Date')}<th>Ref</th>${sortTh(sc,'reason','Reason')}${sortTh(sc,'cat','Category')}<th>Student</th>${sortTh(sc,'amount','Amount',1)}<th>By</th></tr></thead><tbody>
-   ${pg.map(x=>`<tr><td>${dateCell('x',x,x.date)}</td><td class="mono">${E(x.ref)}</td><td>${E(x.reason)}</td><td>${E(x.category||'—')}</td><td>${x.studentId?`<button class="lnk" data-act="openStudent" data-id="${E(x.studentId)}">${E(stu(x.studentId).name)}</button>${x.sem?' · Sem '+x.sem:''}`:'—'}</td><td class="num amt">${inr(x.amount)}</td><td>${E(x.by)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">No expenses for these filters.</td></tr>'}
-   </tbody></table></div>${pager(sc,l.length)}
-   <p class="note">Setting <b>expenseReducesDue</b> is ${db.settings.flags.expenseReducesDue?'ON: an expense linked to a student lowers that semester\'s due':'OFF (default): expenses are a separate ledger and do not change dues'}. (Open question for Roshanbhai.)</p></div>`;
-}
 /* an inline date editor for Cash / Cheque / Expense rows; UPI and cancelled rows show plain text */
-function dateCell(kind,rec,iso){const editable=can('fees.editdate')&&(kind==='x'||(rec.mode!=='UPI'&&rec.status==='SUCCESS'));
+function dateCell(kind,rec,iso){const editable=can('fees.editdate')&&rec.mode!=='UPI'&&rec.status==='SUCCESS';
   return editable?`<input type="date" class="inl" value="${E(iso)}" max="${today()}" aria-label="Invoice date of ${E(kind==='x'?rec.ref:rec.rc)}" data-change="invDate" data-kind="${kind}" data-id="${E(rec.id)}">`:`<span>${fmtD(iso)}</span>${kind==='p'&&rec.mode==='UPI'?' <small class="muted" title="Payment date + 1 day">auto</small>':''}`}
-CHG.invDate=el=>{const kind=el.dataset.kind;const rec=kind==='x'?db.expenses.find(x=>x.id===el.dataset.id):db.payments.find(x=>x.id===el.dataset.id);
+CHG.invDate=el=>{const kind=el.dataset.kind;const rec=db.payments.find(x=>x.id===el.dataset.id);
   if(!rec)throw new Error('Not found');const v=el.value;if(v>today())throw new Error('Invoice date cannot be in the future');
   const ch=editInvoiceDate(kind,rec,v);if(!ch)return;
   if(kind==='p'){const s=stu(rec.studentId);notify('datechange',`Invoice date changed · ${rec.rc}`,`${fmtD(rec.dateEdits.at(-1).from)} → ${fmtD(v)}. Your receipt was updated.`,{students:[s.id],portal:'sfees',self:true});
     notify('datechange',`Invoice date changed · ${rec.rc}`,`${s.name}: ${fmtD(rec.dateEdits.at(-1).from)} → ${fmtD(v)}`,{roles:['Super Admin','Principal'],staff:'audit',tab:'activity'})}
   save();toast(`Invoice date saved: ${fmtD(v)}${kind==='p'?' · receipt regenerated':''}`);renderPage()};
-function expenseForm(o){
-  const T=today();const cats=db.settings.expenseCats;const s=o.sid&&stu(o.sid);
-  return`<button class="btn x" data-act="close">Close</button><h2>Add expense</h2><p class="muted" style="margin:4px 0 14px">Amount, reason and date are required. Linking a student is optional.</p>
-  <form data-form="expense" class="form">${F('amount','Amount (₹)',{req:true,attrs:'inputmode="decimal"'})}${F('date','Date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}
-   ${F('reason','Reason',{req:true,span:1,attrs:'maxlength="160"'})}${F('category','Category (optional)',{opts:[['','None'],...cats.map(c=>[c,c])]})}
-   <div class="field"><label class="label" for="f_sid">Linked student (optional)</label><select id="f_sid" name="sid"><option value="">Not linked</option>${db.students.filter(x=>x.status==='ACTIVE'||x.id===o.sid).sort((a,b)=>a.name.localeCompare(b.name)).map(x=>`<option value="${E(x.id)}" ${x.id===o.sid?'selected':''}>${E(x.name)} · ${E(x.enrol)}</option>`).join('')}</select></div>
-   ${F('sem','Semester (optional)',{val:o.sem||'',opts:[['','None'],...SEMS.map(n=>[n,'Semester '+n])]})}
-   <p class="note span">Date works like Cash: it is the date you enter, and can be edited later in the table.</p>
-   <div class="actions span"><button class="btn primary big">Save expense</button><button type="button" class="btn" data-act="close">Cancel</button></div></form>`;
-}
-ACT.newExpense=el=>{need('expenses.manage','add expenses');drawer(expenseForm({sid:el.dataset.sid||'',sem:el.dataset.sem?+el.dataset.sem:''}),false,'Add expense');$('#f_amount').focus()};
-FORM.expense=(f,d)=>{need('expenses.manage','add expenses');const a=toPaise(d.amount);if(!(a>0)||a>100000000)throw new Error('Enter an amount greater than zero');const reason=capText(d.reason,'Reason',160);if(reason.length<3)throw new Error('Write the reason');
-  if(!validIso(d.date)||d.date>today())throw new Error('Choose a valid date (not in the future)');if(d.sid&&!stu(d.sid))throw new Error('Student not found');
-  const x={id:uid('x'),ref:'EXP-'+pad(db.counters.exp++,4),studentId:d.sid||'',sem:d.sem?+d.sem:null,amount:a,reason,category:d.category||'',date:d.date,entryAt:Date.now(),by:cur().name,byId:cur().id,dateEdits:[]};
-  db.expenses.push(x);log('Expense added','Expense',x.ref,null,{amount:inr(a),reason,date:fmtD(x.date),student:x.studentId?stu(x.studentId).enrol:''});save();closeLayer();ui.tab.fees='expenses';ui.col={q:'',sid:'',sem:0,mode:'CASH'};renderPage();toast(`Expense ${x.ref} saved`)};
-
 /* ---------- 3. pending dues ---------- */
 function duesFilter(){return ui.f['fees.dues']=Object.assign({q:'',course:'',sem:'',cat:'',fund:'',over:'',sort:'due',dir:-1,page:0},ui.f['fees.dues']||{})}
 function duesFiltered(){const f=duesFilter();const q=f.q.toLowerCase();
@@ -1864,17 +1843,17 @@ FORM.sendRemind=(f,d)=>{need('notices.post');const ids=f.dataset.ids.split(',').
 /* ---------- 4. receipts ---------- */
 function rcFilter(){return ui.f['fees.receipts']=Object.assign({q:'',mode:'',status:'',from:'',to:'',sort:'entry',dir:-1,page:0},ui.f['fees.receipts']||{})}
 function receiptsFiltered(){const f=rcFilter();const q=f.q.toLowerCase();
-  let l=db.payments.filter(p=>(!f.mode||p.mode===f.mode)&&(!f.status||p.status===f.status)&&(!f.from||p.invoiceDate>=f.from)&&(!f.to||p.invoiceDate<=f.to)&&(!q||[p.rc,stu(p.studentId).name,stu(p.studentId).enrol,p.chequeNo,p.upiRef].some(v=>String(v||'').toLowerCase().includes(q))));
+  let l=db.payments.filter(p=>(!f.mode||p.mode===f.mode)&&(!f.status||p.status===f.status)&&(!f.from||p.invoiceDate>=f.from)&&(!f.to||p.invoiceDate<=f.to)&&(!q||[p.rc,stu(p.studentId).name,stu(p.studentId).enrol,p.chequeNo,p.upiRef,batchOf(p),p.reason].some(v=>String(v||'').toLowerCase().includes(q))));
   const k={entry:p=>p.entryAt,date:p=>p.invoiceDate,amount:p=>p.amount,rc:p=>p.rc,name:p=>stu(p.studentId).name}[f.sort]||(p=>p.entryAt);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
 function feeReceipts(){
   const f=rcFilter();const sc='fees.receipts';const l=receiptsFiltered();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);
   return`<div class="panel"><h2>Receipts ${pill(inr(sum(l.filter(p=>p.status==='SUCCESS'),p=>p.amount))+' successful','good')}</h2>
-   <div class="filters"><input type="search" placeholder="Receipt no, name, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}
+   <div class="filters"><input type="search" placeholder="Receipt no, name, batch, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI'],['EXPENSE','Expense']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}
     <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label></div>
-   <div class="tablewrap"><table><thead><tr>${sortTh(sc,'rc','Receipt')}${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entered')}${sortTh(sc,'name','Student')}<th>Sem</th><th>Mode</th>${sortTh(sc,'amount','Amount',1)}<th>Status</th><th></th></tr></thead><tbody>
-   ${pg.map(p=>{const s=stu(p.studentId);return`<tr><td class="mono">${E(p.rc)}</td><td>${dateCell('p',p,p.invoiceDate)}</td><td><small>${fmtT(p.entryAt)}</small></td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}">${E(s.name)}</button></td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}</td><td>${payPill(p.status)}${p.depositId?' '+pill('Deposited'):''}</td>
-    <td><div class="actions nowrap"><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button>${p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn sm danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="9" class="empty">No receipts for these filters.</td></tr>'}</tbody></table></div>${pager(sc,l.length)}
-   <p class="note">Change the invoice date of a Cash or Cheque receipt right in the table: the receipt PDF is regenerated and the change is logged (old → new). UPI dates are fixed. A payment is never deleted; cancel it with a reason.</p></div>`;
+   <div class="tablewrap"><table><thead><tr>${sortTh(sc,'rc','Receipt')}${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entered')}${sortTh(sc,'name','Student')}<th>Batch</th><th>Sem</th><th>Mode</th>${sortTh(sc,'amount','Amount',1)}<th>Status</th><th></th></tr></thead><tbody>
+   ${pg.map(p=>{const s=stu(p.studentId);return`<tr><td class="mono">${E(p.rc)}</td><td>${dateCell('p',p,p.invoiceDate)}</td><td><small>${fmtT(p.entryAt)}</small></td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}">${E(s.name)}</button></td><td class="mono">${E(batchOf(p))}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}</td><td>${payPill(p.status)}${p.depositId?' '+pill('Deposited'):''}</td>
+    <td><div class="actions nowrap"><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button>${p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn sm danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="10" class="empty">No receipts for these filters.</td></tr>'}</tbody></table></div>${pager(sc,l.length)}
+   <p class="note">Change the invoice date of a Cash, Cheque or Expense receipt right in the table: the receipt PDF is regenerated and the change is logged (old → new). UPI dates are fixed. A payment is never deleted; cancel it with a reason.</p></div>`;
 }
 
 /* ---------- 5. fee setup ---------- */
@@ -1888,8 +1867,6 @@ function feeSetup(){
    <div class="actions" style="margin-top:12px"><button class="btn primary">Save fees and due dates</button></div></form>
   <form class="scard" data-form="receiptSetup"><h2>Receipt numbering</h2><div class="form">${F('receiptPrefix','Prefix',{val:c.receiptPrefix,req:true,attrs:'maxlength="16"'})}${F('nextReceipt','Next number',{type:'number',val:c.nextReceipt,req:true,attrs:'min="1"'})}</div>
    <p class="note">Next receipt: <b class="mono">${E(c.receiptPrefix+pad(c.nextReceipt,4))}</b>. The number can only go up, never back to a used one. (OPEN: send us the receipt format used today.)</p>
-   <h2 style="margin-top:16px">Expenses</h2>${F('expenseCats','Expense categories (comma separated)',{val:st.expenseCats.join(', ')})}
-   <label class="chk" style="margin-top:10px"><input type="checkbox" name="expenseReducesDue" ${st.flags.expenseReducesDue?'checked':''}> An expense linked to a student reduces that student's due <small class="muted">(OPEN · default off)</small></label>
    <div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>
   <form class="scard" data-form="upiSetup"><h2>UPI / Google Pay</h2><div class="form">${F('provider','Payment gateway',{val:st.upi.provider,opts:Object.entries(PaymentProviders).filter(([k])=>k!=='GooglePay').map(([k,v])=>[k,v.name])})}${F('mode','Mode',{val:st.upi.mode,opts:['Sandbox','Live']})}${F('vpa','College UPI ID (merchant VPA)',{val:st.upi.vpa,req:true,span:1,attrs:'maxlength="60"'})}</div>
    <label class="chk" style="margin-top:10px"><input type="checkbox" name="googlePay" ${st.upi.googlePay?'checked':''}> Use the direct Google Pay adapter (switch on only if Google approves the college's account)</label>
@@ -1902,8 +1879,8 @@ FORM.feeDefaults=(f,d)=>{need('fees.setup');const st=db.settings;const before={f
   st.feeDefault=nf;st.dueDates=nd;st.reminderDays=rd;log('Fee setup changed','Settings','fees',before,{fees:JSON.stringify(nf),due:JSON.stringify(nd),days:rd});ntSync();save();renderPage();toast('Fee setup saved')};
 FORM.receiptSetup=(f,d)=>{need('fees.setup');const c=db.college,st=db.settings;const px=capText(d.receiptPrefix,'Prefix',16);if(!/^[A-Za-z0-9\/\-_]+$/.test(px))throw new Error('Prefix can use letters, numbers, / - _');
   const n=+d.nextReceipt;const used=Math.max(0,...db.payments.filter(p=>p.rc.startsWith(px)).map(p=>+p.rc.slice(px.length)||0));if(!(n>=1)||n<=used)throw new Error(`Next number must be more than ${used} (already used)`);
-  const before={prefix:c.receiptPrefix,next:c.nextReceipt,flag:st.flags.expenseReducesDue};c.receiptPrefix=px;c.nextReceipt=n;st.expenseCats=String(d.expenseCats||'').split(',').map(x=>x.trim()).filter(Boolean).slice(0,20);if(!st.expenseCats.length)st.expenseCats=['Other'];
-  st.flags.expenseReducesDue=!!d.expenseReducesDue;log('Receipt settings changed','Settings','receipts',before,{prefix:px,next:n,flag:st.flags.expenseReducesDue});save();renderPage();toast('Saved')};
+  const before={prefix:c.receiptPrefix,next:c.nextReceipt};c.receiptPrefix=px;c.nextReceipt=n;
+  log('Receipt settings changed','Settings','receipts',before,{prefix:px,next:n});save();renderPage();toast('Saved')};
 FORM.upiSetup=(f,d)=>{need('fees.setup');const u=db.settings.upi;const vpa=String(d.vpa||'').trim();if(!/^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(vpa))throw new Error('Enter a valid UPI ID like college@okaxis');const before={...u};
   Object.assign(u,{provider:PaymentProviders[d.provider]?d.provider:'Razorpay',mode:d.mode==='Live'?'Live':'Sandbox',vpa,googlePay:!!d.googlePay});log('UPI settings changed','Settings','upi',before,{...u});save();renderPage();toast('UPI settings saved')};
 /* ---------- PDF writer (A4, Helvetica, no libraries so it works offline) ---------- */
@@ -1963,7 +1940,7 @@ function receiptPdf(p){
     if(cancelled){g.rect(40,124,515,26,'#fdeaea');g.text(52,141,`CANCELLED on ${fmtD(istDate(p.cancelledAt))} - ${p.cancelReason}`,{size:10,bold:true,color:'#b42318'})}
     else{g.rect(40,124,150,24,'#e5f6ec');g.text(52,140,'PAYMENT RECEIVED',{size:10,bold:true,color:'#1a7f45'})}
     const mode=modeName(p.mode)+(p.mode==='CHEQUE'?` No. ${p.chequeNo}, ${p.bank}, dated ${fmtD(p.chequeDate)}`:'')+(p.mode==='UPI'?` (${p.upiRef})`:'');
-    const info=[['Student',s.name],['Enrolment no.',s.enrol],['Course',course(s.course).name],['Semester',String(p.sem)],['Mode of payment',mode],['Category',s.category],['Entered by',p.by||'-'],['Entered on',fmtT(p.entryAt)]];
+    const info=[['Student',s.name],['Enrolment no.',s.enrol],['Course',course(s.course).name],['Batch',batchOf(p)],['Semester',String(p.sem)],['Mode of payment',mode],['Category',s.category],['Entered by',p.by||'-'],['Entered on',fmtT(p.entryAt)]];if(p.mode==='EXPENSE'&&p.reason)info.push(['Used for (expense)',p.reason]);
     let y=180;info.forEach((r,i)=>{const cx=i%2?310:40;if(i%2===0&&i>0)y+=40;g.text(cx,y,r[0].toUpperCase(),{size:7.5,bold:true,color:MUT});g.wrap(cx,y+15,r[1],240,{size:11,color:INK})});
     y+=64;g.rect(40,y,515,24,'#eef2fb');
     g.text(50,y+16,'PARTICULARS',{size:8,bold:true,color:MUT});g.text(545,y+16,'AMOUNT',{size:8,bold:true,color:MUT,align:'right'});y+=24;
@@ -2082,22 +2059,22 @@ function viewAudit(){
 }
 /* one row per payment or expense */
 function txAll(){
-  return db.payments.map(p=>{const s=stu(p.studentId);return{kind:'p',id:p.id,date:p.invoiceDate,entry:p.entryAt,s,sem:p.sem,mode:p.mode,amount:p.amount,ref:p.rc,status:p.status,by:p.by,rec:p}})
-   .concat(db.expenses.map(x=>{const s=x.studentId?stu(x.studentId):null;return{kind:'x',id:x.id,date:x.date,entry:x.entryAt,s,sem:x.sem,mode:'EXPENSE',amount:x.amount,ref:x.ref,status:'SUCCESS',by:x.by,rec:x,reason:x.reason}}));
+  return db.payments.map(p=>{const s=stu(p.studentId);return{kind:'p',id:p.id,date:p.invoiceDate,entry:p.entryAt,s,sem:p.sem,mode:p.mode,amount:p.amount,ref:p.rc,status:p.status,by:p.by,rec:p,reason:p.reason||'',batch:batchOf(p)}})
+   ;
 }
 function txFilter(){return ui.f['audit.tx']=Object.assign({q:'',modes:[],from:'',to:'',course:'',sem:'',cat:'',fund:'',status:'',by:'',min:'',max:'',sort:'date',dir:-1,page:0},ui.f['audit.tx']||{})}
 function txFiltered(){
   const f=txFilter();const q=f.q.toLowerCase();const mn=f.min!==''?toPaise(f.min):null,mx=f.max!==''?toPaise(f.max):null;
   let l=txAll().filter(r=>(!f.modes.length||f.modes.includes(r.mode))&&(!f.from||r.date>=f.from)&&(!f.to||r.date<=f.to)&&(!f.course||(r.s&&r.s.course===f.course))&&(!f.sem||r.sem===+f.sem)
    &&(!f.cat||(r.s&&r.s.category===f.cat))&&(!f.fund||(r.s&&r.s.funding===f.fund))&&(!f.status||r.status===f.status)&&(!f.by||r.by===f.by)&&(mn===null||r.amount>=mn)&&(mx===null||r.amount<=mx)
-   &&(!q||[r.ref,r.s&&r.s.name,r.s&&r.s.enrol,r.reason,r.rec.chequeNo,r.rec.upiRef].some(v=>String(v||'').toLowerCase().includes(q))));
+   &&(!q||[r.ref,r.s&&r.s.name,r.s&&r.s.enrol,r.reason,r.batch,r.rec.chequeNo,r.rec.upiRef].some(v=>String(v||'').toLowerCase().includes(q))));
   const k={date:r=>r.date+String(r.entry).padStart(14,'0'),entry:r=>r.entry,name:r=>r.s?r.s.name:'~',course:r=>r.s?r.s.course:'~',sem:r=>r.sem||0,cat:r=>r.s?r.s.category:'~',fund:r=>r.s?r.s.funding:'~',mode:r=>r.mode,amount:r=>r.amount,ref:r=>r.ref,status:r=>r.status,by:r=>r.by}[f.sort]||(r=>r.date);
   l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l;
 }
 const txTotals=l=>{const ok=l.filter(r=>r.status==='SUCCESS');const o={};['CASH','CHEQUE','UPI','EXPENSE'].forEach(m=>o[m]=sum(ok.filter(r=>r.mode===m),r=>r.amount));o.income=o.CASH+o.CHEQUE+o.UPI;return o};
 function auditTx(){
   const f=txFilter();const sc='audit.tx';const l=txFiltered();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);const t=txTotals(l);const bys=[...new Set(txAll().map(r=>r.by))];
-  return`<div class="totals">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)}</span><b>${inr(t[m])}</b></div>`).join('')}<div class="tt sum"><span>Fees received</span><b>${inr(t.income)}</b></div></div>
+  return`<div class="totals">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)}</span><b>${inr(t[m])}</b></div>`).join('')}<div class="tt sum"><span>Cash + Cheque + UPI</span><b>${inr(t.income)}</b></div></div>
   <div class="panel"><div class="filters"><input type="search" placeholder="Search receipt, name, cheque, UTR, reason" aria-label="Search transactions" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
    <div class="chips" role="group" aria-label="Mode">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<button type="button" class="chip ${MODE_TONE[m]}" aria-pressed="${f.modes.includes(m)}" data-act="txMode" data-m="${m}">${modeName(m)}</button>`).join('')}</div>
    <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label>
@@ -2105,15 +2082,15 @@ function auditTx(){
    <input class="numin" placeholder="Min ₹" aria-label="Minimum amount" value="${E(f.min)}" data-change="sf" data-scope="${sc}" data-k="min" inputmode="decimal"><input class="numin" placeholder="Max ₹" aria-label="Maximum amount" value="${E(f.max)}" data-change="sf" data-scope="${sc}" data-k="max" inputmode="decimal">
    <button class="btn sm" data-act="txClear">Clear</button></div>
   <div class="actions" style="margin-bottom:10px"><span class="muted">${l.length} rows</span><span style="flex:1"></span><button class="btn" data-act="txCsv">Export Excel</button><button class="btn" data-act="txPrint">Export PDF</button></div>
-  <div class="tablewrap"><table class="dense"><thead><tr>${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entry time')}${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course')}${sortTh(sc,'sem','Sem')}${sortTh(sc,'cat','Category')}${sortTh(sc,'fund','Funding')}${sortTh(sc,'mode','Mode')}${sortTh(sc,'amount','Amount',1)}${sortTh(sc,'ref','Receipt / ref')}${sortTh(sc,'status','Status')}${sortTh(sc,'by','Entered by')}</tr></thead><tbody>
-  ${pg.map(r=>`<tr><td>${fmtD(r.date)}</td><td><small>${fmtT(r.entry)}</small></td><td>${r.s?`<button class="lnk" data-act="openStudent" data-id="${E(r.s.id)}">${E(r.s.name)}</button>`:`<span class="muted">${E(r.reason||'—')}</span>`}</td><td>${r.s?E(course(r.s.course).name):'—'}</td><td>${r.sem||'—'}</td><td>${r.s?E(r.s.category):'—'}</td><td>${r.s?E(fundLabel(r.s.funding)):'—'}</td><td>${modePill(r.mode)}</td><td class="num amt">${inr(r.amount)}</td><td class="mono">${r.kind==='p'?`<button class="lnk mono" data-act="viewReceipt" data-id="${E(r.id)}">${E(r.ref)}</button>`:E(r.ref)}</td><td>${payPill(r.status)}</td><td>${E(r.by)}</td></tr>`).join('')||'<tr><td colspan="12" class="empty">No transactions for these filters.</td></tr>'}
+  <div class="tablewrap"><table class="dense"><thead><tr>${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entry time')}${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course')}<th>Batch</th>${sortTh(sc,'sem','Sem')}${sortTh(sc,'cat','Category')}${sortTh(sc,'fund','Funding')}${sortTh(sc,'mode','Mode')}${sortTh(sc,'amount','Amount',1)}${sortTh(sc,'ref','Receipt / ref')}${sortTh(sc,'status','Status')}${sortTh(sc,'by','Entered by')}</tr></thead><tbody>
+  ${pg.map(r=>`<tr><td>${fmtD(r.date)}</td><td><small>${fmtT(r.entry)}</small></td><td>${r.s?`<button class="lnk" data-act="openStudent" data-id="${E(r.s.id)}">${E(r.s.name)}</button>`:`<span class="muted">${E(r.reason||'—')}</span>`}</td><td>${r.s?E(course(r.s.course).name):'—'}</td><td class="mono">${E(r.batch||'—')}</td><td>${r.sem||'—'}</td><td>${r.s?E(r.s.category):'—'}</td><td>${r.s?E(fundLabel(r.s.funding)):'—'}</td><td>${modePill(r.mode)}</td><td class="num amt">${inr(r.amount)}</td><td class="mono">${r.kind==='p'?`<button class="lnk mono" data-act="viewReceipt" data-id="${E(r.id)}">${E(r.ref)}</button>`:E(r.ref)}</td><td>${payPill(r.status)}</td><td>${E(r.by)}</td></tr>`).join('')||'<tr><td colspan="13" class="empty">No transactions for these filters.</td></tr>'}
   </tbody></table></div>${pager(sc,l.length)}</div>`;
 }
 ACT.txMode=el=>{const f=txFilter();const m=el.dataset.m;f.modes=f.modes.includes(m)?f.modes.filter(x=>x!==m):[...f.modes,m];f.page=0;renderPage()};
 ACT.txClear=()=>{const f=txFilter();ui.f['audit.tx']={sort:f.sort,dir:f.dir,page:0};renderPage()};
-const txCols=['Invoice date','Entry time','Student','Enrolment no','Course','Sem','Category','Funding','Mode','Amount (₹)','Receipt / ref','Status','Entered by','Cheque no','Bank','UPI ref','Reason'];
-const txRow=r=>[fmtD(r.date),fmtT(r.entry),r.s?r.s.name:'',r.s?r.s.enrol:'',r.s?course(r.s.course).name:'',r.sem||'',r.s?r.s.category:'',r.s?fundLabel(r.s.funding):'',modeName(r.mode),r.amount/100,r.ref,r.status,r.by,r.rec.chequeNo||'',r.rec.bank||'',r.rec.upiRef||'',r.reason||r.rec.cancelReason||''];
-ACT.txCsv=()=>{need('audit.view');const l=txFiltered();const t=txTotals(l);showCsv('NPCTE transactions',txCols,[...l.map(txRow),[],['Totals (successful)','','','','','','','','Cash',t.CASH/100],['','','','','','','','','Cheque',t.CHEQUE/100],['','','','','','','','','UPI',t.UPI/100],['','','','','','','','','Expense',t.EXPENSE/100]]);log('Audit exported','Audit','',null,{rows:l.length,format:'Excel'})};
+const txCols=['Invoice date','Entry time','Student','Enrolment no','Course','Batch','Sem','Category','Funding','Mode','Amount (₹)','Receipt / ref','Status','Entered by','Cheque no','Bank','UPI ref','Reason'];
+const txRow=r=>[fmtD(r.date),fmtT(r.entry),r.s?r.s.name:'',r.s?r.s.enrol:'',r.s?course(r.s.course).name:'',r.batch||'',r.sem||'',r.s?r.s.category:'',r.s?fundLabel(r.s.funding):'',modeName(r.mode),r.amount/100,r.ref,r.status,r.by,r.rec.chequeNo||'',r.rec.bank||'',r.rec.upiRef||'',r.reason||r.rec.cancelReason||''];
+ACT.txCsv=()=>{need('audit.view');const l=txFiltered();const t=txTotals(l);showCsv('NPCTE transactions',txCols,[...l.map(txRow),[],['Totals (successful)','','','','','','','','','Cash',t.CASH/100],['','','','','','','','','','Cheque',t.CHEQUE/100],['','','','','','','','','','UPI',t.UPI/100],['','','','','','','','','','Expense',t.EXPENSE/100]]);log('Audit exported','Audit','',null,{rows:l.length,format:'Excel'})};
 /* printable report with the college header: the browser's "Save as PDF" makes the PDF */
 function printReport(title,sub,cols,rows,foot){
   const c=db.college;const w=$('#printArea')||document.body.appendChild(Object.assign(document.createElement('div'),{id:'printArea'}));
@@ -2135,13 +2112,13 @@ function depPeriod(){const f=ui.f.dep=Object.assign({p:'week',from:'',to:''},ui.
   return{from:f.from||addDays(T,-30),to:f.to||T,f}}
 function auditDeposit(){
   const{from,to,f}=depPeriod();const inP=p=>p.invoiceDate>=from&&p.invoiceDate<=to&&p.status==='SUCCESS';
-  const pays=db.payments.filter(inP);const und=pays.filter(p=>(p.mode==='CASH'||p.mode==='CHEQUE')&&!p.depositId);const ex=db.expenses.filter(x=>x.date>=from&&x.date<=to);
+  const pays=db.payments.filter(inP);const und=pays.filter(p=>(p.mode==='CASH'||p.mode==='CHEQUE')&&!p.depositId);const ex=pays.filter(p=>p.mode==='EXPENSE');
   const col=m=>{const l=m==='EXPENSE'?ex:pays.filter(p=>p.mode===m);return{t:sum(l,x=>x.amount),n:l.length,und:m==='CASH'||m==='CHEQUE'?sum(l.filter(p=>!p.depositId),p=>p.amount):null}};
   const sc=can('audit.deposit');
   return`<div class="panel"><h2>Cash & cheque deposit report</h2>
    <div class="filters"><div class="chips" role="group" aria-label="Period">${[['week','This week'],['lastweek','Last week'],['month','This month'],['lastmonth','Last month'],['custom','Custom']].map(([k,l])=>`<button type="button" class="chip" aria-pressed="${f.p===k}" data-act="depP" data-p="${k}">${l}</button>`).join('')}</div>
     ${f.p==='custom'?`<label class="dl">From <input type="date" value="${E(from)}" data-change="sf" data-scope="dep" data-k="from"></label><label class="dl">To <input type="date" value="${E(to)}" data-change="sf" data-scope="dep" data-k="to"></label>`:`<span class="muted">${fmtD(from)} to ${fmtD(to)}</span>`}</div>
-   <div class="totals four">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>{const c=col(m);return`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)} · ${c.n}</span><b>${inr(c.t)}</b>${c.und!==null?`<small>${c.und?inr(c.und)+' not deposited':'all deposited'}</small>`:`<small>${m==='UPI'?'goes to bank by gateway':'paid out'}</small>`}</div>`}).join('')}</div>
+   <div class="totals four">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>{const c=col(m);return`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)} · ${c.n}</span><b>${inr(c.t)}</b>${c.und!==null?`<small>${c.und?inr(c.und)+' not deposited':'all deposited'}</small>`:`<small>${m==='UPI'?'goes to bank by gateway':'fee used for college expense'}</small>`}</div>`}).join('')}</div>
    <h3>Not yet deposited · ${und.length} entries · ${inr(sum(und,p=>p.amount))}</h3>
    <div class="tablewrap"><table><thead><tr>${sc?`<th><input type="checkbox" aria-label="Select all" data-change="depAll" checked></th>`:''}<th>Invoice date</th><th>Receipt</th><th>Student</th><th>Mode</th><th>Cheque</th><th class="num">Amount</th></tr></thead><tbody>
    ${und.sort((a,b)=>a.invoiceDate<b.invoiceDate?-1:1).map(p=>`<tr>${sc?`<td><input type="checkbox" name="dep" value="${E(p.id)}" checked aria-label="Include ${E(p.rc)}" data-change="depCount"></td>`:''}<td>${fmtD(p.invoiceDate)}</td><td class="mono">${E(p.rc)}</td><td>${E(stu(p.studentId).name)}</td><td>${modePill(p.mode)}</td><td>${p.mode==='CHEQUE'?E(p.chequeNo+' · '+p.bank):'—'}</td><td class="num amt">${inr(p.amount)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nothing waiting to be deposited in this period.</td></tr>'}</tbody></table></div>
@@ -2161,9 +2138,9 @@ FORM.deposit=(f,d)=>{need('audit.deposit','mark deposits');const l=depChecked().
   db.deposits.push(dp);l.forEach(p=>p.depositId=dp.id);log('Marked as deposited','Deposit',dp.id,null,{total:inr(dp.total),entries:dp.count,bankRef:ref,on:fmtD(dp.depositedOn)});save();renderPage();toast(`${inr(dp.total)} marked as deposited`)};
 ACT.depUndo=el=>{if(!['Super Admin','Principal'].includes(cur().role))throw new Error('Only the Principal can undo a deposit');const dp=db.deposits.find(x=>x.id===el.dataset.id);
   confirmBox('Undo deposit',`${dp.count} entries (${inr(dp.total)}) go back to "not deposited".`,'Undo',()=>{db.payments.forEach(p=>{if(p.depositId===dp.id)p.depositId=''});db.deposits=db.deposits.filter(x=>x!==dp);log('Deposit undone','Deposit',dp.id,{total:inr(dp.total)},null);save();renderPage();toast('Deposit undone')},true)};
-ACT.depPrint=()=>{const{from,to}=depPeriod();const l=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&(p.mode==='CASH'||p.mode==='CHEQUE'));const ex=db.expenses.filter(x=>x.date>=from&&x.date<=to);const t=m=>inr(sum(db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&p.mode===m),p=>p.amount));
+ACT.depPrint=()=>{const{from,to}=depPeriod();const l=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&(p.mode==='CASH'||p.mode==='CHEQUE'));const t=m=>inr(sum(db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&p.mode===m),p=>p.amount));
   printReport('Cash & cheque deposit report',`${fmtD(from)} to ${fmtD(to)}`,['Invoice date','Receipt','Student','Mode','Cheque','Amount','Deposited'],l.map(p=>[fmtD(p.invoiceDate),p.rc,stu(p.studentId).name,modeName(p.mode),p.mode==='CHEQUE'?p.chequeNo+' '+p.bank:'',inr(p.amount),p.depositId?'Yes':'No']),
-   `<p class="pt">Cash ${t('CASH')} · Cheque ${t('CHEQUE')} · UPI ${t('UPI')} · Expense ${inr(sum(ex,x=>x.amount))} · Not deposited ${inr(sum(l.filter(p=>!p.depositId),p=>p.amount))}</p><p class="pt">Deposited by: ____________________ &nbsp; Checked by: ____________________</p>`)};
+   `<p class="pt">Cash ${t('CASH')} · Cheque ${t('CHEQUE')} · UPI ${t('UPI')} · Expense ${t('EXPENSE')} · Not deposited ${inr(sum(l.filter(p=>!p.depositId),p=>p.amount))}</p><p class="pt">Deposited by: ____________________ &nbsp; Checked by: ____________________</p>`)};
 
 /* activity log (§7B): read-only, Principal and Super Admin */
 function auditActivity(){
@@ -2221,12 +2198,11 @@ FORM.mailSet=(f,d)=>{need('settings.manage');const m=db.settings.mail;const befo
 CHG.mute=el=>{lsSet('npcte_mute',el.checked?'0':'1');toast(el.checked?'Sound on':'Sound off')};
 function setFlags(){const fl=db.settings.flags;
   return`<form class="scard" data-form="flags" style="max-width:820px"><h2>Open items · feature flags</h2><p class="note" style="margin:0 0 12px">These questions are waiting for the college (Roshanbhai). The app works with the default until they answer.</p>
-   <label class="chk"><input type="checkbox" name="expenseReducesDue" ${fl.expenseReducesDue?'checked':''}> 1 · An expense linked to a student reduces that student's due <small class="muted">(default: off)</small></label>
-   <label class="chk"><input type="checkbox" name="fundingAllCategories" ${fl.fundingAllCategories?'checked':''}> 2 · Show the funding type (Cash / Scholarship) for all categories, not only SC / ST <small class="muted">(default: off)</small></label>
-   <label class="chk"><input type="checkbox" name="lateFee" disabled> 3 · Late fee <small class="muted">(default: no late fee · due dates in Fees & receipts)</small></label>
-   <ul class="note"><li>4 · Receipt format and numbering used today (send a photo)</li><li>5 · College bank account and UPI merchant / gateway</li><li>6 · Old data: Excel of current students (CSV import template is in Students → Import)</li><li>7 · Exact reports the trust / university asks for</li><li>8 · Student login ID: enrolment no. or email (now: either works)</li></ul>
+   <label class="chk"><input type="checkbox" name="fundingAllCategories" ${fl.fundingAllCategories?'checked':''}> 1 · Show the funding type (Cash / Scholarship) for all categories, not only SC / ST <small class="muted">(default: off)</small></label>
+   <label class="chk"><input type="checkbox" name="lateFee" disabled> 2 · Late fee <small class="muted">(default: no late fee · due dates in Fees & receipts)</small></label>
+   <ul class="note"><li>3 · Receipt format and numbering used today (send a photo)</li><li>4 · College bank account and UPI merchant / gateway</li><li>5 · Old data: Excel of current students (CSV import template is in Students → Import)</li><li>6 · Exact reports the trust / university asks for</li><li>7 · Student login ID: enrolment no. or email (now: either works)</li></ul>
    <div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>`}
-FORM.flags=(f,d)=>{need('settings.manage');const fl=db.settings.flags;const before={...fl};fl.expenseReducesDue=!!d.expenseReducesDue;fl.fundingAllCategories=!!d.fundingAllCategories;log('Feature flags changed','Settings','flags',before,{...fl});save();renderPage();toast('Saved')};
+FORM.flags=(f,d)=>{need('settings.manage');const fl=db.settings.flags;const before={...fl};fl.fundingAllCategories=!!d.fundingAllCategories;log('Feature flags changed','Settings','flags',before,{...fl});save();renderPage();toast('Saved')};
 function setData(){return`<div class="scard danger" style="max-width:720px"><h2>Demo data</h2><p class="note">Everything lives in this browser. Reset puts back the sample students, payments and notices.</p><div class="actions" style="margin-top:10px"><button class="btn" data-act="backup">Download backup (JSON)</button><button class="btn danger" data-act="resetDemo">Reset demo data</button></div></div>`}
 ACT.backup=()=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const c=JSON.parse(JSON.stringify(db));c.users.forEach(u=>delete u.password);download('npcte-backup-'+today()+'.json',JSON.stringify(c,null,1),'application/json');log('Backup downloaded','System','')};
 
@@ -2254,7 +2230,7 @@ function viewStudentHome(){
 function viewStudentFees(){
   const s=me();const sm=feeSum(s);const pays=db.payments.filter(p=>p.studentId===s.id).sort((a,b)=>b.entryAt-a.entryAt);
   return head('My fees',`Total ${inr(sm.total)} · paid ${inr(sm.paid)} · due now ${inr(sm.payable)}`)+semCards(s,{pay:true})+
-  `<div class="panel" style="margin-top:16px"><h2>Receipts</h2><div class="list">${pays.map(p=>`<div class="li"><div><b>${E(p.rc)} · ${inr(p.amount)}</b><small>Semester ${p.sem} · ${modeName(p.mode)} · invoice ${fmtD(p.invoiceDate)}</small></div><div class="actions nowrap">${p.status==='SUCCESS'?'':payPill(p.status)}<button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button><button class="btn sm" data-act="dlPdf" data-id="${E(p.id)}">PDF</button></div></div>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
+  `<div class="panel" style="margin-top:16px"><h2>Receipts</h2><div class="list">${pays.map(p=>`<div class="li"><div><b>${E(p.rc)} · ${inr(p.amount)}</b><small>Batch ${E(batchOf(p))} · Semester ${p.sem} · ${modeName(p.mode)} · invoice ${fmtD(p.invoiceDate)}</small></div><div class="actions nowrap">${p.status==='SUCCESS'?'':payPill(p.status)}<button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button><button class="btn sm" data-act="dlPdf" data-id="${E(p.id)}">PDF</button></div></div>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
   <p class="note">Paying with UPI: your receipt is ready as soon as the bank confirms. Its invoice date is the next day (college rule).</p>`;
 }
 ACT.payNow=el=>{const s=me();const m=semSummary(s,+el.dataset.sem);if(!(m.due>0))throw new Error('Nothing due for this semester');
@@ -2398,9 +2374,9 @@ function donut(parts){/* [label,value,cls,link] */
 }
 function viewDashboard(){
   need('dashboard.view');const u=cur(),T=today(),M=T.slice(0,7);const L=live();
-  const pays=okP();const today_=sum(pays.filter(p=>p.invoiceDate===T),p=>p.amount);const month=sum(pays.filter(p=>p.invoiceDate.slice(0,7)===M),p=>p.amount);
+  const allP=okP();const pays=allP.filter(p=>p.mode!=='EXPENSE');const today_=sum(pays.filter(p=>p.invoiceDate===T),p=>p.amount);const month=sum(pays.filter(p=>p.invoiceDate.slice(0,7)===M),p=>p.amount);
   const dl=L.map(s=>({s,sm:feeSum(s)})).filter(x=>x.sm.payable>0).sort((a,b)=>b.sm.payable-a.sm.payable);const outst=sum(dl,x=>x.sm.payable);
-  const expM=sum(db.expenses.filter(x=>x.date.slice(0,7)===M),x=>x.amount);const sch=L.filter(s=>s.funding==='SCHOLARSHIP').length;
+  const expPM=allP.filter(p=>p.mode==='EXPENSE'&&p.invoiceDate.slice(0,7)===M);const expM=sum(expPM,p=>p.amount);const sch=L.filter(s=>s.funding==='SCHOLARSHIP').length;
   const clerk=u.role==='Clerk';const mF={from:M+'-01',to:monthEnd(M),modes:['CASH','CHEQUE','UPI'],status:'SUCCESS'};
   const k=[
     !clerk&&kpi('Students',L.length,`${L.filter(s=>s.course==='BED').length} B.Ed · ${L.filter(s=>s.course==='MED').length} M.Ed`,'students',null,{status:'ACTIVE'}),
@@ -2408,11 +2384,11 @@ function viewDashboard(){
     kpi('Collected this month',inr(month),MON[+M.slice(5)-1]+' '+M.slice(0,4),'audit','tx',mF),
     kpi('Total outstanding',inr(outst),dl.length+' students · '+dl.filter(x=>x.sm.overdue).length+' overdue','fees','dues',{},'warn'),
     !clerk&&kpi('Scholarship students',sch,'SC / ST · by scholarship','students',null,{fund:'SCHOLARSHIP',status:'ACTIVE'}),
-    kpi('Expenses this month',inr(expM),db.expenses.filter(x=>x.date.slice(0,7)===M).length+' entries','fees','expenses',{from:M+'-01',to:monthEnd(M)})].filter(Boolean);
+    kpi('Fees used as expense',inr(expM),expPM.length+(expPM.length===1?' receipt':' receipts')+' this month','audit','tx',{from:M+'-01',to:monthEnd(M),modes:['EXPENSE'],status:'SUCCESS'})].filter(Boolean);
   const keys=monthKeys(12);const vals=keys.map(m=>sum(pays.filter(p=>p.invoiceDate.slice(0,7)===m),p=>p.amount));
-  const yFrom=keys[0]+'-01';const inY=pays.filter(p=>p.invoiceDate>=yFrom);
+  const yFrom=keys[0]+'-01';const inY=allP.filter(p=>p.invoiceDate>=yFrom);
   const modeParts=[['Cash',sum(inY.filter(p=>p.mode==='CASH'),p=>p.amount),'d-cash',{to:'audit',sub:'tx',f:{from:yFrom,modes:['CASH']}}],['Cheque',sum(inY.filter(p=>p.mode==='CHEQUE'),p=>p.amount),'d-cheque',{to:'audit',sub:'tx',f:{from:yFrom,modes:['CHEQUE']}}],
-    ['UPI',sum(inY.filter(p=>p.mode==='UPI'),p=>p.amount),'d-upi',{to:'audit',sub:'tx',f:{from:yFrom,modes:['UPI']}}],['Expense',sum(db.expenses.filter(x=>x.date>=yFrom),x=>x.amount),'d-exp',{to:'audit',sub:'tx',f:{from:yFrom,modes:['EXPENSE']}}]];
+    ['UPI',sum(inY.filter(p=>p.mode==='UPI'),p=>p.amount),'d-upi',{to:'audit',sub:'tx',f:{from:yFrom,modes:['UPI']}}],['Expense',sum(inY.filter(p=>p.mode==='EXPENSE'),p=>p.amount),'d-exp',{to:'audit',sub:'tx',f:{from:yFrom,modes:['EXPENSE']}}]];
   const catBars=CATS.map(c=>[c,L.filter(s=>s.category===c).length,'c-cat',{to:'students',f:{cat:c,status:'ACTIVE'}}]);
   const fundBars=[['By Cash',L.filter(s=>s.funding==='CASH').length,'c-cash',{to:'students',f:{fund:'CASH',status:'ACTIVE'}}],['By Scholarship',sch,'c-sch',{to:'students',f:{fund:'SCHOLARSHIP',status:'ACTIVE'}}]];
   const hr=+new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hour:'2-digit',hour12:false}).format(Date.now());const greet=hr<12?'Good morning':hr<17?'Good afternoon':'Good evening';
@@ -2425,7 +2401,7 @@ function viewDashboard(){
    <div class="panel"><h2>Students by category</h2>${barsH(catBars)}<h3>Cash vs Scholarship</h3>${barsH(fundBars)}</div>`}</div>
   <div class="grid three-col">
    <div class="panel"><h2>Top pending dues <button class="btn sm" data-act="goto" data-to="fees" data-sub="dues">All</button></h2><div class="list">${dl.slice(0,7).map(x=>`<button class="li pick" data-act="openStudent" data-id="${E(x.s.id)}"><div><b>${E(x.s.name)}</b><small>${E(x.s.enrol)} · ${E(classLabel(x.s))}</small></div><span class="amt ${x.sm.overdue?'t-bad':''}">${inr(x.sm.payable)}</span></button>`).join('')||'<p class="note">No dues. Everyone is paid up.</p>'}</div></div>
-   <div class="panel"><h2>Latest 10 payments <button class="btn sm" data-act="goto" data-to="fees" data-sub="receipts">All</button></h2><div class="list">${pays.sort((a,b)=>b.entryAt-a.entryAt).slice(0,10).map(p=>`<button class="li pick" data-act="viewReceipt" data-id="${E(p.id)}"><div><b>${E(stu(p.studentId).name)}</b><small>${E(p.rc)} · ${modeName(p.mode)} · ${fmtD(p.invoiceDate)}</small></div><span class="amt">${inr(p.amount)}</span></button>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
+   <div class="panel"><h2>Latest 10 payments <button class="btn sm" data-act="goto" data-to="fees" data-sub="receipts">All</button></h2><div class="list">${allP.sort((a,b)=>b.entryAt-a.entryAt).slice(0,10).map(p=>`<button class="li pick" data-act="viewReceipt" data-id="${E(p.id)}"><div><b>${E(stu(p.studentId).name)}</b><small>${E(p.rc)} · ${modeName(p.mode)} · ${fmtD(p.invoiceDate)}</small></div><span class="amt">${inr(p.amount)}</span></button>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
    <div class="panel"><h2>Latest notices ${can('notices.post')?'<button class="btn sm" data-act="nav" data-id="notices">All</button>':''}</h2><div class="list">${db.notices.slice().sort((a,b)=>b.publishAt-a.publishAt).slice(0,5).map(n=>`<div class="li"><div><b>${E(n.title)}</b><small>${fmtT(n.publishAt)} · ${E(audienceLabel(n.audience))}</small></div>${n.isFeeAlert?pill('Fee','warn'):''}</div>`).join('')||'<p class="note">No notices yet.</p>'}</div></div></div>`;
 }
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('svg a[data-act]')){e.preventDefault();e.target.dispatchEvent(new MouseEvent('click',{bubbles:true}))}});

@@ -16,7 +16,7 @@ function viewStudentHome(){
 function viewStudentFees(){
   const s=me();const sm=feeSum(s);const pays=db.payments.filter(p=>p.studentId===s.id).sort((a,b)=>b.entryAt-a.entryAt);
   return head('My fees',`Total ${inr(sm.total)} · paid ${inr(sm.paid)} · due now ${inr(sm.payable)}`)+semCards(s,{pay:true})+
-  `<div class="panel" style="margin-top:16px"><h2>Receipts</h2><div class="list">${pays.map(p=>`<div class="li"><div><b>${E(p.rc)} · ${inr(p.amount)}</b><small>Semester ${p.sem} · ${modeName(p.mode)} · invoice ${fmtD(p.invoiceDate)}</small></div><div class="actions nowrap">${p.status==='SUCCESS'?'':payPill(p.status)}<button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button><button class="btn sm" data-act="dlPdf" data-id="${E(p.id)}">PDF</button></div></div>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
+  `<div class="panel" style="margin-top:16px"><h2>Receipts</h2><div class="list">${pays.map(p=>`<div class="li"><div><b>${E(p.rc)} · ${inr(p.amount)}</b><small>Batch ${E(batchOf(p))} · Semester ${p.sem} · ${modeName(p.mode)} · invoice ${fmtD(p.invoiceDate)}</small></div><div class="actions nowrap">${p.status==='SUCCESS'?'':payPill(p.status)}<button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button><button class="btn sm" data-act="dlPdf" data-id="${E(p.id)}">PDF</button></div></div>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
   <p class="note">Paying with UPI: your receipt is ready as soon as the bank confirms. Its invoice date is the next day (college rule).</p>`;
 }
 ACT.payNow=el=>{const s=me();const m=semSummary(s,+el.dataset.sem);if(!(m.due>0))throw new Error('Nothing due for this semester');

@@ -19,7 +19,7 @@ function receiptPdf(p){
     if(cancelled){g.rect(40,124,515,26,'#fdeaea');g.text(52,141,`CANCELLED on ${fmtD(istDate(p.cancelledAt))} - ${p.cancelReason}`,{size:10,bold:true,color:'#b42318'})}
     else{g.rect(40,124,150,24,'#e5f6ec');g.text(52,140,'PAYMENT RECEIVED',{size:10,bold:true,color:'#1a7f45'})}
     const mode=modeName(p.mode)+(p.mode==='CHEQUE'?` No. ${p.chequeNo}, ${p.bank}, dated ${fmtD(p.chequeDate)}`:'')+(p.mode==='UPI'?` (${p.upiRef})`:'');
-    const info=[['Student',s.name],['Enrolment no.',s.enrol],['Course',course(s.course).name],['Semester',String(p.sem)],['Mode of payment',mode],['Category',s.category],['Entered by',p.by||'-'],['Entered on',fmtT(p.entryAt)]];
+    const info=[['Student',s.name],['Enrolment no.',s.enrol],['Course',course(s.course).name],['Batch',batchOf(p)],['Semester',String(p.sem)],['Mode of payment',mode],['Category',s.category],['Entered by',p.by||'-'],['Entered on',fmtT(p.entryAt)]];if(p.mode==='EXPENSE'&&p.reason)info.push(['Used for (expense)',p.reason]);
     let y=180;info.forEach((r,i)=>{const cx=i%2?310:40;if(i%2===0&&i>0)y+=40;g.text(cx,y,r[0].toUpperCase(),{size:7.5,bold:true,color:MUT});g.wrap(cx,y+15,r[1],240,{size:11,color:INK})});
     y+=64;g.rect(40,y,515,24,'#eef2fb');
     g.text(50,y+16,'PARTICULARS',{size:8,bold:true,color:MUT});g.text(545,y+16,'AMOUNT',{size:8,bold:true,color:MUT,align:'right'});y+=24;

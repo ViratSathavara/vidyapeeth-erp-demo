@@ -46,7 +46,7 @@ Folder layout:
 |---|---|---|
 | **Super Admin** | Virat (platform owner) | Everything, across colleges. Manages the college record, Principal/Clerk logins, settings, sees all data and the full audit/event log. Built multi-college ready (`collegeId` on every table) even though only NPCTE exists now. |
 | **Principal** | College head | **Full access** inside NPCTE: dashboard, students, fees, audit, notices, settings (except platform-level). |
-| **Clerk / Accountant** | Handles B.Ed + M.Ed accounts | Students (add/edit), fee collection (all 4 modes), expenses, audit reports, notices. Cannot change roles/permissions or college settings. Cannot delete a payment — only cancel with a reason (logged). |
+| **Clerk / Accountant** | Handles B.Ed + M.Ed accounts | Students (add/edit), fee collection (all 4 modes, including By Expense), audit reports, notices. Cannot change roles/permissions or college settings. Cannot delete a payment — only cancel with a reason (logged). |
 | **Student** | Each enrolled student | Own portal only: profile, own fees & receipts, notices meant for them, notifications. |
 
 - Permissions are stored per role (matrix screen under Settings → Roles & Permissions, editable by Super Admin/Principal) and checked **on the server**, not only by hiding buttons.
@@ -65,10 +65,9 @@ Student(id, collegeId, userId, enrolmentNo, name, gender, dob, phone, email, add
         courseId, admissionYear, currentSemester, category[GENERAL|OBC|SC|ST|EWS],
         fundingType[CASH|SCHOLARSHIP], scholarshipNote?, status[ACTIVE|LEFT|PASSED], createdBy)
 StudentSemesterFee(id, studentId, semester 1..4, amount, dueDate?)  -- copied from FeeTemplate, editable per student
-Payment(id, collegeId, studentId?, semester, mode[CASH|CHEQUE|UPI|EXPENSE], amount,
-        invoiceDate, entryAt, chequeNo?, bankName?, chequeDate?, upiRef?, providerTxnId?,
+Payment(id, collegeId, studentId, semester, batch, mode[CASH|CHEQUE|UPI|EXPENSE], amount,
+        invoiceDate, entryAt, chequeNo?, bankName?, chequeDate?, upiRef?, providerTxnId?, expenseReason?,
         status[PENDING|SUCCESS|FAILED|CANCELLED], cancelReason?, receiptNo, receiptPdfUrl, depositId?, createdBy)
-Expense(id, collegeId, studentId?, semester?, amount, reason, category?, expenseDate, createdBy)   -- see §5.3
 Deposit(id, collegeId, type[CASH|CHEQUE], periodFrom, periodTo, total, depositedOn, bankRef, createdBy)
 Notice(id, collegeId, title, body, attachmentUrl?, audience{all|course|semester|students[]}, isFeeAlert, publishAt, createdBy)
 Notification(id, userId, type, title, body, link, readAt, createdAt)
@@ -84,7 +83,7 @@ Money is stored as integer paise. All dates stored in UTC, shown in **Asia/Kolka
 
 Principal & Super Admin see the full dashboard; Clerk sees a fee-focused version.
 
-- **KPI cards:** total students (B.Ed / M.Ed), collected today, collected this month, total outstanding, scholarship students count, expenses this month.
+- **KPI cards:** total students (B.Ed / M.Ed), collected today, collected this month, total outstanding, scholarship students count, fees used as expense this month.
 - **Charts** (Recharts or Chart.js, responsive, light/dark):
   - Collection per month (last 12 months) — line
   - Collection by mode (Cash / Cheque / UPI / Expense) — bar or donut
@@ -95,13 +94,12 @@ Principal & Super Admin see the full dashboard; Clerk sees a fee-focused version
 
 ## 5. Module: Fee Collection
 
-Keep it to **5 tabs** (replace the demo's 8–9):
+Keep it to **4 tabs** (replace the demo's 8–9). There is **no separate Expenses section**: an expense is only recorded as a student fee taken **By Expense** (§5.3).
 
 1. **Collect payment**
-2. **Expenses**
-3. **Pending dues**
-4. **Receipts** (all payments, cancel with reason)
-5. **Fee setup** (Principal/Super Admin only: default fee per course × semester, receipt prefix, UPI settings)
+2. **Pending dues**
+3. **Receipts** (all payments, cancel with reason)
+4. **Fee setup** (Principal/Super Admin only: default fee per course × semester, receipt prefix, UPI settings)
 
 ### 5.1 Fee structure
 - B.Ed and M.Ed: 4 semesters each. Fees are tracked **per semester**.
@@ -114,19 +112,22 @@ Flow: search student (name / enrolment no / phone) → see 4 semester cards with
 
 | Mode | Fields | Invoice date rule |
 |---|---|---|
-| **By Cash** | amount, invoice date, note | **Invoice date = the date the user enters/edits in the table**, not the moment of entry. Default = today, editable. Receipt uses this date. |
-| **By Cheque** | amount, cheque no, bank, cheque date, invoice date | Same as Cash: manual invoice date, editable later from the table. |
-| **By UPI** | amount (student pays online, or clerk triggers) | **Invoice date = payment date + 1 day** (paid 8 Nov → invoice 9 Nov). Computed automatically in Asia/Kolkata, not editable. |
-| **By Expense** | amount, reason, date | Opens the Expense form (§5.3). Manual date, same rule as Cash. |
+| **By Cash** | amount, batch, invoice date, note | **Invoice date = the date the user enters/edits in the table**, not the moment of entry. Default = today, editable. Receipt uses this date. |
+| **By Cheque** | amount, batch, cheque no, bank, cheque date, invoice date | Same as Cash: manual invoice date, editable later from the table. |
+| **By UPI** | amount, batch (student pays online, or clerk triggers) | **Invoice date = payment date + 1 day** (paid 8 Nov → invoice 9 Nov). Computed automatically in Asia/Kolkata, not editable. |
+| **By Expense** | amount, batch, invoice date, what the fee was used for (required) | Same as Cash: manual invoice date, editable later. See §5.3. |
 
 - The invoice date of Cash / Cheque / Expense rows can be edited **inline in the Receipts table**; changing it regenerates the receipt PDF and writes an AuditLog entry with old → new date.
 - `entryAt` (real timestamp) is always stored separately for audit.
+- **Batch is mandatory on every payment** and typed by the clerk, e.g. `2025-27` (inputs like `2025-2027` or `2025/27` are normalised to `2025-27`; end year must be after start year, max 5 years). Shown on the receipt, PDF, Receipts table, Audit and exports, and searchable. When a student pays UPI from the portal, the batch of their last receipt is used (else admission year + 2).
 - After a successful payment: receipt number (prefix + running number), PDF receipt, email to student, in-app + push notification to the student, live update on dashboards via Socket.IO.
 
-### 5.3 Expenses
-- "Add expense" opens a drawer/tab: **amount, reason (required), date, optional student link, optional semester, optional category** (e.g. purchase, fee adjustment, other).
-- Expenses list with filters (date range, category, linked student, created by) and totals.
-- **OPEN — confirm with Roshanbhai:** does an expense linked to a student reduce that student's fee due? **Default: No** — expenses are a separate ledger and do not change dues. Build a setting `expenseReducesDue` (default `false`).
+### 5.3 By Expense (no separate expense ledger)
+- When a student's fee money is used directly for a college expense, the clerk collects that fee with mode **By Expense** in Collect payment.
+- Fields: amount, batch, invoice date, **what the fee was used for** (required).
+- Effect: it is a normal successful payment: receipt number + PDF + email, the semester due goes down, it can be cancelled with a reason, and the invoice date can be edited.
+- It shows as **Expense** in Receipts (mode filter), Audit (mode filter, totals, exports), the deposit report (not deposited to bank) and the Dashboard. It is **not** counted in "Collected" (Cash + Cheque + UPI).
+- There is no "Add expense" form, expenses list, expense categories or `expenseReducesDue` setting.
 
 ### 5.4 UPI / Google Pay
 - Build a `PaymentProvider` interface (`createOrder`, `verifyWebhook`, `getStatus`) so the provider can be swapped.
@@ -239,7 +240,7 @@ Each phase ends with: working build, tests passing, a short report, and a commit
 | 0 | Setup | Branch `phase1`, monorepo `/web` + `/server`, Prisma schema, env example, lint/format, seed script, NPCTE branding | `npm run dev` runs both; seed loads |
 | 1 | Auth & roles | Login, JWT, 4 roles, permission matrix, forced password change, role-based layout & menu | Each role sees only its menu; API rejects wrong role |
 | 2 | Students | Add/edit form (category + SC/ST funding type), 4 editable semester fees, list/filter/export, profile, auto login + credentials email | New student gets email and can log in |
-| 3 | Fee collection | 5 tabs, Cash/Cheque/Expense with manual invoice date + inline edit, receipts PDF + email, pending dues, cancel with reason | Invoice-date rules pass tests; dues correct |
+| 3 | Fee collection | 4 tabs, Cash/Cheque/Expense with manual invoice date + inline edit, receipts PDF + email, pending dues, cancel with reason | Invoice-date rules pass tests; dues correct |
 | 4 | UPI | Provider adapter, order + webhook, payment date +1 day invoice rule, Pay now in portal | Sandbox payment marks SUCCESS via webhook only |
 | 5 | Audit | Transactions audit with all filters/sorting/totals, deposit report + mark deposited, activity log, exports | Filters & totals match DB queries in tests |
 | 6 | Notices & notifications | Notice board, audiences, fee reminders, Socket.IO live toasts + sound + bell, Web Push | Notice reaches the right students live and as phone push |
@@ -264,7 +265,7 @@ Each phase ends with: working build, tests passing, a short report, and a commit
 
 ## 15. Open questions (ask Roshanbhai; build with the defaults above)
 
-1. Does an expense linked to a student reduce that student's due? (default: no)
+1. ~~Expense vs student due~~ — decided: By Expense is a fee payment and reduces the due (§5.3).
 2. Should funding type (Cash/Scholarship) be available for OBC/EWS too? (default: SC/ST only)
 3. Semester due dates for B.Ed and M.Ed, and late fee — any? (default: no late fee)
 4. Receipt format/sample and numbering they use today (photo).
