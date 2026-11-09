@@ -1,7 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": null,
+  "buildCommand": "echo \"static site: index.html is prebuilt by npm run build locally\"",
+  "installCommand": "echo \"no install needed\"",
   "outputDirectory": ".",
   "cleanUrls": true,
   "headers": [
