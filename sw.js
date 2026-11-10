@@ -1,10 +1,13 @@
 /* NPCTE service worker: offline fallback + notification clicks (+ Web Push in the real app) */
-const C='npcte-v5';
-self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['/','/offline.html','/icons/icon-192.png','/icons/icon-512.png','/manifest.webmanifest'])).then(()=>self.skipWaiting()))});
+const C='npcte-v6';
+/* install never fails: one file that cannot be cached (a redirect such as /offline.html -> /offline with cleanUrls,
+   a login wall on a protected preview, a 404) used to reject addAll, the worker never activated and NO notification could be shown */
+const PRE=['/','/offline.html','/icons/icon-192.png','/icons/icon-512.png','/icons/badge-96.png','/manifest.webmanifest'];
+self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(C).then(c=>Promise.all(PRE.map(u=>fetch(u,{credentials:'same-origin'}).then(r=>{if(r.ok&&!r.redirected)return c.put(u,r)}).catch(()=>{})))))});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==C).map(x=>caches.delete(x)))).then(()=>self.clients.claim()))});
 self.addEventListener('fetch',e=>{
   const r=e.request;if(r.method!=='GET'||new URL(r.url).origin!==location.origin||r.url.includes('/api/'))return;
-  if(r.mode==='navigate'){e.respondWith(fetch(r).then(res=>{const cp=res.clone();caches.open(C).then(c=>c.put('/',cp));return res}).catch(()=>caches.match('/').then(x=>x||caches.match('/offline.html'))));return}
+  if(r.mode==='navigate'){e.respondWith(fetch(r).then(res=>{const cp=res.clone();caches.open(C).then(c=>c.put('/',cp));return res}).catch(()=>caches.match('/').then(x=>x||caches.match('/offline.html')).then(x=>x||new Response('Offline',{status:503}))));return}
   e.respondWith(caches.match(r).then(x=>x||fetch(r)));
 });
 /* Web Push from the server (Phase 6 of the real build): payload {title, body, link} */
