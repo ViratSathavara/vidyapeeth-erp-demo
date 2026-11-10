@@ -52,5 +52,15 @@ function askNotifyGently(){if(!('Notification' in window)||Notification.permissi
 ACT.askNotify=async()=>{closeDialog();if(!('Notification' in window))throw new Error('This browser does not support notifications');const r=await Notification.requestPermission();
   if(r==='granted'){toast('Notifications on');showPopup('Notifications are on','You will get NPCTE fee alerts and notices here.','on')}else toast('Notifications not allowed',true);const np=$('#notifyPanel');if(np)np.innerHTML=notifyPanelHtml();if(ui.route==='sprofile')renderPage()};
 if('serviceWorker' in navigator&&location.protocol!=='file:')addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
-ACT.testPop=el=>{const d=+el.dataset.d||0;const u=cur();const run=()=>showPopup('NPCTE · test notification',`Hello ${u?u.name:''}, popups work on this device.`,'test-'+Date.now()).then(ok=>{if(!ok)toast('Could not show a popup. Check the notification settings.',true)});
-  if(d){toast(`Popup in ${d} seconds. Lock the phone now.`);setTimeout(run,d*1000)}else run()};
+ACT.testPop=async el=>{const d=+el.dataset.d||0;const u=cur();
+  if(!('Notification' in window))throw new Error('This browser does not support notifications');
+  if(Notification.permission!=='granted'){const r=await Notification.requestPermission();if(r!=='granted')throw new Error('Notifications are blocked. Allow them in the phone settings for this app / browser.')}
+  const reg=navigator.serviceWorker&&await Promise.race([navigator.serviceWorker.ready,new Promise(r=>setTimeout(()=>r(null),4000))]);
+  if(!reg||!reg.active)throw new Error('The app\'s service worker is not running yet. Reload the app once and try again.');
+  reg.active.postMessage({type:'notify',delay:d*1000,title:'NPCTE · test notification',body:`Hello ${u?u.name:''}, notifications work on this device.`,tag:'test-'+Date.now()});
+  ev('Click','Test notification',d?d+' s':'now');toast(d?`Notification in ${d} seconds. Close the app or lock the phone now.`:'Notification sent. Pull down the notification shade.')};
+ACT.notifCheck=async()=>{const r=[];const perm=!('Notification' in window)?'not supported':Notification.permission;r.push(['Permission',perm]);
+  let sw='not supported';if('serviceWorker' in navigator){const reg=await navigator.serviceWorker.getRegistration();sw=reg&&reg.active?'running':reg?'installing':'not registered'}r.push(['Service worker',sw]);
+  r.push(['Opened as installed app',matchMedia('(display-mode: standalone)').matches?'yes':'no (browser tab)']);r.push(['Browser',device()]);r.push(['Secure (https)',isSecureContext?'yes':'no']);
+  const ok=perm==='granted'&&sw==='running';
+  dialog(`<h3>Notification check</h3><div class="panel" style="padding:12px">${r.map(([k,v])=>`<div class="rline"><span>${E(k)}</span><b>${E(v)}</b></div>`).join('')}</div><p class="note">${ok?'Everything is ready. If nothing shows in the notification shade, turn on notifications for this app in the phone settings (steps below the Test buttons).':perm==='denied'?'Notifications are blocked for this site. Allow them in the phone settings.':perm!=='granted'?'Tap “Turn on notifications” and choose Allow.':'Reload the app once so the service worker starts.'}</p><div class="actions" style="justify-content:flex-end"><button class="btn primary" data-act="closeDialog">OK</button></div>`,'Notification check')};
