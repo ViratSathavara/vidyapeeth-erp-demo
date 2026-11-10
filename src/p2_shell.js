@@ -1,7 +1,7 @@
 /* =====================================================================
    Login, forced password change, app shell (sidebar, top bar, student bottom tabs)
    ===================================================================== */
-const DEMO_ACCTS=()=>{const s=db.students[0];return[['admin','admin123','Super Admin','Platform owner · everything'],['principal','principal123','Principal','Full access inside NPCTE'],['clerk','clerk123','Clerk / Accountant','Students, fees, audit, notices'],[s?s.enrol.toLowerCase():'','student123','Student',s?s.name+' · own portal':'']]};
+const DEMO_ACCTS=()=>{const s=db.students[0];return[['admin','admin123','Super Admin','Platform owner · everything'],['principal','principal123','Principal','B.Ed only'],['principalmed','principal123','Principal','M.Ed only'],['clerk','clerk123','Clerk / Accountant','B.Ed + M.Ed · fees, students'],[s?s.enrol.toLowerCase():'','student123','Student',s?s.name+' · own portal':'']]};
 const LOGO=()=>`<div class="seal" aria-hidden="true">N</div>`;
 function renderLogin(msg){
   document.body.classList.remove('rail-lock','portal');const c=db.college;document.title='Sign in · '+c.short+' ERP';
@@ -90,7 +90,7 @@ function renderApp(){
    <div class="rail-scrim" data-act="railClose"></div>
    <main><div class="topbar"><button class="iconbtn menu-btn" data-act="railOpen" type="button" aria-label="Open menu" aria-controls="rail" aria-expanded="false">${ICON_MENU}</button>
     <div class="tb-brand">${LOGO()}<b>${E(db.college.short)}</b></div><div class="crumb" id="crumb"></div>
-    <div class="tb-end"><span id="tbInstall" class="install-holder"></span>${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button>
+    <div class="tb-end">${portal?'':courseSwitch()}<span id="tbInstall" class="install-holder"></span>${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button>
     ${portal?'':`<button class="iconbtn" data-act="logout" type="button" title="Sign out" aria-label="Sign out">${ICON_OUT}</button>`}</div></div>
     <div id="installSlot" class="install-holder"></div><div id="page"></div></main>
    ${portal?`<nav class="btabs" id="btabs" aria-label="Student menu"></nav>`:''}</div>`;
@@ -122,6 +122,10 @@ ACT.railToggle=()=>{const a=$('.app');if(!a)return;const mini=a.dataset.rail!=='
 try{matchMedia('(min-width:821px)').addEventListener('change',e=>{if(e.matches)railClose()})}catch(e){}
 ACT.profile=()=>{const u=cur();railClose();if(u.role==='Student'){go('sprofile');return}drawer(staffProfileHtml(),false,'Your profile')};
 ACT.skip=()=>{if(!focusH1()){const pg=$('#page');if(pg){pg.tabIndex=-1;softFocus(pg)}}};
+/* course switch in the top bar: shown when the login has more than one course */
+function courseSwitch(){const my=myCourses();if(my.length<2)return'';const p=pickedCourse();
+  return`<label class="cswitch" title="Show data for"><span class="sr">Show data for</span><select data-change="pickCourse" aria-label="Show data for course"><option value="">${my.length===db.courses.length?'All courses':'All my courses'}</option>${my.map(id=>`<option value="${E(id)}" ${p===id?'selected':''}>${E(course(id).name)}</option>`).join('')}</select></label>`}
+CHG.pickCourse=el=>{setPickedCourse(el.value);ui.f={};ui.col=null;renderApp();toast('Showing '+scopeLabel())};
 function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();keepFocus(pg,()=>{pg.innerHTML=n?n[3]():''});renderNav()}
 function go(route,tab){if(tab)ui.tab[route]=tab;const prev=ui.route;ui.route=route;renderPage();window.scrollTo(0,0);playEnter('enter');const a=document.activeElement;if(route!==prev||!a||a===document.body)focusH1()}
 ACT.nav=el=>{closeLayer();railClose();go(el.dataset.id)};

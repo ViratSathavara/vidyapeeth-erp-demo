@@ -4,7 +4,8 @@ const fmtSize=n=>n<1024?n+' B':(n/1024).toFixed(1)+' KB';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 /* The PDF is rebuilt from the payment every time it is opened, so an edited invoice date always shows on the receipt.
    NOTE: this browser PDF uses Helvetica (Latin only). The real server PDF embeds Noto Sans Gujarati (spec §1). */
-function receiptPdf(p){
+/* student copy (portal download and email): the bill only, without mode of payment or office details */
+function receiptPdf(p,studentCopy){if(studentCopy===undefined)studentCopy=isStudentUser(cur());
   const s=stu(p.studentId),c=db.college;const ts=new Date(p.entryAt||Date.now());const cancelled=p.status==='CANCELLED';
   const stamp=`${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
   return makePdf(g=>{
@@ -19,15 +20,15 @@ function receiptPdf(p){
     if(cancelled){g.rect(40,124,515,26,'#fdeaea');g.text(52,141,`CANCELLED on ${fmtD(istDate(p.cancelledAt))} - ${p.cancelReason}`,{size:10,bold:true,color:'#b42318'})}
     else{g.rect(40,124,150,24,'#e5f6ec');g.text(52,140,'PAYMENT RECEIVED',{size:10,bold:true,color:'#1a7f45'})}
     const mode=modeName(p.mode)+(p.mode==='CHEQUE'?` No. ${p.chequeNo}, ${p.bank}, dated ${fmtD(p.chequeDate)}`:'')+(p.mode==='UPI'?` (${p.upiRef})`:'');
-    const info=[['Student',s.name],['Enrolment no.',s.enrol],['Course',course(s.course).name],['Batch',batchOf(p)],['Semester',String(p.sem)],['Mode of payment',mode],['Category',s.category],['Entered by',p.by||'-'],['Entered on',fmtT(p.entryAt)]];if(p.mode==='EXPENSE'&&p.reason)info.push(['Used for (expense)',p.reason]);
+    const info=[['Student',s.name],['Enrolment no.',s.enrol],['Course',course(s.course).name],['Batch',batchOf(p)],['Semester',String(p.sem)],...(studentCopy?[['Fee','Tuition fee']]:[['Mode of payment',mode],['Category',s.category],['Entered by',p.by||'-'],['Entered on',fmtT(p.entryAt)]])];if(!studentCopy&&p.mode==='EXPENSE'&&p.reason)info.push(['Used for (expense)',p.reason]);
     let y=180;info.forEach((r,i)=>{const cx=i%2?310:40;if(i%2===0&&i>0)y+=40;g.text(cx,y,r[0].toUpperCase(),{size:7.5,bold:true,color:MUT});g.wrap(cx,y+15,r[1],240,{size:11,color:INK})});
     y+=64;g.rect(40,y,515,24,'#eef2fb');
     g.text(50,y+16,'PARTICULARS',{size:8,bold:true,color:MUT});g.text(545,y+16,'AMOUNT',{size:8,bold:true,color:MUT,align:'right'});y+=24;
-    g.text(50,y+18,`${course(s.course).name} Semester ${p.sem} fee`,{size:11});g.text(545,y+18,rs(p.amount),{size:11,align:'right',bold:true});y+=28;g.line(40,y,555,y,LINE,.6);
+    g.text(50,y+18,`Tuition fee · ${course(s.course).name} Semester ${p.sem}`,{size:11});g.text(545,y+18,rs(p.amount),{size:11,align:'right',bold:true});y+=28;g.line(40,y,555,y,LINE,.6);
     const m=semSummary(s,p.sem);
     y+=18;g.rect(300,y,255,64,'#f3f5fa');
     g.text(314,y+22,'AMOUNT RECEIVED',{size:8,bold:true,color:MUT});g.text(541,y+50,rs(p.amount),{size:22,bold:true,color:cancelled?'#b42318':INK,align:'right'});
-    g.text(40,y+22,`Semester ${p.sem} fee ${rs(m.amount)} · paid ${rs(m.paid)}`,{size:10,color:MUT});g.text(40,y+44,'Balance '+rs(m.due),{size:14,bold:true});
+    g.text(40,y+22,`Semester ${p.sem} tuition fee ${rs(m.amount)} · paid ${rs(m.paid)}`,{size:10,color:MUT});g.text(40,y+44,'Balance '+rs(m.due),{size:14,bold:true});
     y+=92;g.line(40,y,555,y,LINE);
     g.wrap(40,y+22,'This is a computer generated receipt and does not need a signature. Please keep it for your records. For any query contact the college accounts office with the receipt number.',515,{size:9,color:MUT});
     if((p.dateEdits||[]).length)g.wrap(40,y+60,'Invoice date updated on '+fmtT(p.dateEdits.at(-1).at)+'.',515,{size:8.5,color:MUT});
@@ -44,7 +45,7 @@ function mailBody(rec){
   const s=stu(rec.studentId),c=db.college;
   if(rec.kind==='credentials')return{text:`Dear ${s.name},\n\nYour ${c.short} student portal is ready.\n\nPortal: ${location.origin}/\nLogin ID: ${s.enrol.toLowerCase()} (or ${s.email})\nTemporary password: ${rec.pw?'(sent in this email)':'—'}\n\nYou must choose your own password at the first sign-in.\n\nInstall as an app: open the portal in Chrome on Android and tap "Install app", or on iPhone open it in Safari, tap Share and then "Add to Home Screen".\n\n${c.name}\n${c.phone} · ${c.email}`};
   const p=db.payments.find(x=>x.id===rec.paymentId);
-  return{text:`Dear ${s.name},\n\n${p.status==='CANCELLED'?'This receipt has been cancelled.':'We have received your fee payment.'}\nReceipt: ${p.rc}\nAmount: ${rs(p.amount)}\nSemester: ${p.sem}\nMode: ${modeName(p.mode)}\nInvoice date: ${fmtD(p.invoiceDate)}\n\nThe receipt PDF is attached.\n\n${c.name}\n${c.phone} · ${c.email}`,pdf:receiptPdf(p),filename:p.rc.replace(/[^\w-]+/g,'_')+'.pdf'};
+  return{text:`Dear ${s.name},\n\n${p.status==='CANCELLED'?'This receipt has been cancelled.':'We have received your fee payment.'}\nReceipt: ${p.rc}\nAmount: ${rs(p.amount)}\nTuition fee · Semester ${p.sem}\nBatch: ${batchOf(p)}\nInvoice date: ${fmtD(p.invoiceDate)}\n\nThe receipt PDF is attached.\n\n${c.name}\n${c.phone} · ${c.email}`,pdf:receiptPdf(p,true),filename:p.rc.replace(/[^\w-]+/g,'_')+'.pdf'};
 }
 function queueMail(o){
   const rec={id:uid('o'),ts:Date.now(),kind:o.kind,paymentId:o.paymentId||'',studentId:o.studentId,to:(o.to||[]).filter(e=>MAIL_OK.test(e||'')),subject:o.subject,status:'Queued',mode:db.settings.mail.mode,attempts:0,error:'',why:o.why||''};

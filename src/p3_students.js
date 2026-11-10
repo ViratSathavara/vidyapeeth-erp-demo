@@ -8,7 +8,7 @@ const PAGE=25;
 function stuFilter(){return ui.f.students=Object.assign({q:'',course:'',sem:'',cat:'',fund:'',status:'ACTIVE',dues:'',sort:'name',dir:1,page:0},ui.f.students||{})}
 function studentsFiltered(){
   const f=stuFilter();const q=f.q.trim().toLowerCase();
-  let l=db.students.map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.status||s.status===f.status)
+  let l=vStudents().map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.status||s.status===f.status)
     &&(!f.dues||(f.dues==='yes'?sm.payable>0:sm.payable===0))&&(!q||[s.name,s.enrol,s.phone,s.email].some(v=>String(v).toLowerCase().includes(q))));
   const key={name:x=>x.s.name.toLowerCase(),enrol:x=>x.s.enrol,course:x=>x.s.course+x.s.sem,cat:x=>x.s.category,fund:x=>x.s.funding,due:x=>x.sm.payable,paid:x=>x.sm.paid}[f.sort]||(x=>x.s.name);
   l.sort((a,b)=>{const A=key(a),B=key(b);return(A<B?-1:A>B?1:0)*f.dir});
@@ -21,18 +21,18 @@ ACT.pg=el=>{ui.f[el.dataset.scope].page+= +el.dataset.d;renderPage();$('#page h1
 CHG.sf=el=>{const f=ui.f[el.dataset.scope];f[el.dataset.k]=el.value;f.page=0;renderPage()};
 LIVE.sq=el=>{const f=ui.f[el.dataset.scope];f.q=el.value;f.page=0;clearTimeout(LIVE._t);LIVE._t=setTimeout(()=>{renderPage();const i=$(`[data-live=sq][data-scope="${el.dataset.scope}"]`);if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}},200)};
 const sel=(scope,k,label,opts)=>{const f=ui.f[scope];return`<select aria-label="${E(label)}" data-change="sf" data-scope="${E(scope)}" data-k="${E(k)}">${opts.map(([v,l])=>`<option value="${E(v)}" ${String(f[k])===String(v)?'selected':''}>${E(l)}</option>`).join('')}</select>`};
-const COURSE_OPTS=()=>[['','All courses'],...db.courses.map(c=>[c.id,c.name])];
-const SEM_OPTS=[['','All semesters'],...SEMS.map(n=>[n,'Semester '+n])];
+const COURSE_OPTS=()=>[['','All courses'],...scopeCourses().map(c=>[c.id,c.name])];
+const SEM_OPTS_=()=>[['','All semesters'],...SEMS_ALL().map(n=>[n,'Semester '+n])];
 const CAT_OPTS=[['','All categories'],...CATS.map(c=>[c,c])];
 const FUND_OPTS=[['','Cash + Scholarship'],['CASH','By Cash'],['SCHOLARSHIP','By Scholarship']];
 
 function viewStudents(){
   const f=stuFilter();const l=studentsFiltered();const page=l.slice(f.page*PAGE,(f.page+1)*PAGE);
   const acts=`${can('students.edit')?`<button class="btn" data-act="importStudents">Import CSV</button>`:''}<button class="btn" data-act="exportStudents">Export Excel</button>${can('students.edit')?'<button class="btn primary" data-act="newStudent">Add student</button>':''}`;
-  const act=db.students.filter(s=>s.status==='ACTIVE');
+  const act=vStudents().filter(s=>s.status==='ACTIVE');
   return head('Students',`${act.length} active · ${act.filter(s=>s.course==='BED').length} B.Ed · ${act.filter(s=>s.course==='MED').length} M.Ed · ${act.filter(s=>s.funding==='SCHOLARSHIP').length} on scholarship`,acts)+
   `<div class="panel"><div class="filters"><input type="search" placeholder="Search name, enrolment no, phone or email" aria-label="Search students" data-live="sq" data-scope="students" value="${E(f.q)}">
-    ${sel('students','course','Course',COURSE_OPTS())}${sel('students','sem','Semester',SEM_OPTS)}${sel('students','cat','Category',CAT_OPTS)}${sel('students','fund','Funding type',FUND_OPTS)}
+    ${sel('students','course','Course',COURSE_OPTS())}${sel('students','sem','Semester',SEM_OPTS_())}${sel('students','cat','Category',CAT_OPTS)}${sel('students','fund','Funding type',FUND_OPTS)}
     ${sel('students','status','Status',[['','All status'],['ACTIVE','Active'],['LEFT','Left'],['PASSED','Passed']])}${sel('students','dues','Dues',[['','Dues: any'],['yes','Has dues'],['no','No dues']])}
     ${Object.entries(f).some(([k,v])=>!['sort','dir','page','status'].includes(k)&&v)?'<button class="btn sm" data-act="clearF" data-scope="students">Clear</button>':''}</div>
   <div class="tablewrap"><table><thead><tr>${sortTh('students','name','Student')}${sortTh('students','enrol','Enrolment no')}${sortTh('students','course','Course · Sem')}${sortTh('students','cat','Category')}${sortTh('students','fund','Funding')}${sortTh('students','paid','Paid',1)}${sortTh('students','due','Due now',1)}<th>Status</th></tr></thead><tbody>
@@ -42,13 +42,14 @@ function viewStudents(){
 ACT.clearF=el=>{const sc=el.dataset.scope;const keep=ui.f[sc];ui.f[sc]={sort:keep.sort,dir:keep.dir,page:0};if(sc==='students')ui.f[sc].status='ACTIVE';renderPage()};
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches&&e.target.matches('tr.click[data-act]')){e.preventDefault();e.target.click()}});
 const avatar=s=>s.photo?`<img class="av" src="${E(s.photo)}" alt="">`:`<div class="av" aria-hidden="true">${E(initials(s.name))}</div>`;
-ACT.exportStudents=()=>{need('students.view');showCsv('NPCTE students',['Enrolment no','Name','Gender','DOB','Phone','Email','Address','Course','Admission year','Semester','Category','Funding','Status','Sem 1 fee','Sem 2 fee','Sem 3 fee','Sem 4 fee','Paid','Due now'],
-  studentsFiltered().map(({s,sm})=>[s.enrol,s.name,s.gender,fmtD(s.dob),s.phone,s.email,s.address,course(s.course).name,s.admissionYear,s.sem,s.category,fundLabel(s.funding),statusLabel[s.status],...SEMS.map(n=>semFee(s,n).amount/100),sm.paid/100,sm.payable/100]))};
+ACT.exportStudents=()=>{need('students.view');showCsv('NPCTE students',['Enrolment no','Name','Gender','DOB','Phone','Email','Address','Course','Batch','Semester','Category','Funding','Status','Sem 1 fee','Sem 2 fee','Sem 3 fee','Sem 4 fee','Paid','Due now'],
+  studentsFiltered().map(({s,sm})=>[s.enrol,s.name,s.gender,fmtD(s.dob),s.phone,s.email,s.address,course(s.course).name,defaultBatch(s),s.sem,s.category,fundLabel(s.funding),statusLabel[s.status],...SEMS_ALL().map(n=>semFee(s,n)?semFee(s,n).amount/100:''),sm.paid/100,sm.payable/100]))};
 
 /* ---------- add / edit form ---------- */
 function studentForm(s){
   const isNew=!s;const T=today();const y=+T.slice(0,4);const st=db.settings;
-  const d=s||{name:'',gender:'',dob:'',phone:'',email:'',address:'',course:'BED',admissionYear:+T.slice(5,7)>=6?y:y-1,sem:1,category:'General',funding:'CASH',scholarshipNote:'',status:'ACTIVE',fees:SEMS.map(n=>({sem:n,amount:st.feeDefault.BED[n-1],due:defaultDue('BED',+T.slice(5,7)>=6?y:y-1,n)}))};
+  const c0=pickedCourse()||myCourses()[0]||'BED';const y0=+T.slice(5,7)>=6?y:y-1;
+  const d=s||{name:'',gender:'',dob:'',phone:'',email:'',address:'',course:c0,admissionYear:y0,sem:1,category:'General',funding:'CASH',scholarshipNote:'',status:'ACTIVE',fees:semsOf(c0).map(n=>({sem:n,amount:(st.feeDefault[c0]||[])[n-1]||0,due:defaultDue(c0,y0,n)}))};
   const canEnrol=!isNew&&(cur().role==='Super Admin'||cur().role==='Principal');
   ui.photo=d.photo||'';
   return`<button class="btn x" data-act="close">Close</button><h2>${isNew?'Add student':'Edit '+E(d.name)}</h2>
@@ -64,9 +65,9 @@ function studentForm(s){
     <div class="field span"><span class="label">Photo</span><div class="photo-row"><div id="photoPrev">${ui.photo?`<img class="av lg" src="${E(ui.photo)}" alt="">`:`<div class="av lg">${E(initials(d.name||'?'))}</div>`}</div><label class="btn sm"><input type="file" accept="image/*" data-change="photo" class="sr"> Choose photo</label>${ui.photo?'<button type="button" class="btn sm" data-act="photoClear">Remove</button>':''}</div></div>
    </div></fieldset>
    <fieldset class="fs"><legend>Course</legend><div class="form">
-    ${F('course','Course',{val:d.course,opts:db.courses.map(c=>[c.id,c.name]),req:true,attrs:'data-change="formCourse"'})}
-    ${F('admissionYear','Admission year',{type:'number',val:d.admissionYear,req:true,attrs:`min="2015" max="${y+1}" data-change="formCourse"`})}
-    ${F('sem','Current semester',{val:d.sem,opts:SEMS.map(n=>[n,'Semester '+n])})}
+    ${F('course','Course',{val:d.course,opts:db.courses.filter(c=>mayCourse(c.id)&&(c.active!==false||c.id===d.course)).map(c=>[c.id,c.name]),req:true,attrs:'data-change="formCourse"'})}
+    <div class="field" id="batchWrap">${batchSelect(d.course,d.admissionYear)}</div>
+    <div class="field" id="semWrap">${semSelect(d.course,d.sem)}</div>
     ${isNew?'':F('status','Status',{val:d.status,opts:[['ACTIVE','Active'],['LEFT','Left'],['PASSED','Passed']]})}
     ${canEnrol?F('enrol','Enrolment no.',{val:d.enrol,req:true,attrs:'maxlength="20"'}):''}
    </div></fieldset>
@@ -77,19 +78,28 @@ function studentForm(s){
     <div class="field span" id="schNote" ${fundingApplies(d.category)&&d.funding==='SCHOLARSHIP'?'':'hidden'}><label class="label" for="f_scholarshipNote">Scholarship note (optional)</label><input id="f_scholarshipNote" name="scholarshipNote" maxlength="120" value="${E(d.scholarshipNote)}" placeholder="e.g. Government post-matric scholarship"></div>
     <p class="note span" style="margin:0">Funding type is only a label for filters and reports. The fee amount and the way it is collected stay the same.</p>
    </div></fieldset>
-   <fieldset class="fs"><legend>Semester fees</legend><div class="semfees" id="semFees">${SEMS.map(n=>{const fe=d.fees.find(x=>x.sem===n);return`<div class="sfe"><b>Semester ${n}</b>
-     <label class="label" for="f_fee${n}">Amount (₹)</label><input id="f_fee${n}" name="fee${n}" inputmode="decimal" value="${fe.amount/100}" required data-live="feeEdit">
-     <label class="label" for="f_due${n}">Due date</label><input id="f_due${n}" name="due${n}" type="date" value="${E(fe.due||'')}"></div>`}).join('')}</div>
-    <p class="note" id="feeNote">Pre-filled from the default (${inr(st.feeDefault[d.course][0])} per semester). Change any semester for this student only.</p></fieldset>
+   <fieldset class="fs"><legend>Tuition fee per semester</legend><div class="semfees" id="semFees">${semFeeFields(d.course,d.fees)}</div>
+    <p class="note" id="feeNote">${feeNoteText(d.course)}</p></fieldset>
    <div class="actions sticky-actions"><button class="btn primary big">${isNew?'Save student and create login':'Save changes'}</button><button type="button" class="btn" data-act="close">Cancel</button></div>
   </form>`;
 }
+/* batch dropdown (value = admission year), semester dropdown and tuition fields follow the chosen course */
+function batchSelect(cid,y){const opts=batchOptions(cid).map(b=>[b.slice(0,4),b]);if(y&&!opts.some(o=>+o[0]===+y))opts.push([String(y),batchLabel(cid,y)]);
+  return`<label class="label" for="f_admissionYear">Batch *</label><select id="f_admissionYear" name="admissionYear" required data-change="formCourse">${opts.map(([v,l])=>`<option value="${E(v)}" ${+v===+y?'selected':''}>${E(l)}</option>`).join('')}</select>`}
+function semSelect(cid,v){return`<label class="label" for="f_sem">Current semester</label><select id="f_sem" name="sem">${semsOf(cid).map(n=>`<option value="${n}" ${+v===n?'selected':''}>Semester ${n}</option>`).join('')}</select>`}
+function semFeeFields(cid,fees){return semsOf(cid).map(n=>{const fe=(fees||[]).find(x=>x.sem===n)||{amount:0,due:''};return`<div class="sfe"><b>Semester ${n}</b>
+     <label class="label" for="f_fee${n}">Tuition fee (₹)</label><input id="f_fee${n}" name="fee${n}" inputmode="decimal" value="${fe.amount/100}" required data-live="feeEdit">
+     <label class="label" for="f_due${n}">Due date</label><input id="f_due${n}" name="due${n}" type="date" value="${E(fe.due||'')}"></div>`}).join('')}
+const feeNoteText=cid=>`Pre-filled from the default tuition fee (${inr(((db.settings.feeDefault[cid]||[])[0])||0)} per semester). Change any semester for this student only.`;
 ACT.newStudent=()=>{need('students.edit','add students');ui.feeTouched=false;drawer(studentForm(null),true,'Add student');$('#f_name').focus()};
-ACT.editStudent=el=>{need('students.edit','edit students');const s=stu(el.dataset.id);ui.feeTouched=true;drawer(studentForm(s),true,'Edit student')};
+ACT.editStudent=el=>{need('students.edit','edit students');guardStudent(el.dataset.id);const s=stu(el.dataset.id);ui.feeTouched=true;drawer(studentForm(s),true,'Edit student')};
 LIVE.feeEdit=()=>{ui.feeTouched=true};
 CHG.formCat=el=>{const on=fundingApplies(el.value);$('#fundWrap').hidden=!on;if(!on){const c=$('input[name=funding][value=CASH]');if(c)c.checked=true}$('#schNote').hidden=!(on&&$('input[name=funding][value=SCHOLARSHIP]').checked)};
 document.addEventListener('change',e=>{if(e.target.name==='funding')$('#schNote')&&($('#schNote').hidden=e.target.value!=='SCHOLARSHIP')});
-CHG.formCourse=()=>{const f=$('form[data-form=addStudent]');if(!f||ui.feeTouched)return;const c=f.course.value,y=+f.admissionYear.value;SEMS.forEach(n=>{f['fee'+n].value=db.settings.feeDefault[c][n-1]/100;f['due'+n].value=defaultDue(c,y,n)});$('#feeNote').textContent=`Pre-filled from the default (${inr(db.settings.feeDefault[c][0])} per semester). Change any semester for this student only.`};
+CHG.formCourse=el=>{const f=el.form;if(!f)return;const c=f.course.value,y=+f.admissionYear.value;
+  if(el.name==='course'){$('#batchWrap').innerHTML=batchSelect(c,y);$('#semWrap').innerHTML=semSelect(c,Math.min(+f.sem.value||1,semsOf(c).length))}
+  const isNew=f.dataset.form==='addStudent';const sameLen=semsOf(c).every(n=>f['fee'+n]);
+  if(isNew&&!ui.feeTouched||!sameLen){$('#semFees').innerHTML=semFeeFields(c,semsOf(c).map(n=>({sem:n,amount:(db.settings.feeDefault[c]||[])[n-1]||0,due:defaultDue(c,y,n)})));$('#feeNote').textContent=feeNoteText(c)}};
 CHG.photo=el=>{const file=el.files&&el.files[0];if(!file)return;if(!/^image\//.test(file.type))throw new Error('Choose an image file');
   const img=new Image();const url=URL.createObjectURL(file);img.onload=()=>{const c=document.createElement('canvas'),S=160;const r=Math.max(S/img.width,S/img.height);c.width=c.height=S;const g=c.getContext('2d');g.drawImage(img,(S-img.width*r)/2,(S-img.height*r)/2,img.width*r,img.height*r);ui.photo=c.toDataURL('image/jpeg',.8);URL.revokeObjectURL(url);$('#photoPrev').innerHTML=`<img class="av lg" src="${ui.photo}" alt="">`};img.onerror=()=>toast('Could not read this image',true);img.src=url};
 ACT.photoClear=()=>{ui.photo='';$('#photoPrev').innerHTML='<div class="av lg">?</div>'};
@@ -99,12 +109,13 @@ function readStudentForm(f,d,old){
   const phone=String(d.phone||'').replace(/\D/g,'');if(!/^[6-9]\d{9}$/.test(phone))throw new Error('Enter a 10-digit mobile number');
   const email=String(d.email||'').trim().toLowerCase();if(!MAIL_OK.test(email))throw new Error('Enter a valid email (login details are sent there)');
   if(db.students.some(s=>s!==old&&s.email.toLowerCase()===email))throw new Error('Another student already uses this email');
-  if(!db.courses.some(c=>c.id===d.course))throw new Error('Choose B.Ed or M.Ed');
+  if(!db.courses.some(c=>c.id===d.course)||!mayCourse(d.course))throw new Error('Choose a course you manage');
   const y=+d.admissionYear;if(!(y>=2015&&y<=+today().slice(0,4)+1))throw new Error('Check the admission year');
   if(!CATS.includes(d.category))throw new Error('Choose a category');
   const fundOn=fundingApplies(d.category);if(fundOn&&!['CASH','SCHOLARSHIP'].includes(d.funding))throw new Error('Choose the funding type: By Cash or By Scholarship');
   if(d.dob&&!validIso(d.dob))throw new Error('Check the date of birth');
-  const fees=SEMS.map(n=>{const a=toPaise(d['fee'+n]);if(!(a>=0)||a>100000000)throw new Error(`Semester ${n} fee must be a number between 0 and 10,00,000`);const due=d['due'+n]||'';if(due&&!validIso(due))throw new Error(`Check the semester ${n} due date`);return{sem:n,amount:a,due}});
+  if(!semsOf(d.course).includes(+d.sem||1))throw new Error('Choose a valid semester');
+  const fees=semsOf(d.course).map(n=>{const a=toPaise(d['fee'+n]);if(!(a>=0)||a>100000000)throw new Error(`Semester ${n} tuition fee must be a number between 0 and 10,00,000`);const due=d['due'+n]||'';if(due&&!validIso(due))throw new Error(`Check the semester ${n} due date`);return{sem:n,amount:a,due}});
   return{name,gender:d.gender||'',dob:d.dob||'',phone,email,address:capText(d.address,'Address',300),photo:ui.photo||'',course:d.course,admissionYear:y,sem:+d.sem||1,category:d.category,funding:fundOn?d.funding:'CASH',scholarshipNote:fundOn&&d.funding==='SCHOLARSHIP'?capText(d.scholarshipNote,'Scholarship note',120):'',fees};
 }
 FORM.addStudent=(f,d)=>{
@@ -120,7 +131,7 @@ FORM.addStudent=(f,d)=>{
 };
 ACT.openStudentD=el=>{closeDialog();openStudent(el.dataset.id)};
 FORM.editStudent=(f,d)=>{
-  need('students.edit','edit students');const s=stu(f.dataset.id);if(!s)throw new Error('Student not found');const v=readStudentForm(f,d,s);
+  need('students.edit','edit students');guardStudent(f.dataset.id);const s=stu(f.dataset.id);if(!s)throw new Error('Student not found');const v=readStudentForm(f,d,s);
   const before={name:s.name,phone:s.phone,email:s.email,course:s.course,sem:s.sem,category:s.category,funding:s.funding,status:s.status,fees:s.fees.map(x=>inr(x.amount)).join(' / '),enrol:s.enrol};
   if(d.enrol!==undefined){const en=capText(d.enrol,'Enrolment no.',20).toUpperCase();if(!/^[A-Z0-9-\/]{3,20}$/.test(en))throw new Error('Enrolment no. can use letters, numbers and -');if(db.students.some(x=>x!==s&&x.enrol===en))throw new Error('This enrolment no. is already used');
     if(en!==s.enrol){const u=db.users.find(x=>x.id===s.userId);if(u)u.username=en.toLowerCase();s.enrol=en}}
@@ -179,7 +190,7 @@ const diffText=(b,a)=>{if(!a)return'';return Object.keys(a).map(k=>`${k}: ${b&&b
 /* ---------- CSV import (spec §15.6: a template for students only) ---------- */
 const IMPORT_COLS=['name','gender','dob','phone','email','address','course','admissionYear','sem','category','funding','fee1','fee2','fee3','fee4'];
 ACT.importStudents=()=>{need('students.edit');drawer(`<button class="btn x" data-act="close">Close</button><h2>Import students from CSV</h2>
-  <p class="muted">Save your Excel sheet as CSV with these columns (first row = headings). Dates as YYYY-MM-DD, course BED or MED, funding CASH or SCHOLARSHIP, fees in rupees (blank = default). Each imported student gets a login and an email.</p>
+  <p class="muted">Save your Excel sheet as CSV with these columns (first row = headings). Dates as YYYY-MM-DD, course code (e.g. BED or MED), funding CASH or SCHOLARSHIP, fees in rupees (blank = default). Each imported student gets a login and an email.</p>
   <div class="actions" style="margin:10px 0"><button class="btn" data-act="importTpl">Download template</button><label class="btn"><input type="file" accept=".csv,text/csv" class="sr" data-change="importFile"> Choose CSV file</label></div>
   <div id="importOut"></div>`,true)};
 ACT.importTpl=()=>download('npcte-student-import-template.csv','﻿'+csvOf(IMPORT_COLS,[['Riya Patel','F','2003-04-15','9876543210','riya.patel@example.com','Mahesana','BED',today().slice(0,4),'1','SC','SCHOLARSHIP','30000','30000','30000','30000']]),'text/csv;charset=utf-8');
@@ -188,9 +199,9 @@ CHG.importFile=el=>{const file=el.files&&el.files[0];if(!file)return;file.text()
   const rows=parseCsv(t.replace(/^﻿/,''));const hd=rows.shift().map(h=>h.trim());const miss=['name','phone','email','course','admissionYear','category'].filter(c=>!hd.includes(c));
   if(miss.length){$('#importOut').innerHTML=`<div class="err">Missing columns: ${E(miss.join(', '))}</div>`;return}
   const ok=[],bad=[];rows.forEach((r,i)=>{const d={};hd.forEach((h,j)=>d[h]=(r[j]||'').trim());d.course=(d.course||'').toUpperCase();d.funding=(d.funding||'CASH').toUpperCase();d.sem=d.sem||1;
-    SEMS.forEach(n=>{d['fee'+n]=d['fee'+n]||String(db.settings.feeDefault[d.course]?db.settings.feeDefault[d.course][n-1]/100:'');d['due'+n]=''});
+    (course(d.course)?semsOf(d.course):SEMS).forEach(n=>{d['fee'+n]=d['fee'+n]||String(db.settings.feeDefault[d.course]?db.settings.feeDefault[d.course][n-1]/100:'');d['due'+n]=''});
     try{ui.photo='';const v=readStudentForm(null,d,null);if(ok.some(x=>x.email===v.email))throw new Error('Email repeated in the file');ok.push(v)}catch(e){bad.push(`Row ${i+2}: ${e.message}`)}});
   ui.importRows=ok;$('#importOut').innerHTML=`<div class="panel" style="padding:12px"><p style="margin:0"><b>${ok.length}</b> ready to import${bad.length?`, <b class="t-bad">${bad.length}</b> with problems`:''}.</p>${bad.length?`<ul class="note">${bad.slice(0,20).map(b=>`<li>${E(b)}</li>`).join('')}</ul>`:''}
    ${ok.length?`<button class="btn primary" style="margin-top:10px" data-act="importGo">Import ${ok.length} students</button>`:''}</div>`}).catch(()=>toast('Could not read the file',true))};
-ACT.importGo=()=>{need('students.edit');const l=ui.importRows||[];l.forEach(v=>{v.dues=SEMS.map(n=>defaultDue(v.course,v.admissionYear,n));const s=makeStudent({...v,fees:v.fees.map(x=>x.amount),createdBy:cur().name});db.students.push(s);const pw=tempPassword();createStudentLogin(s,pw,true);sendCredentials(s,pw,'new')});
+ACT.importGo=()=>{need('students.edit');const l=ui.importRows||[];l.forEach(v=>{v.dues=semsOf(v.course).map(n=>defaultDue(v.course,v.admissionYear,n));const s=makeStudent({...v,fees:v.fees.map(x=>x.amount),createdBy:cur().name});db.students.push(s);const pw=tempPassword();createStudentLogin(s,pw,true);sendCredentials(s,pw,'new')});
   log('Students imported','Student','',null,{count:l.length});ui.importRows=null;save();closeLayer();renderPage();toast(`${l.length} students imported. Login emails are on their way.`)};

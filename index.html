@@ -764,6 +764,23 @@ table.dense th,table.dense td{padding:7px 8px;font-size:13px}
 .instbtn{display:inline-flex;align-items:center;gap:6px;width:auto!important;padding:0 10px;border:1px solid color-mix(in srgb,var(--gold) 60%,var(--line))!important;color:var(--fg);font-weight:600;font-size:13px}
 .instbtn .lbl{white-space:nowrap}
 @media (max-width:560px){.instbtn .lbl{display:none}.instbtn{padding:0;width:40px!important;justify-content:center}}
+/* course switch in the top bar */
+.cswitch select{height:40px;border:1px solid var(--field-line);border-radius:10px;background:var(--surface);color:var(--fg);font:600 14px/1 var(--body);padding:0 30px 0 12px;max-width:150px;cursor:pointer;
+  appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:calc(100% - 16px) 17px,calc(100% - 11px) 17px;background-size:5px 5px;background-repeat:no-repeat}
+.cswitch select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (max-width:520px){.cswitch select{max-width:112px;font-size:13px;padding:0 26px 0 10px;height:38px}.topbar .crumb{display:none}}
+.fs-plain{border:0;padding:0;margin:0;min-width:0}.chkrow{display:flex;flex-wrap:wrap;gap:6px 18px;margin:4px 0}
+/* Collect fee: student-wise table */
+.t-good{color:var(--good)}
+.kpis-sm{margin-bottom:12px}.kpis-sm .kpi{cursor:default}.kpis-sm .kpi .v{font-size:22px}
+.today-strip{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:10px 14px;margin:0 0 14px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);font-size:14px}
+.today-strip span{display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums}
+.sc{display:inline-flex;flex-direction:column;line-height:1.15;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sc small{font-size:11px;font-weight:500;color:var(--muted)}
+.sc.ok{color:var(--good)}.sc.due{color:var(--marigold)}.sc.bad{color:var(--bad)}.sc.up{color:var(--muted);font-weight:500}
+.feetable td{vertical-align:middle}
+.scard>h2{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.scard>h2 .btn{font:600 14px/1.2 var(--body);letter-spacing:0;padding:9px 14px;min-height:0;height:auto}
 </style>
 <div id="root"></div><div id="layer"></div><div id="dlg"></div>
 <script>
@@ -773,7 +790,7 @@ table.dense th,table.dense td{padding:7px 8px;font-size:13px}
    Spec: docs/NPCTE-ERP-Phase1-Spec.md. Money is stored as integer paise.
    Dates are kept as ISO yyyy-mm-dd (Asia/Kolkata) and shown as DD-MM-YYYY.
    ===================================================================== */
-const LS_KEY='npcte_erp_v1', SES_KEY='npcte_erp_session_v1', THEME_KEY='npcte_erp_theme', DB_VER=1;
+const LS_KEY='npcte_erp_v1', SES_KEY='npcte_erp_session_v1', THEME_KEY='npcte_erp_theme', DB_VER=2;
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 /* inr takes PAISE */
@@ -823,6 +840,8 @@ function migrate(){
   const s=db.settings;s.flags=Object.assign({fundingAllCategories:false,lateFee:false},s.flags||{});delete s.flags.expenseReducesDue;delete s.expenseCats;
   if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no separate expense ledger: an expense is a fee taken By Expense */
   if(!db.enquiries)db.enquiries=[];
+  db.courses.forEach(c=>{if(!c.years)c.years=Math.max(1,Math.ceil((c.semesters||4)/2));if(c.active===undefined)c.active=true});
+  db.users.forEach(u=>{if(STAFF_ROLES.includes(u.role)&&!Array.isArray(u.courses))u.courses=db.courses.map(c=>c.id)});
 }
 const NAME_MAX=80;
 const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)throw new Error(`${label} is too long (${v.length} characters; the limit is ${max}).`);return v};
@@ -848,7 +867,7 @@ const canAny=(...p)=>p.some(can);
 const need=(p,what)=>{if(!can(p))throw new Error('You do not have access'+(what?' to '+what:''))};
 const isStudentUser=u=>!!u&&u.role==='Student';
 /* a student login may open only its own record (spec §14: another student's id -> 403) */
-const mayStudent=id=>{const u=cur();if(!u)return false;if(u.role==='Student')return !!id&&u.studentId===id;return can('students.view')};
+const mayStudent=id=>{const u=cur();if(!u)return false;if(u.role==='Student')return !!id&&u.studentId===id;const s=stu(id);return can('students.view')&&!!s&&mayCourse(s.course)};
 function guardStudent(id){if(!mayStudent(id))throw new Error('403 · You can only open your own record')}
 
 /* ---------- lookups ---------- */
@@ -857,6 +876,27 @@ const course=id=>db.courses.find(c=>c.id===id);
 const CATS=['General','OBC','SC','ST','EWS'];
 const fundingApplies=cat=>db.settings.flags.fundingAllCategories||cat==='SC'||cat==='ST';
 const classLabel=s=>`${course(s.course).name} · Sem ${s.sem}`;
+/* semesters of a course (B.Ed / M.Ed = 4; a new course such as PhD can have more) */
+const semsOf=cid=>{const c=course(cid);return Array.from({length:c?c.semesters:4},(_,i)=>i+1)};
+
+/* ---------- course scope ----------
+   Super Admin: every course. Principal / Clerk: only the courses the Super Admin assigned to that login.
+   The course switch in the top bar (All / B.Ed / M.Ed) narrows every screen further. The real server applies the same filter on every query. */
+const SCOPE_KEY='npcte_erp_course';
+const myCourses=()=>{const u=cur();if(!u)return[];if(u.role==='Super Admin')return db.courses.map(c=>c.id);
+  if(u.role==='Student'){const s=stu(u.studentId);return s?[s.course]:[]}return(u.courses||[]).filter(id=>course(id))};
+const pickedCourse=()=>{let v='';try{v=sessionStorage.getItem(SCOPE_KEY)||''}catch(e){v=memStore[SCOPE_KEY]||''}return myCourses().includes(v)?v:''};
+function setPickedCourse(v){try{v?sessionStorage.setItem(SCOPE_KEY,v):sessionStorage.removeItem(SCOPE_KEY)}catch(e){memStore[SCOPE_KEY]=v}}
+const scopeIds=()=>{const p=pickedCourse();return p?[p]:myCourses()};
+const inScope=cid=>scopeIds().includes(cid);
+const mayCourse=cid=>myCourses().includes(cid);
+const scopeCourses=()=>db.courses.filter(c=>inScope(c.id));
+const vStudents=()=>db.students.filter(s=>inScope(s.course));
+const payCourse=p=>(stu(p.studentId)||{}).course;
+const vPayments=()=>db.payments.filter(p=>inScope(payCourse(p)));
+const scopeLabel=()=>{const p=pickedCourse();return p?course(p).name:myCourses().length===db.courses.length?'All courses':myCourses().map(id=>course(id).name).join(' + ')};
+const maxSems=()=>Math.max(4,...scopeCourses().map(c=>c.semesters));
+const SEMS_ALL=()=>Array.from({length:maxSems()},(_,i)=>i+1);
 
 /* ---------- audit log: every action with before / after ---------- */
 const device=()=>{const ua=navigator.userAgent;const t=/Mobi|Android|iPhone/i.test(ua)?'Phone':'Desktop';const b=/Edg\//.test(ua)?'Edge':/Chrome\//.test(ua)?'Chrome':/Firefox\//.test(ua)?'Firefox':/Safari\//.test(ua)?'Safari':'Browser';return t+' · '+b};
@@ -885,7 +925,7 @@ function semSummary(s,n){
   return{sem:n,amount,paid,adj,due,dueDate,started,overdue,status};
 }
 function feeSum(s){
-  const sems=[1,2,3,4].map(n=>semSummary(s,n));
+  const sems=semsOf(s.course).map(n=>semSummary(s,n));
   const cur_=sems.filter(x=>x.started);
   return{sems,total:sum(sems,x=>x.amount),paid:sum(sems,x=>x.paid),payable:s.status==='ACTIVE'?sum(cur_,x=>x.due):0,upcoming:sum(sems.filter(x=>!x.started),x=>x.due),overdue:cur_.some(x=>x.overdue)};
 }
@@ -895,7 +935,11 @@ function feeSum(s){
 const upiInvoiceDate=paidAt=>addDays(istDate(paidAt),1);
 function nextReceiptNo(){const c=db.college;const n=c.nextReceipt++;return`${c.receiptPrefix}${pad(n,4)}`}
 /* batch = the student's 2-year course batch, typed by the clerk on every receipt, e.g. 2025-27 */
-const defaultBatch=s=>s&&s.admissionYear?`${s.admissionYear}-${String(s.admissionYear+2).slice(2)}`:'';
+const courseYears=cid=>(course(cid)||{}).years||2;
+const batchLabel=(cid,y)=>`${y}-${String(+y+courseYears(cid)).slice(2)}`;
+const defaultBatch=s=>s&&s.admissionYear?batchLabel(s.course,s.admissionYear):'';
+/* batch dropdown: 8 years back to 2 years ahead, newest first */
+function batchOptions(cid){const y=+today().slice(0,4);const out=[];for(let a=y+1;a>=y-8;a--)out.push(batchLabel(cid,a));return out}
 const batchOf=p=>p.batch||defaultBatch(stu(p.studentId));
 function cleanBatch(v){const t=String(v||'').replace(/\s+/g,'').replace(/[–—\/]/g,'-');
   const m=t.match(/^(20\d{2})-(\d{2}|20\d{2})$/);if(!m)throw new Error('Enter the batch like 2025-27');
@@ -946,7 +990,7 @@ function makeStudent(d){
   const s={id:uid('s'),enrol:d.enrol||nextEnrol(d.course,d.admissionYear),name:d.name,gender:d.gender||'',dob:d.dob||'',phone:d.phone||'',email:d.email||'',address:d.address||'',photo:d.photo||'',
     course:d.course,admissionYear:+d.admissionYear,sem:+d.sem||1,category:d.category||'General',funding:d.funding||'CASH',scholarshipNote:d.scholarshipNote||'',status:d.status||'ACTIVE',
     createdBy:d.createdBy||'System',createdAt:d.createdAt||Date.now(),
-    fees:[1,2,3,4].map(n=>({sem:n,amount:d.fees?d.fees[n-1]:db.settings.feeDefault[d.course][n-1],due:d.dues?d.dues[n-1]:defaultDue(d.course,d.admissionYear,n)}))};
+    fees:semsOf(d.course).map(n=>({sem:n,amount:d.fees?d.fees[n-1]:(db.settings.feeDefault[d.course]||[])[n-1]||0,due:d.dues?d.dues[n-1]:defaultDue(d.course,d.admissionYear,n)}))};
   if(!fundingApplies(s.category))s.funding='CASH';
   return s;
 }
@@ -966,12 +1010,13 @@ function seed(){
       upi:{provider:'Razorpay',vpa:'npcte@okaxis',mode:'Sandbox',googlePay:false},
       mail:{mode:'demo',fromName:"NPCTE Accounts",replyTo:'npcte@yahoo.co.in',sendReceipts:true,sendCredentials:true},
       sound:true},
-    courses:[{id:'BED',name:'B.Ed',semesters:4},{id:'MED',name:'M.Ed',semesters:4}],
+    courses:[{id:'BED',name:'B.Ed',semesters:4,years:2,active:true},{id:'MED',name:'M.Ed',semesters:4,years:2,active:true}],
     roles:DEFAULT_ROLES(),
     users:[
       {id:'u_admin',role:'Super Admin',name:'Virat Sathavara',username:'admin',email:'admin@npcte.org',phone:'',password:'admin123',mustChange:false,active:true,lastLoginAt:0},
-      {id:'u_prin',role:'Principal',name:'Principal, NPCTE',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0},
-      {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0}],
+      {id:'u_prin',role:'Principal',name:'Principal, B.Ed',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['BED']},
+      {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
+      {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
     students:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],outbox:[],upiOrders:[],enquiries:[],
     counters:{enrol:{},exp:1}};
   /* sample names only (demo) */
@@ -997,7 +1042,7 @@ function seed(){
     else if(i%5===2)mk(s,1,'CHEQUE',Math.round(f1/2),4+i,{f:{chequeNo:String(100200+i),bank:['SBI','Bank of Baroda','Mehsana Urban Co-op Bank'][i%3],chequeDate:addDays(today(),-6-i)}});
     else if(i%5===3)mk(s,1,'CASH',1500000,1+i);
     else if(i%10===4)mk(s,1,'EXPENSE',1000000,5+i,{f:{reason:['Exam form fees paid to the university','Practice-teaching school material'][i%2]}});
-    if(s.sem===3){mk(s,2,i%2?'UPI':'CASH',semFee(s,2).amount,60+i);mk(s,1,'CASH',f1,200+i)}
+    if(s.sem===3){mk(s,2,i%2?'UPI':'CASH',semFee(s,2).amount,60+i);const r1=semSummary(s,1).due;if(r1>0)mk(s,1,'CASH',r1,200+i)}
   });
   /* one cancelled receipt */
   const pc=db.payments.find(p=>p.mode==='CASH');if(pc){const s=stu(pc.studentId);const extra={id:uid('p'),studentId:s.id,sem:pc.sem,mode:'CASH',amount:500000,invoiceDate:addDays(today(),-9),entryAt:Date.now()-9*864e5,paidAt:Date.now()-9*864e5,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'CANCELLED',cancelReason:'Entered twice by mistake',cancelledAt:Date.now()-9*864e5+6e5,cancelledBy:by.name,rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:by.name,byId:by.id,dateEdits:[]};db.payments.push(extra)}
@@ -1041,7 +1086,9 @@ const audienceLabel=a=>!a||a.type==='all'?'All students':a.type==='course'?cours
 function ntRecipients(o){
   const out=new Map();const act=cur();
   (o.users||[]).forEach(id=>{const u=db.users.find(x=>x.id===id&&x.active);if(u)out.set(u.id,u)});
-  (o.roles||[]).forEach(r=>db.users.filter(u=>u.active&&u.role===r).forEach(u=>out.set(u.id,u)));
+  /* staff only hear about students of their own courses */
+  const oc=o.course||(o.sid&&stu(o.sid)?stu(o.sid).course:'');
+  (o.roles||[]).forEach(r=>db.users.filter(u=>u.active&&u.role===r&&(!oc||u.role==='Super Admin'||(u.courses||[]).includes(oc))).forEach(u=>out.set(u.id,u)));
   const sids=o.students||(o.audience?audienceStudents(o.audience).map(s=>s.id):[]);
   sids.forEach(id=>{const s=stu(id);const u=s&&db.users.find(x=>x.id===s.userId&&x.active);if(u)out.set(u.id,u)});
   if(act&&!o.self)out.delete(act.id);
@@ -1093,11 +1140,24 @@ function ding(){
   try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();const t=audioCtx.currentTime;
     [[880,0],[1320,.12]].forEach(([f,d])=>{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(.0001,t+d);g.gain.exponentialRampToValueAtTime(.18,t+d+.02);g.gain.exponentialRampToValueAtTime(.0001,t+d+.25);o.connect(g);g.connect(audioCtx.destination);o.start(t+d);o.stop(t+d+.3)})}catch(e){}
 }
-function sysPopup(n){
-  try{if(!('Notification' in window)||Notification.permission!=='granted'||!document.hidden)return;
-    const show=()=>{const x=new Notification(n.t,{body:n.x||'',tag:n.id,icon:'/icons/icon-192.png'});x.onclick=()=>{window.focus();x.close()}};
-    if(navigator.serviceWorker&&navigator.serviceWorker.controller)navigator.serviceWorker.ready.then(r=>r.showNotification(n.t,{body:n.x||'',tag:n.id,icon:'/icons/icon-192.png',badge:'/icons/icon-192.png'})).catch(show);else show()}catch(e){}
-}
+/* phone / desktop popup. Android only allows popups through the service worker (new Notification() throws there),
+   so the service worker is always used when it is ready. vibrate + renotify make Android treat it as an alert, not a silent entry. */
+const POP_OPTS=(body,tag,link)=>({body:body||'',tag,renotify:true,requireInteraction:false,silent:false,vibrate:[200,100,200],icon:'/icons/icon-192.png',badge:'/icons/badge-96.png',timestamp:Date.now(),data:{link:link||'/'}});
+async function showPopup(title,body,tag,link){
+  if(!('Notification' in window)||Notification.permission!=='granted')return false;
+  try{const reg=navigator.serviceWorker&&await Promise.race([navigator.serviceWorker.ready,new Promise(r=>setTimeout(()=>r(null),3000))]);
+    if(reg){await reg.showNotification(title,POP_OPTS(body,tag,link));return true}
+    const x=new Notification(title,POP_OPTS(body,tag,link));x.onclick=()=>{window.focus();x.close()};return true}catch(e){return false}}
+function sysPopup(n){if(!document.hidden)return;showPopup(n.t,n.x,n.id)}
+/* "Test notification" on every profile: shows a popup now, or after 10 s so the phone can be locked first */
+function notifyPanelHtml(){const perm=!('Notification' in window)?'unsupported':Notification.permission;
+  return`<p class="note" style="margin:0 0 8px">Popups for payments, fee alerts and notices on this device.</p>
+   <div class="rline"><span>Popups on this device</span><b>${perm==='granted'?'On':perm==='denied'?'Blocked in phone settings':perm==='unsupported'?'Not supported here':'Off'}</b></div>
+   ${perm==='default'?'<button class="btn primary" data-act="askNotify">Turn on notifications</button>':''}
+   ${perm==='granted'?'<div class="actions" style="margin-top:8px"><button class="btn" data-act="testPop" data-d="0">Test popup now</button><button class="btn" data-act="testPop" data-d="10">Test in 10 seconds (lock the phone)</button></div>':''}
+   ${perm==='denied'?'<p class="note">Open the phone Settings → Apps → NPCTE (or your browser) → Notifications, and allow them.</p>':''}
+   <label class="chk" style="margin-top:8px"><input type="checkbox" data-change="mute" ${muted()?'':'checked'}> Sound for live notifications</label>
+   <details class="note" style="margin-top:8px"><summary>No popup on the lock screen?</summary><p>Android: Settings → Apps → NPCTE (or Chrome / Samsung Internet) → Notifications → turn on <b>Pop on screen</b> / <b>Alert</b> and <b>Lock screen</b>. Also allow the app in Battery → <b>Unrestricted</b>.<br>iPhone: add the app to the Home Screen from Safari first; then Settings → Notifications → NPCTE → Lock Screen + Banners.</p></details>`}
 /* a toast that names the notification and opens it on tap */
 function liveToast(n){
   const box=document.getElementById('livebox')||(()=>{const b=document.createElement('div');b.id='livebox';b.setAttribute('aria-live','polite');document.body.appendChild(b);return b})();
@@ -1330,7 +1390,7 @@ ACT.theme=()=>{const dark=document.documentElement.getAttribute('data-theme')===
 /* =====================================================================
    Login, forced password change, app shell (sidebar, top bar, student bottom tabs)
    ===================================================================== */
-const DEMO_ACCTS=()=>{const s=db.students[0];return[['admin','admin123','Super Admin','Platform owner · everything'],['principal','principal123','Principal','Full access inside NPCTE'],['clerk','clerk123','Clerk / Accountant','Students, fees, audit, notices'],[s?s.enrol.toLowerCase():'','student123','Student',s?s.name+' · own portal':'']]};
+const DEMO_ACCTS=()=>{const s=db.students[0];return[['admin','admin123','Super Admin','Platform owner · everything'],['principal','principal123','Principal','B.Ed only'],['principalmed','principal123','Principal','M.Ed only'],['clerk','clerk123','Clerk / Accountant','B.Ed + M.Ed · fees, students'],[s?s.enrol.toLowerCase():'','student123','Student',s?s.name+' · own portal':'']]};
 const LOGO=()=>`<div class="seal" aria-hidden="true">N</div>`;
 function renderLogin(msg){
   document.body.classList.remove('rail-lock','portal');const c=db.college;document.title='Sign in · '+c.short+' ERP';
@@ -1419,7 +1479,7 @@ function renderApp(){
    <div class="rail-scrim" data-act="railClose"></div>
    <main><div class="topbar"><button class="iconbtn menu-btn" data-act="railOpen" type="button" aria-label="Open menu" aria-controls="rail" aria-expanded="false">${ICON_MENU}</button>
     <div class="tb-brand">${LOGO()}<b>${E(db.college.short)}</b></div><div class="crumb" id="crumb"></div>
-    <div class="tb-end"><span id="tbInstall" class="install-holder"></span>${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button>
+    <div class="tb-end">${portal?'':courseSwitch()}<span id="tbInstall" class="install-holder"></span>${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button>
     ${portal?'':`<button class="iconbtn" data-act="logout" type="button" title="Sign out" aria-label="Sign out">${ICON_OUT}</button>`}</div></div>
     <div id="installSlot" class="install-holder"></div><div id="page"></div></main>
    ${portal?`<nav class="btabs" id="btabs" aria-label="Student menu"></nav>`:''}</div>`;
@@ -1451,6 +1511,10 @@ ACT.railToggle=()=>{const a=$('.app');if(!a)return;const mini=a.dataset.rail!=='
 try{matchMedia('(min-width:821px)').addEventListener('change',e=>{if(e.matches)railClose()})}catch(e){}
 ACT.profile=()=>{const u=cur();railClose();if(u.role==='Student'){go('sprofile');return}drawer(staffProfileHtml(),false,'Your profile')};
 ACT.skip=()=>{if(!focusH1()){const pg=$('#page');if(pg){pg.tabIndex=-1;softFocus(pg)}}};
+/* course switch in the top bar: shown when the login has more than one course */
+function courseSwitch(){const my=myCourses();if(my.length<2)return'';const p=pickedCourse();
+  return`<label class="cswitch" title="Show data for"><span class="sr">Show data for</span><select data-change="pickCourse" aria-label="Show data for course"><option value="">${my.length===db.courses.length?'All courses':'All my courses'}</option>${my.map(id=>`<option value="${E(id)}" ${p===id?'selected':''}>${E(course(id).name)}</option>`).join('')}</select></label>`}
+CHG.pickCourse=el=>{setPickedCourse(el.value);ui.f={};ui.col=null;renderApp();toast('Showing '+scopeLabel())};
 function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();keepFocus(pg,()=>{pg.innerHTML=n?n[3]():''});renderNav()}
 function go(route,tab){if(tab)ui.tab[route]=tab;const prev=ui.route;ui.route=route;renderPage();window.scrollTo(0,0);playEnter('enter');const a=document.activeElement;if(route!==prev||!a||a===document.body)focusH1()}
 ACT.nav=el=>{closeLayer();railClose();go(el.dataset.id)};
@@ -1467,7 +1531,7 @@ const PAGE=25;
 function stuFilter(){return ui.f.students=Object.assign({q:'',course:'',sem:'',cat:'',fund:'',status:'ACTIVE',dues:'',sort:'name',dir:1,page:0},ui.f.students||{})}
 function studentsFiltered(){
   const f=stuFilter();const q=f.q.trim().toLowerCase();
-  let l=db.students.map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.status||s.status===f.status)
+  let l=vStudents().map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.status||s.status===f.status)
     &&(!f.dues||(f.dues==='yes'?sm.payable>0:sm.payable===0))&&(!q||[s.name,s.enrol,s.phone,s.email].some(v=>String(v).toLowerCase().includes(q))));
   const key={name:x=>x.s.name.toLowerCase(),enrol:x=>x.s.enrol,course:x=>x.s.course+x.s.sem,cat:x=>x.s.category,fund:x=>x.s.funding,due:x=>x.sm.payable,paid:x=>x.sm.paid}[f.sort]||(x=>x.s.name);
   l.sort((a,b)=>{const A=key(a),B=key(b);return(A<B?-1:A>B?1:0)*f.dir});
@@ -1480,18 +1544,18 @@ ACT.pg=el=>{ui.f[el.dataset.scope].page+= +el.dataset.d;renderPage();$('#page h1
 CHG.sf=el=>{const f=ui.f[el.dataset.scope];f[el.dataset.k]=el.value;f.page=0;renderPage()};
 LIVE.sq=el=>{const f=ui.f[el.dataset.scope];f.q=el.value;f.page=0;clearTimeout(LIVE._t);LIVE._t=setTimeout(()=>{renderPage();const i=$(`[data-live=sq][data-scope="${el.dataset.scope}"]`);if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}},200)};
 const sel=(scope,k,label,opts)=>{const f=ui.f[scope];return`<select aria-label="${E(label)}" data-change="sf" data-scope="${E(scope)}" data-k="${E(k)}">${opts.map(([v,l])=>`<option value="${E(v)}" ${String(f[k])===String(v)?'selected':''}>${E(l)}</option>`).join('')}</select>`};
-const COURSE_OPTS=()=>[['','All courses'],...db.courses.map(c=>[c.id,c.name])];
-const SEM_OPTS=[['','All semesters'],...SEMS.map(n=>[n,'Semester '+n])];
+const COURSE_OPTS=()=>[['','All courses'],...scopeCourses().map(c=>[c.id,c.name])];
+const SEM_OPTS_=()=>[['','All semesters'],...SEMS_ALL().map(n=>[n,'Semester '+n])];
 const CAT_OPTS=[['','All categories'],...CATS.map(c=>[c,c])];
 const FUND_OPTS=[['','Cash + Scholarship'],['CASH','By Cash'],['SCHOLARSHIP','By Scholarship']];
 
 function viewStudents(){
   const f=stuFilter();const l=studentsFiltered();const page=l.slice(f.page*PAGE,(f.page+1)*PAGE);
   const acts=`${can('students.edit')?`<button class="btn" data-act="importStudents">Import CSV</button>`:''}<button class="btn" data-act="exportStudents">Export Excel</button>${can('students.edit')?'<button class="btn primary" data-act="newStudent">Add student</button>':''}`;
-  const act=db.students.filter(s=>s.status==='ACTIVE');
+  const act=vStudents().filter(s=>s.status==='ACTIVE');
   return head('Students',`${act.length} active · ${act.filter(s=>s.course==='BED').length} B.Ed · ${act.filter(s=>s.course==='MED').length} M.Ed · ${act.filter(s=>s.funding==='SCHOLARSHIP').length} on scholarship`,acts)+
   `<div class="panel"><div class="filters"><input type="search" placeholder="Search name, enrolment no, phone or email" aria-label="Search students" data-live="sq" data-scope="students" value="${E(f.q)}">
-    ${sel('students','course','Course',COURSE_OPTS())}${sel('students','sem','Semester',SEM_OPTS)}${sel('students','cat','Category',CAT_OPTS)}${sel('students','fund','Funding type',FUND_OPTS)}
+    ${sel('students','course','Course',COURSE_OPTS())}${sel('students','sem','Semester',SEM_OPTS_())}${sel('students','cat','Category',CAT_OPTS)}${sel('students','fund','Funding type',FUND_OPTS)}
     ${sel('students','status','Status',[['','All status'],['ACTIVE','Active'],['LEFT','Left'],['PASSED','Passed']])}${sel('students','dues','Dues',[['','Dues: any'],['yes','Has dues'],['no','No dues']])}
     ${Object.entries(f).some(([k,v])=>!['sort','dir','page','status'].includes(k)&&v)?'<button class="btn sm" data-act="clearF" data-scope="students">Clear</button>':''}</div>
   <div class="tablewrap"><table><thead><tr>${sortTh('students','name','Student')}${sortTh('students','enrol','Enrolment no')}${sortTh('students','course','Course · Sem')}${sortTh('students','cat','Category')}${sortTh('students','fund','Funding')}${sortTh('students','paid','Paid',1)}${sortTh('students','due','Due now',1)}<th>Status</th></tr></thead><tbody>
@@ -1501,13 +1565,14 @@ function viewStudents(){
 ACT.clearF=el=>{const sc=el.dataset.scope;const keep=ui.f[sc];ui.f[sc]={sort:keep.sort,dir:keep.dir,page:0};if(sc==='students')ui.f[sc].status='ACTIVE';renderPage()};
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches&&e.target.matches('tr.click[data-act]')){e.preventDefault();e.target.click()}});
 const avatar=s=>s.photo?`<img class="av" src="${E(s.photo)}" alt="">`:`<div class="av" aria-hidden="true">${E(initials(s.name))}</div>`;
-ACT.exportStudents=()=>{need('students.view');showCsv('NPCTE students',['Enrolment no','Name','Gender','DOB','Phone','Email','Address','Course','Admission year','Semester','Category','Funding','Status','Sem 1 fee','Sem 2 fee','Sem 3 fee','Sem 4 fee','Paid','Due now'],
-  studentsFiltered().map(({s,sm})=>[s.enrol,s.name,s.gender,fmtD(s.dob),s.phone,s.email,s.address,course(s.course).name,s.admissionYear,s.sem,s.category,fundLabel(s.funding),statusLabel[s.status],...SEMS.map(n=>semFee(s,n).amount/100),sm.paid/100,sm.payable/100]))};
+ACT.exportStudents=()=>{need('students.view');showCsv('NPCTE students',['Enrolment no','Name','Gender','DOB','Phone','Email','Address','Course','Batch','Semester','Category','Funding','Status','Sem 1 fee','Sem 2 fee','Sem 3 fee','Sem 4 fee','Paid','Due now'],
+  studentsFiltered().map(({s,sm})=>[s.enrol,s.name,s.gender,fmtD(s.dob),s.phone,s.email,s.address,course(s.course).name,defaultBatch(s),s.sem,s.category,fundLabel(s.funding),statusLabel[s.status],...SEMS_ALL().map(n=>semFee(s,n)?semFee(s,n).amount/100:''),sm.paid/100,sm.payable/100]))};
 
 /* ---------- add / edit form ---------- */
 function studentForm(s){
   const isNew=!s;const T=today();const y=+T.slice(0,4);const st=db.settings;
-  const d=s||{name:'',gender:'',dob:'',phone:'',email:'',address:'',course:'BED',admissionYear:+T.slice(5,7)>=6?y:y-1,sem:1,category:'General',funding:'CASH',scholarshipNote:'',status:'ACTIVE',fees:SEMS.map(n=>({sem:n,amount:st.feeDefault.BED[n-1],due:defaultDue('BED',+T.slice(5,7)>=6?y:y-1,n)}))};
+  const c0=pickedCourse()||myCourses()[0]||'BED';const y0=+T.slice(5,7)>=6?y:y-1;
+  const d=s||{name:'',gender:'',dob:'',phone:'',email:'',address:'',course:c0,admissionYear:y0,sem:1,category:'General',funding:'CASH',scholarshipNote:'',status:'ACTIVE',fees:semsOf(c0).map(n=>({sem:n,amount:(st.feeDefault[c0]||[])[n-1]||0,due:defaultDue(c0,y0,n)}))};
   const canEnrol=!isNew&&(cur().role==='Super Admin'||cur().role==='Principal');
   ui.photo=d.photo||'';
   return`<button class="btn x" data-act="close">Close</button><h2>${isNew?'Add student':'Edit '+E(d.name)}</h2>
@@ -1523,9 +1588,9 @@ function studentForm(s){
     <div class="field span"><span class="label">Photo</span><div class="photo-row"><div id="photoPrev">${ui.photo?`<img class="av lg" src="${E(ui.photo)}" alt="">`:`<div class="av lg">${E(initials(d.name||'?'))}</div>`}</div><label class="btn sm"><input type="file" accept="image/*" data-change="photo" class="sr"> Choose photo</label>${ui.photo?'<button type="button" class="btn sm" data-act="photoClear">Remove</button>':''}</div></div>
    </div></fieldset>
    <fieldset class="fs"><legend>Course</legend><div class="form">
-    ${F('course','Course',{val:d.course,opts:db.courses.map(c=>[c.id,c.name]),req:true,attrs:'data-change="formCourse"'})}
-    ${F('admissionYear','Admission year',{type:'number',val:d.admissionYear,req:true,attrs:`min="2015" max="${y+1}" data-change="formCourse"`})}
-    ${F('sem','Current semester',{val:d.sem,opts:SEMS.map(n=>[n,'Semester '+n])})}
+    ${F('course','Course',{val:d.course,opts:db.courses.filter(c=>mayCourse(c.id)&&(c.active!==false||c.id===d.course)).map(c=>[c.id,c.name]),req:true,attrs:'data-change="formCourse"'})}
+    <div class="field" id="batchWrap">${batchSelect(d.course,d.admissionYear)}</div>
+    <div class="field" id="semWrap">${semSelect(d.course,d.sem)}</div>
     ${isNew?'':F('status','Status',{val:d.status,opts:[['ACTIVE','Active'],['LEFT','Left'],['PASSED','Passed']]})}
     ${canEnrol?F('enrol','Enrolment no.',{val:d.enrol,req:true,attrs:'maxlength="20"'}):''}
    </div></fieldset>
@@ -1536,19 +1601,28 @@ function studentForm(s){
     <div class="field span" id="schNote" ${fundingApplies(d.category)&&d.funding==='SCHOLARSHIP'?'':'hidden'}><label class="label" for="f_scholarshipNote">Scholarship note (optional)</label><input id="f_scholarshipNote" name="scholarshipNote" maxlength="120" value="${E(d.scholarshipNote)}" placeholder="e.g. Government post-matric scholarship"></div>
     <p class="note span" style="margin:0">Funding type is only a label for filters and reports. The fee amount and the way it is collected stay the same.</p>
    </div></fieldset>
-   <fieldset class="fs"><legend>Semester fees</legend><div class="semfees" id="semFees">${SEMS.map(n=>{const fe=d.fees.find(x=>x.sem===n);return`<div class="sfe"><b>Semester ${n}</b>
-     <label class="label" for="f_fee${n}">Amount (₹)</label><input id="f_fee${n}" name="fee${n}" inputmode="decimal" value="${fe.amount/100}" required data-live="feeEdit">
-     <label class="label" for="f_due${n}">Due date</label><input id="f_due${n}" name="due${n}" type="date" value="${E(fe.due||'')}"></div>`}).join('')}</div>
-    <p class="note" id="feeNote">Pre-filled from the default (${inr(st.feeDefault[d.course][0])} per semester). Change any semester for this student only.</p></fieldset>
+   <fieldset class="fs"><legend>Tuition fee per semester</legend><div class="semfees" id="semFees">${semFeeFields(d.course,d.fees)}</div>
+    <p class="note" id="feeNote">${feeNoteText(d.course)}</p></fieldset>
    <div class="actions sticky-actions"><button class="btn primary big">${isNew?'Save student and create login':'Save changes'}</button><button type="button" class="btn" data-act="close">Cancel</button></div>
   </form>`;
 }
+/* batch dropdown (value = admission year), semester dropdown and tuition fields follow the chosen course */
+function batchSelect(cid,y){const opts=batchOptions(cid).map(b=>[b.slice(0,4),b]);if(y&&!opts.some(o=>+o[0]===+y))opts.push([String(y),batchLabel(cid,y)]);
+  return`<label class="label" for="f_admissionYear">Batch *</label><select id="f_admissionYear" name="admissionYear" required data-change="formCourse">${opts.map(([v,l])=>`<option value="${E(v)}" ${+v===+y?'selected':''}>${E(l)}</option>`).join('')}</select>`}
+function semSelect(cid,v){return`<label class="label" for="f_sem">Current semester</label><select id="f_sem" name="sem">${semsOf(cid).map(n=>`<option value="${n}" ${+v===n?'selected':''}>Semester ${n}</option>`).join('')}</select>`}
+function semFeeFields(cid,fees){return semsOf(cid).map(n=>{const fe=(fees||[]).find(x=>x.sem===n)||{amount:0,due:''};return`<div class="sfe"><b>Semester ${n}</b>
+     <label class="label" for="f_fee${n}">Tuition fee (₹)</label><input id="f_fee${n}" name="fee${n}" inputmode="decimal" value="${fe.amount/100}" required data-live="feeEdit">
+     <label class="label" for="f_due${n}">Due date</label><input id="f_due${n}" name="due${n}" type="date" value="${E(fe.due||'')}"></div>`}).join('')}
+const feeNoteText=cid=>`Pre-filled from the default tuition fee (${inr(((db.settings.feeDefault[cid]||[])[0])||0)} per semester). Change any semester for this student only.`;
 ACT.newStudent=()=>{need('students.edit','add students');ui.feeTouched=false;drawer(studentForm(null),true,'Add student');$('#f_name').focus()};
-ACT.editStudent=el=>{need('students.edit','edit students');const s=stu(el.dataset.id);ui.feeTouched=true;drawer(studentForm(s),true,'Edit student')};
+ACT.editStudent=el=>{need('students.edit','edit students');guardStudent(el.dataset.id);const s=stu(el.dataset.id);ui.feeTouched=true;drawer(studentForm(s),true,'Edit student')};
 LIVE.feeEdit=()=>{ui.feeTouched=true};
 CHG.formCat=el=>{const on=fundingApplies(el.value);$('#fundWrap').hidden=!on;if(!on){const c=$('input[name=funding][value=CASH]');if(c)c.checked=true}$('#schNote').hidden=!(on&&$('input[name=funding][value=SCHOLARSHIP]').checked)};
 document.addEventListener('change',e=>{if(e.target.name==='funding')$('#schNote')&&($('#schNote').hidden=e.target.value!=='SCHOLARSHIP')});
-CHG.formCourse=()=>{const f=$('form[data-form=addStudent]');if(!f||ui.feeTouched)return;const c=f.course.value,y=+f.admissionYear.value;SEMS.forEach(n=>{f['fee'+n].value=db.settings.feeDefault[c][n-1]/100;f['due'+n].value=defaultDue(c,y,n)});$('#feeNote').textContent=`Pre-filled from the default (${inr(db.settings.feeDefault[c][0])} per semester). Change any semester for this student only.`};
+CHG.formCourse=el=>{const f=el.form;if(!f)return;const c=f.course.value,y=+f.admissionYear.value;
+  if(el.name==='course'){$('#batchWrap').innerHTML=batchSelect(c,y);$('#semWrap').innerHTML=semSelect(c,Math.min(+f.sem.value||1,semsOf(c).length))}
+  const isNew=f.dataset.form==='addStudent';const sameLen=semsOf(c).every(n=>f['fee'+n]);
+  if(isNew&&!ui.feeTouched||!sameLen){$('#semFees').innerHTML=semFeeFields(c,semsOf(c).map(n=>({sem:n,amount:(db.settings.feeDefault[c]||[])[n-1]||0,due:defaultDue(c,y,n)})));$('#feeNote').textContent=feeNoteText(c)}};
 CHG.photo=el=>{const file=el.files&&el.files[0];if(!file)return;if(!/^image\//.test(file.type))throw new Error('Choose an image file');
   const img=new Image();const url=URL.createObjectURL(file);img.onload=()=>{const c=document.createElement('canvas'),S=160;const r=Math.max(S/img.width,S/img.height);c.width=c.height=S;const g=c.getContext('2d');g.drawImage(img,(S-img.width*r)/2,(S-img.height*r)/2,img.width*r,img.height*r);ui.photo=c.toDataURL('image/jpeg',.8);URL.revokeObjectURL(url);$('#photoPrev').innerHTML=`<img class="av lg" src="${ui.photo}" alt="">`};img.onerror=()=>toast('Could not read this image',true);img.src=url};
 ACT.photoClear=()=>{ui.photo='';$('#photoPrev').innerHTML='<div class="av lg">?</div>'};
@@ -1558,12 +1632,13 @@ function readStudentForm(f,d,old){
   const phone=String(d.phone||'').replace(/\D/g,'');if(!/^[6-9]\d{9}$/.test(phone))throw new Error('Enter a 10-digit mobile number');
   const email=String(d.email||'').trim().toLowerCase();if(!MAIL_OK.test(email))throw new Error('Enter a valid email (login details are sent there)');
   if(db.students.some(s=>s!==old&&s.email.toLowerCase()===email))throw new Error('Another student already uses this email');
-  if(!db.courses.some(c=>c.id===d.course))throw new Error('Choose B.Ed or M.Ed');
+  if(!db.courses.some(c=>c.id===d.course)||!mayCourse(d.course))throw new Error('Choose a course you manage');
   const y=+d.admissionYear;if(!(y>=2015&&y<=+today().slice(0,4)+1))throw new Error('Check the admission year');
   if(!CATS.includes(d.category))throw new Error('Choose a category');
   const fundOn=fundingApplies(d.category);if(fundOn&&!['CASH','SCHOLARSHIP'].includes(d.funding))throw new Error('Choose the funding type: By Cash or By Scholarship');
   if(d.dob&&!validIso(d.dob))throw new Error('Check the date of birth');
-  const fees=SEMS.map(n=>{const a=toPaise(d['fee'+n]);if(!(a>=0)||a>100000000)throw new Error(`Semester ${n} fee must be a number between 0 and 10,00,000`);const due=d['due'+n]||'';if(due&&!validIso(due))throw new Error(`Check the semester ${n} due date`);return{sem:n,amount:a,due}});
+  if(!semsOf(d.course).includes(+d.sem||1))throw new Error('Choose a valid semester');
+  const fees=semsOf(d.course).map(n=>{const a=toPaise(d['fee'+n]);if(!(a>=0)||a>100000000)throw new Error(`Semester ${n} tuition fee must be a number between 0 and 10,00,000`);const due=d['due'+n]||'';if(due&&!validIso(due))throw new Error(`Check the semester ${n} due date`);return{sem:n,amount:a,due}});
   return{name,gender:d.gender||'',dob:d.dob||'',phone,email,address:capText(d.address,'Address',300),photo:ui.photo||'',course:d.course,admissionYear:y,sem:+d.sem||1,category:d.category,funding:fundOn?d.funding:'CASH',scholarshipNote:fundOn&&d.funding==='SCHOLARSHIP'?capText(d.scholarshipNote,'Scholarship note',120):'',fees};
 }
 FORM.addStudent=(f,d)=>{
@@ -1579,7 +1654,7 @@ FORM.addStudent=(f,d)=>{
 };
 ACT.openStudentD=el=>{closeDialog();openStudent(el.dataset.id)};
 FORM.editStudent=(f,d)=>{
-  need('students.edit','edit students');const s=stu(f.dataset.id);if(!s)throw new Error('Student not found');const v=readStudentForm(f,d,s);
+  need('students.edit','edit students');guardStudent(f.dataset.id);const s=stu(f.dataset.id);if(!s)throw new Error('Student not found');const v=readStudentForm(f,d,s);
   const before={name:s.name,phone:s.phone,email:s.email,course:s.course,sem:s.sem,category:s.category,funding:s.funding,status:s.status,fees:s.fees.map(x=>inr(x.amount)).join(' / '),enrol:s.enrol};
   if(d.enrol!==undefined){const en=capText(d.enrol,'Enrolment no.',20).toUpperCase();if(!/^[A-Z0-9-\/]{3,20}$/.test(en))throw new Error('Enrolment no. can use letters, numbers and -');if(db.students.some(x=>x!==s&&x.enrol===en))throw new Error('This enrolment no. is already used');
     if(en!==s.enrol){const u=db.users.find(x=>x.id===s.userId);if(u)u.username=en.toLowerCase();s.enrol=en}}
@@ -1638,7 +1713,7 @@ const diffText=(b,a)=>{if(!a)return'';return Object.keys(a).map(k=>`${k}: ${b&&b
 /* ---------- CSV import (spec §15.6: a template for students only) ---------- */
 const IMPORT_COLS=['name','gender','dob','phone','email','address','course','admissionYear','sem','category','funding','fee1','fee2','fee3','fee4'];
 ACT.importStudents=()=>{need('students.edit');drawer(`<button class="btn x" data-act="close">Close</button><h2>Import students from CSV</h2>
-  <p class="muted">Save your Excel sheet as CSV with these columns (first row = headings). Dates as YYYY-MM-DD, course BED or MED, funding CASH or SCHOLARSHIP, fees in rupees (blank = default). Each imported student gets a login and an email.</p>
+  <p class="muted">Save your Excel sheet as CSV with these columns (first row = headings). Dates as YYYY-MM-DD, course code (e.g. BED or MED), funding CASH or SCHOLARSHIP, fees in rupees (blank = default). Each imported student gets a login and an email.</p>
   <div class="actions" style="margin:10px 0"><button class="btn" data-act="importTpl">Download template</button><label class="btn"><input type="file" accept=".csv,text/csv" class="sr" data-change="importFile"> Choose CSV file</label></div>
   <div id="importOut"></div>`,true)};
 ACT.importTpl=()=>download('npcte-student-import-template.csv','﻿'+csvOf(IMPORT_COLS,[['Riya Patel','F','2003-04-15','9876543210','riya.patel@example.com','Mahesana','BED',today().slice(0,4),'1','SC','SCHOLARSHIP','30000','30000','30000','30000']]),'text/csv;charset=utf-8');
@@ -1647,51 +1722,80 @@ CHG.importFile=el=>{const file=el.files&&el.files[0];if(!file)return;file.text()
   const rows=parseCsv(t.replace(/^﻿/,''));const hd=rows.shift().map(h=>h.trim());const miss=['name','phone','email','course','admissionYear','category'].filter(c=>!hd.includes(c));
   if(miss.length){$('#importOut').innerHTML=`<div class="err">Missing columns: ${E(miss.join(', '))}</div>`;return}
   const ok=[],bad=[];rows.forEach((r,i)=>{const d={};hd.forEach((h,j)=>d[h]=(r[j]||'').trim());d.course=(d.course||'').toUpperCase();d.funding=(d.funding||'CASH').toUpperCase();d.sem=d.sem||1;
-    SEMS.forEach(n=>{d['fee'+n]=d['fee'+n]||String(db.settings.feeDefault[d.course]?db.settings.feeDefault[d.course][n-1]/100:'');d['due'+n]=''});
+    (course(d.course)?semsOf(d.course):SEMS).forEach(n=>{d['fee'+n]=d['fee'+n]||String(db.settings.feeDefault[d.course]?db.settings.feeDefault[d.course][n-1]/100:'');d['due'+n]=''});
     try{ui.photo='';const v=readStudentForm(null,d,null);if(ok.some(x=>x.email===v.email))throw new Error('Email repeated in the file');ok.push(v)}catch(e){bad.push(`Row ${i+2}: ${e.message}`)}});
   ui.importRows=ok;$('#importOut').innerHTML=`<div class="panel" style="padding:12px"><p style="margin:0"><b>${ok.length}</b> ready to import${bad.length?`, <b class="t-bad">${bad.length}</b> with problems`:''}.</p>${bad.length?`<ul class="note">${bad.slice(0,20).map(b=>`<li>${E(b)}</li>`).join('')}</ul>`:''}
    ${ok.length?`<button class="btn primary" style="margin-top:10px" data-act="importGo">Import ${ok.length} students</button>`:''}</div>`}).catch(()=>toast('Could not read the file',true))};
-ACT.importGo=()=>{need('students.edit');const l=ui.importRows||[];l.forEach(v=>{v.dues=SEMS.map(n=>defaultDue(v.course,v.admissionYear,n));const s=makeStudent({...v,fees:v.fees.map(x=>x.amount),createdBy:cur().name});db.students.push(s);const pw=tempPassword();createStudentLogin(s,pw,true);sendCredentials(s,pw,'new')});
+ACT.importGo=()=>{need('students.edit');const l=ui.importRows||[];l.forEach(v=>{v.dues=semsOf(v.course).map(n=>defaultDue(v.course,v.admissionYear,n));const s=makeStudent({...v,fees:v.fees.map(x=>x.amount),createdBy:cur().name});db.students.push(s);const pw=tempPassword();createStudentLogin(s,pw,true);sendCredentials(s,pw,'new')});
   log('Students imported','Student','',null,{count:l.length});ui.importRows=null;save();closeLayer();renderPage();toast(`${l.length} students imported. Login emails are on their way.`)};
 /* =====================================================================
-   Fee Collection (spec §5): 5 tabs
-   Collect payment (Cash / Cheque / UPI / Expense) · Pending dues · Receipts · Fee setup
+   Fee Collection (spec §5): Collect fee (every student, semester-wise) · Pending dues · Receipts · Fee setup
+   Modes in one dropdown: Cash / Cheque / UPI / Expense. Only tuition fee is collected.
    ===================================================================== */
 const MODES=[['CASH','By Cash'],['CHEQUE','By Cheque'],['UPI','By UPI'],['EXPENSE','By Expense']];
 const modeName=m=>({CASH:'Cash',CHEQUE:'Cheque',UPI:'UPI',EXPENSE:'Expense'}[m]||m);
 const MODE_TONE={CASH:'m-cash',CHEQUE:'m-cheque',UPI:'m-upi',EXPENSE:'m-exp'};
 const modePill=m=>`<span class="pill ${MODE_TONE[m]||''}">${E(modeName(m))}</span>`;
 const payPill=st=>st==='SUCCESS'?pill('Success','good'):st==='CANCELLED'?pill('Cancelled','bad'):st==='FAILED'?pill('Failed','bad'):pill('Pending','warn');
-function feeTabs(){const t=[['collect','Collect payment']];t.push(['dues','Pending dues'],['receipts','Receipts']);if(can('fees.setup'))t.push(['setup','Fee setup']);return t}
+function feeTabs(){const t=[['collect','Collect fee']];t.push(['dues','Pending dues'],['receipts','Receipts']);if(can('fees.setup'))t.push(['setup','Fee setup']);return t}
 function viewFees(){
   const tabs=feeTabs();let t=ui.tab.fees||'collect';if(!tabs.some(x=>x[0]===t))t='collect';ui.tab.fees=t;
-  const T=today();const tp=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);
+  const T=today();const tp=vPayments().filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);
   return head('Fee Collection',`Today: ${inr(sum(tp,p=>p.amount))} in ${tp.length} receipt${tp.length===1?'':'s'} · ${fmtD(T)}`,'')+tabsBar('fees',tabs,t)+
    ({collect:feeCollect,dues:feeDues,receipts:feeReceipts,setup:feeSetup}[t])();
 }
 
-/* ---------- 1. collect ---------- */
+/* ---------- 1. collect fee: every student, semester by semester ----------
+   One row per student (cards on a phone). "Collect" opens a panel: pick the semester, pick the mode
+   from a dropdown (Cash / Cheque / UPI / Expense), pick the batch, save -> receipt. */
+const MODE_OK=k=>k==='EXPENSE'?can('expenses.manage'):can('fees.collect');
+function colFilter(){return ui.f['fees.collect']=Object.assign({q:'',course:'',sem:'',batch:'',st:'',sort:'name',dir:1,page:0},ui.f['fees.collect']||{})}
+function colRows(){const f=colFilter();const q=f.q.trim().toLowerCase();
+  let l=vStudents().filter(s=>s.status==='ACTIVE').map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.batch||defaultBatch(s)===f.batch)
+    &&(!f.st||(f.st==='due'?sm.payable>0:f.st==='overdue'?sm.overdue:f.st==='paid'?sm.payable===0:true))&&(!q||[s.name,s.enrol,s.phone].some(v=>String(v).toLowerCase().includes(q))));
+  const k={name:x=>x.s.name.toLowerCase(),course:x=>x.s.course+x.s.sem,due:x=>x.sm.payable,paid:x=>x.sm.paid,bal:x=>x.sm.total-x.sm.paid}[f.sort]||(x=>x.s.name);
+  l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
+function semCell(x){if(!x.amount)return'<span class="muted">—</span>';
+  if(!x.due)return`<span class="sc ok" title="Paid ${inr(x.paid)}">✓ Paid</span>`;
+  if(!x.started)return`<span class="sc up" title="Not started yet">${inr(x.due)}<small>upcoming</small></span>`;
+  return`<span class="sc ${x.overdue?'bad':'due'}">${inr(x.due)}<small>${x.overdue?'overdue':x.paid?'part paid':'due'}</small></span>`}
 function feeCollect(){
-  need('fees.view');const c=ui.col=ui.col||{q:'',sid:'',sem:0,mode:'CASH'};const s=c.sid&&stu(c.sid);
-  const q=c.q.trim().toLowerCase();
-  const hits=q?db.students.filter(x=>x.status==='ACTIVE'&&[x.name,x.enrol,x.phone].some(v=>String(v).toLowerCase().includes(q))).slice(0,8):[];
-  let body='';
-  if(!s)body=`<div class="panel"><h2>1 · Find the student</h2><input type="search" id="colQ" data-live="colQ" value="${E(c.q)}" placeholder="Type name, enrolment no. or mobile" aria-label="Find student" class="bigin" autocomplete="off">
-    <div class="list" style="margin-top:8px">${hits.map(x=>{const sm=feeSum(x);return`<button class="li pick" data-act="colPick" data-id="${E(x.id)}"><div class="who">${avatar(x)}<div><b>${E(x.name)}</b><small>${E(x.enrol)} · ${E(classLabel(x))} · ${E(x.phone)}</small></div></div><span>${sm.payable?`<b class="amt">${inr(sm.payable)}</b> <small class="muted">due</small>`:pill('Paid up','good')}</span></button>`}).join('')||(q?'<p class="note">No active student matches. Check the spelling or enrolment no.</p>':'<p class="note">Start typing to search. Tip: you can also open a student from Students or Pending dues and press Collect.</p>')}</div></div>`;
-  else{
-    const sm=feeSum(s);const m=c.sem&&semSummary(s,c.sem);
-    body=`<div class="panel"><div class="li" style="border:0;padding-top:0"><div class="who">${avatar(s)}<div><b>${E(s.name)}</b><small>${E(s.enrol)} · ${E(classLabel(s))} · ${E(s.category)} · ${E(fundLabel(s.funding))}</small></div></div><button class="btn sm" data-act="colReset">Change student</button></div>
-     <h2 style="margin-top:6px">2 · Pick the semester</h2><div class="sempick" role="radiogroup" aria-label="Semester">${sm.sems.map(x=>`<button type="button" role="radio" aria-checked="${c.sem===x.sem}" class="sp ${x.due?'':'done'}" data-act="colSem" data-sem="${x.sem}" ${x.due?'':'disabled'}><b>Sem ${x.sem}</b><span>${x.due?inr(x.due)+' due':'Paid'}</span><small>${x.started?(x.overdue?'Overdue':x.dueDate?'Due '+fmtD(x.dueDate):''):'Upcoming'}</small></button>`).join('')}</div>
-     ${m?`<h2 style="margin-top:16px">3 · Mode of payment</h2><div class="modes" role="radiogroup" aria-label="Mode">${MODES.map(([k,l])=>`<button type="button" role="radio" aria-checked="${c.mode===k}" class="md ${MODE_TONE[k]}" data-act="colMode" data-m="${k}"${k!=='EXPENSE'&&!can('fees.collect')||k==='EXPENSE'&&!can('expenses.manage')?' disabled':''}>${E(l)}</button>`).join('')}</div>
-     <div style="margin-top:16px">${collectForm(s,m,c.mode)}</div>`:''}</div>`;
-  }
-  return`<div class="grid two-col">${body}<div class="panel"><h2>Today's collection</h2>${todayBox()}</div></div>`;
+  need('fees.view');const f=colFilter();const sc='fees.collect';const l=colRows();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);const SEMS=SEMS_ALL();
+  const T=today();const ok=vPayments().filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);
+  const bats=[...new Set(vStudents().map(defaultBatch))].sort().reverse();
+  const tot={fee:sum(l,x=>x.sm.total),paid:sum(l,x=>x.sm.paid),due:sum(l,x=>x.sm.payable)};
+  return`<div class="kpis k4 kpis-sm"><div class="kpi "><span class="label">Students</span><div class="v">${l.length}</div></div><div class="kpi "><span class="label">Total tuition fee</span><div class="v">${inr(tot.fee)}</div></div><div class="kpi good"><span class="label">Paid</span><div class="v">${inr(tot.paid)}</div></div><div class="kpi bad"><span class="label">Due now</span><div class="v">${inr(tot.due)}</div></div></div>
+   <div class="today-strip"><b>Today</b>${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<span>${modePill(m)} ${inr(sum(ok.filter(p=>p.mode===m),p=>p.amount))}</span>`).join('')}</div>
+   <div class="panel"><h2>Students and their fees</h2>
+   <div class="filters"><input type="search" placeholder="Name, enrolment no. or mobile" aria-label="Search students" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
+    ${scopeCourses().length>1?sel(sc,'course','Course',COURSE_OPTS()):''}${sel(sc,'batch','Batch',[['','All batches'],...bats.map(b=>[b,b])])}${sel(sc,'sem','Semester',[['','All semesters'],...SEMS.map(n=>[n,'Semester '+n])])}
+    ${sel(sc,'st','Status',[['','All students'],['due','Fee due now'],['overdue','Overdue'],['paid','Fully paid (so far)']])}</div>
+   <div class="tablewrap"><table class="feetable"><thead><tr>${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course · Batch')}${SEMS.map(n=>`<th>Sem ${n}</th>`).join('')}${sortTh(sc,'paid','Paid',1)}${sortTh(sc,'due','Due now',1)}<th></th></tr></thead><tbody>
+   ${pg.map(({s,sm})=>`<tr><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}"><b>${E(s.name)}</b></button><small class="muted mono" style="display:block">${E(s.enrol)}</small></td>
+    <td>${E(course(s.course).name)} · Sem ${s.sem}<small class="muted" style="display:block">Batch ${E(defaultBatch(s))}</small></td>
+    ${SEMS.map(n=>`<td>${n>semsOf(s.course).length?'<span class="muted">—</span>':semCell(sm.sems[n-1])}</td>`).join('')}
+    <td class="num amt t-good">${inr(sm.paid)}</td><td class="num amt ${sm.payable?'t-bad':''}">${inr(sm.payable)}</td>
+    <td>${sm.total>sm.paid?`<button class="btn sm primary" data-act="collectFor" data-id="${E(s.id)}">Collect</button>`:pill('Fully paid','good')}</td></tr>`).join('')||`<tr><td colspan="${5+SEMS.length}" class="empty">No students for these filters.</td></tr>`}</tbody></table></div>${pager(sc,l.length)}
+   <p class="note">Due now = semesters that have started and are not fully paid. Upcoming semesters are shown in grey and can also be collected in advance.</p></div>`;
 }
-function todayBox(){const T=today();const ok=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);const ex=ok.filter(p=>p.mode==='EXPENSE');
-  return`<div class="list">${['CASH','CHEQUE','UPI'].map(m=>`<div class="li"><span>${modePill(m)}</span><b class="amt">${inr(sum(ok.filter(p=>p.mode===m),p=>p.amount))}</b></div>`).join('')}<div class="li"><span>${modePill('EXPENSE')}</span><b class="amt">${inr(sum(ex,x=>x.amount))}</b></div></div>
-  <h3>Latest receipts</h3><div class="list">${db.payments.filter(p=>p.status==='SUCCESS').sort((a,b)=>b.entryAt-a.entryAt).slice(0,6).map(p=>`<button class="li pick" data-act="viewReceipt" data-id="${E(p.id)}"><div><b>${E(stu(p.studentId).name)}</b><small>${E(p.rc)} · ${modeName(p.mode)} · invoice ${fmtD(p.invoiceDate)}</small></div><b class="amt">${inr(p.amount)}</b></button>`).join('')||'<p class="note">None yet.</p>'}</div>`}
+/* the collect panel (opens from any Collect button: this list, Pending dues, a student's profile) */
+function openCollect(sid,sem){
+  const s=stu(sid);if(!s)throw new Error('Student not found');guardStudent(sid);if(s.status!=='ACTIVE')throw new Error('This student is not active');
+  const sm=feeSum(s);if(!sem){const fs=sm.sems.find(x=>x.started&&x.due>0)||sm.sems.find(x=>x.due>0);sem=fs?fs.sem:0}
+  const prev=ui.col&&ui.col.mode;ui.col={sid,sem,mode:prev&&MODE_OK(prev)?prev:(MODES.map(m=>m[0]).find(MODE_OK)||'CASH')};
+  drawer(`<button class="btn x" data-act="close">Close</button><h2>Collect fee</h2><div id="colBox" style="margin-top:12px">${collectBox()}</div>`,true,'Collect fee');
+}
+function collectBox(){
+  const c=ui.col;const s=stu(c.sid);const sm=feeSum(s);const m=c.sem&&semSummary(s,c.sem);
+  return`<div class="li" style="border:0;padding:0 0 10px"><div class="who">${avatar(s)}<div><b>${E(s.name)}</b><small>${E(s.enrol)} · ${E(classLabel(s))} · Batch ${E(defaultBatch(s))}</small></div></div><b class="amt">${inr(sm.total-sm.paid)} <small class="muted">balance</small></b></div>
+   <h3 style="margin-top:4px">1 · Semester</h3><div class="sempick" role="radiogroup" aria-label="Semester">${sm.sems.map(x=>`<button type="button" role="radio" aria-checked="${c.sem===x.sem}" class="sp ${x.due?'':'done'}" data-act="colSem" data-sem="${x.sem}" ${x.due?'':'disabled'}><b>Sem ${x.sem}</b><span>${x.due?inr(x.due)+' due':'Paid'}</span><small>${x.started?(x.overdue?'Overdue':x.dueDate?'Due '+fmtD(x.dueDate):'Started'):'Upcoming'}</small></button>`).join('')}</div>
+   ${m?`<h3 style="margin-top:14px">2 · Payment details</h3><div class="form" style="margin-bottom:10px"><div class="field"><label class="label" for="f_mode">Mode of payment *</label><select id="f_mode" data-change="colMode">${MODES.filter(([k])=>MODE_OK(k)).map(([k,l])=>`<option value="${k}" ${c.mode===k?'selected':''}>${E(l)}</option>`).join('')}</select></div></div>${collectForm(s,m,c.mode)}`:'<p class="note">Every semester of this student is fully paid.</p>'}`;
+}
+const reCol=()=>{const b=$('#colBox');if(b)b.innerHTML=collectBox()};
+function batchField(s){const b=defaultBatch(s);const opts=batchOptions(s.course);if(b&&!opts.includes(b))opts.push(b);
+  return`<div class="field"><label class="label" for="f_batch">Batch *</label><select id="f_batch" name="batch" required><option value="">Choose batch</option>${opts.map(o=>`<option ${o===b?'selected':''}>${E(o)}</option>`).join('')}</select></div>`}
 function collectForm(s,m,mode){
-  const T=today();const amt=F('amount','Amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}"`})+F('batch','Batch (e.g. 2025-27)',{req:true,ph:'2025-27',attrs:'maxlength="11" autocomplete="off"'});
+  const T=today();const amt=F('amount','Tuition fee amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}"`})+batchField(s);
   if(mode==='CASH')return`<form data-form="collect" data-mode="CASH" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true})}${F('note','Note (optional)',{span:1,attrs:'maxlength="120"'})}
    <p class="note span">Invoice date = the date you enter here (default today). The receipt uses this date. You can change it later in Receipts.</p><div class="actions span"><button class="btn primary big">Save cash payment · issue receipt</button></div></form>`;
   if(mode==='CHEQUE')return`<form data-form="collect" data-mode="CHEQUE" class="form">${amt}${F('chequeNo','Cheque no.',{req:true,attrs:'inputmode="numeric" maxlength="10"'})}${F('bank','Bank',{req:true,attrs:'maxlength="60" list="banks"'})}<datalist id="banks"><option>State Bank of India</option><option>Bank of Baroda</option><option>Mehsana Urban Co-op Bank</option><option>HDFC Bank</option><option>ICICI Bank</option></datalist>
@@ -1701,31 +1805,28 @@ function collectForm(s,m,mode){
    <div class="actions span"><button class="btn primary big">Create UPI request · show QR</button></div></form>`}
   return`<form data-form="collect" data-mode="EXPENSE" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}
    ${F('reason','Expense: what was this fee used for?',{req:true,span:1,attrs:'maxlength="160" minlength="3"'})}
-   <p class="note span">By Expense: this student's fee was used directly for a college expense. The fee counts as paid: a receipt is issued and the due goes down. It shows as Expense in Receipts, Audit and the Dashboard. Invoice date works like Cash and can be edited later.</p>
+   <p class="note span">By Expense: this student's fee was used directly for a college expense. The fee counts as paid: a receipt is issued and the due goes down. It shows as Expense in Receipts, Audit and the Dashboard. The student only sees the receipt, not the mode.</p>
    <div class="actions span"><button class="btn primary big">Save fee by expense · issue receipt</button></div></form>`;
 }
-LIVE.colQ=el=>{ui.col.q=el.value;clearTimeout(LIVE._c);LIVE._c=setTimeout(()=>{renderPage();const i=$('#colQ');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}},150)};
-ACT.colPick=el=>{const s=stu(el.dataset.id);const sm=feeSum(s);const first=sm.sems.find(x=>x.started&&x.due>0)||sm.sems.find(x=>x.due>0);ui.col={q:'',sid:s.id,sem:first?first.sem:0,mode:ui.col.mode||'CASH'};renderPage()};
-ACT.colReset=()=>{ui.col={q:'',sid:'',sem:0,mode:ui.col.mode};renderPage();setTimeout(()=>$('#colQ')&&$('#colQ').focus(),0)};
-ACT.colSem=el=>{ui.col.sem=+el.dataset.sem;renderPage()};
-ACT.colMode=el=>{ui.col.mode=el.dataset.m;renderPage();if(el.dataset.m==='EXPENSE'){}};
-ACT.collectFor=el=>{need('fees.collect','collect fees');closeLayer();ui.col={q:'',sid:el.dataset.id,sem:+el.dataset.sem||0,mode:'CASH'};if(!ui.col.sem){const f=feeSum(stu(el.dataset.id)).sems.find(x=>x.started&&x.due>0);ui.col.sem=f?f.sem:0}go('fees','collect')};
+ACT.colSem=el=>{ui.col.sem=+el.dataset.sem;reCol()};
+CHG.colMode=el=>{if(!MODE_OK(el.value))throw new Error('You do not have access to this mode');ui.col.mode=el.value;reCol();const a=$('#f_amount');if(a)a.focus()};
+ACT.collectFor=el=>{if(!canAny('fees.collect','expenses.manage'))throw new Error('You do not have access to collect fees');openCollect(el.dataset.id,+el.dataset.sem||0)};
 function amountOf(d,m){const a=toPaise(d.amount);if(!(a>0))throw new Error('Enter the amount');if(a>m.due)throw new Error(`Amount is more than the semester ${m.sem} due (${inr(m.due)})`);return a}
 FORM.collect=(f,d)=>{
   const mode=f.dataset.mode;if(mode==='EXPENSE')need('expenses.manage','add expenses');else need('fees.collect','collect fees');
-  const c=ui.col;const s=stu(c.sid);if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');const m=semSummary(s,c.sem);
+  const c=ui.col;const s=stu(c.sid);if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');guardStudent(s.id);const m=semSummary(s,c.sem);
   const o={sem:c.sem,mode,amount:amountOf(d,m),batch:cleanBatch(d.batch),invoiceDate:d.invoiceDate,note:capText(d.note,'Note',120)};
   if(mode==='EXPENSE'){o.reason=capText(d.reason,'Reason',160);if(o.reason.length<3)throw new Error('Write what the money was used for');if(!validIso(o.invoiceDate))throw new Error('Choose a valid invoice date')}
   if(mode==='CHEQUE'){o.chequeNo=String(d.chequeNo||'').trim();if(!/^\d{6}$/.test(o.chequeNo))throw new Error('Cheque no. must be 6 digits');o.bank=capText(d.bank,'Bank',60);if(!o.bank)throw new Error('Enter the bank name');if(!validIso(d.chequeDate))throw new Error('Enter the cheque date');o.chequeDate=d.chequeDate;
     if(db.payments.some(p=>p.status==='SUCCESS'&&p.mode==='CHEQUE'&&p.chequeNo===o.chequeNo&&p.bank.toLowerCase()===o.bank.toLowerCase()))throw new Error('This cheque no. of this bank is already entered')}
   if(o.invoiceDate>addDays(today(),0))throw new Error('Invoice date cannot be in the future');
-  const p=recordPayment(s,o);afterPayment(p);save();ui.col={q:'',sid:'',sem:0,mode};renderPage();showReceipt(p,true);
+  const p=recordPayment(s,o);afterPayment(p);save();closeLayer();renderPage();showReceipt(p,true);
 };
 /* everything that happens after a successful payment (spec §5.2): receipt no + PDF, email, notification to the student, live update for staff */
 function afterPayment(p){
   const s=stu(p.studentId);
   if(db.settings.mail.sendReceipts)queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Fee receipt ${p.rc} - ${db.college.short}`});
-  notify('payment',`Payment received · ${inr(p.amount)}`,`Semester ${p.sem} · ${modeName(p.mode)} · receipt ${p.rc}`,{students:[s.id],portal:'sfees',tone:'good',self:true});
+  notify('payment',`Fee received · ${inr(p.amount)}`,`Tuition fee · Semester ${p.sem} · receipt ${p.rc}`,{students:[s.id],portal:'sfees',tone:'good',self:true});
   notify('payment',`${modeName(p.mode)} payment · ${s.name}`,`${inr(p.amount)} for semester ${p.sem} · ${p.rc}`,{roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'good',sid:s.id});
 }
 
@@ -1748,7 +1849,7 @@ function handleUpiWebhook(evt){
   o.status='FAILED';o.failedAt=evt.paidAt;const s=stu(o.studentId);
   log('UPI payment failed','UPI order',o.id,null,{amount:inr(o.amount),student:s.enrol});
   notify('payfail','UPI payment failed',`${inr(o.amount)} for semester ${o.sem} did not go through. No money was taken.`,{students:[s.id],portal:'sfees',tone:'bad',self:true});
-  notify('payfail',`UPI payment failed · ${s.name}`,`${inr(o.amount)} · semester ${o.sem}`,{roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
+  notify('payfail',`UPI payment failed · ${s.name}`,`${inr(o.amount)} · semester ${o.sem}`,{sid:s.id,roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
   return null;
 }
 function upiDialog(o){
@@ -1762,7 +1863,7 @@ function upiDialog(o){
 }
 FORM.upiPay=(f,d)=>{
   const u=cur();let s,sem;
-  if(isStudentUser(u)){s=stu(u.studentId);sem=+f.dataset.sem}else{need('fees.collect','collect fees');s=stu(ui.col.sid);sem=ui.col.sem}
+  if(isStudentUser(u)){s=stu(u.studentId);sem=+f.dataset.sem}else{need('fees.collect','collect fees');s=stu(ui.col.sid);sem=ui.col.sem;guardStudent(s&&s.id)}
   if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');const m=semSummary(s,sem);const amount=amountOf(d,m);
   const batch=isStudentUser(u)?(([...db.payments].reverse().find(p=>p.studentId===s.id&&p.batch)||{}).batch||defaultBatch(s)):cleanBatch(d.batch);
   const o=provider.createOrder(s,sem,amount,u.name);o.batch=batch;log('UPI order created','UPI order',o.id,null,{student:s.enrol,sem,amount:inr(amount)});save();closeLayer();upiDialog(o);
@@ -1773,12 +1874,12 @@ ACT.gwFail=el=>{handleUpiWebhook(gwEvent(el.dataset.id,'failed'));save();closeDi
 
 /* ---------- receipt view ---------- */
 function receiptHtml(p){
-  const s=stu(p.studentId);const c=db.college;const bal=semSummary(s,p.sem).due;
+  const s=stu(p.studentId);const sv=isStudentUser(cur());const c=db.college;const bal=semSummary(s,p.sem).due;
   return`<div class="receipt ${p.status==='CANCELLED'?'cancelled':''}"><div class="hd"><div><b>${E(c.name)}</b><div class="muted" style="font-size:12px">${E(c.trust)} · ${E(c.address)}</div></div><div class="right"><b class="mono">${E(p.rc)}</b><div class="muted" style="font-size:12px">Invoice date ${fmtD(p.invoiceDate)}</div></div></div>
    ${p.status==='CANCELLED'?`<p class="err" style="margin:0 0 10px">Cancelled on ${fmtT(p.cancelledAt)} by ${E(p.cancelledBy)} · ${E(p.cancelReason)}</p>`:`<div class="tick"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14"/><path d="M10 16.5l4 4 8-9"/></svg>Payment received</div>`}
-   <div class="rline"><span>Student</span><b>${E(s.name)}</b></div><div class="rline"><span>Enrolment no.</span><span class="mono">${E(s.enrol)}</span></div><div class="rline"><span>Course</span><span>${E(course(s.course).name)} · Semester ${p.sem}</span></div><div class="rline"><span>Batch</span><b>${E(batchOf(p))}</b></div>
-   <div class="rline"><span>Mode</span><span>${modeName(p.mode)}${p.mode==='CHEQUE'?` · No. ${E(p.chequeNo)}, ${E(p.bank)}, dated ${fmtD(p.chequeDate)}`:''}${p.mode==='UPI'?` · ${E(p.upiRef)}`:''}</span></div>${p.mode==='EXPENSE'&&p.reason?`<div class="rline"><span>Used for</span><span>${E(p.reason)}</span></div>`:''}
-   ${p.mode==='UPI'?`<div class="rline"><span>Paid on</span><span>${fmtT(p.paidAt)}</span></div>`:''}<div class="rline"><span>Entered</span><span>${fmtT(p.entryAt)} · ${E(p.by)}</span></div>${p.note?`<div class="rline"><span>Note</span><span>${E(p.note)}</span></div>`:''}
+   <div class="rline"><span>Student</span><b>${E(s.name)}</b></div><div class="rline"><span>Enrolment no.</span><span class="mono">${E(s.enrol)}</span></div><div class="rline"><span>Course</span><span>${E(course(s.course).name)} · Semester ${p.sem}</span></div><div class="rline"><span>Batch</span><b>${E(batchOf(p))}</b></div><div class="rline"><span>Fee</span><span>Tuition fee</span></div>
+   ${sv?'':`<div class="rline"><span>Mode</span><span>${modeName(p.mode)}${p.mode==='CHEQUE'?` · No. ${E(p.chequeNo)}, ${E(p.bank)}, dated ${fmtD(p.chequeDate)}`:''}${p.mode==='UPI'?` · ${E(p.upiRef)}`:''}</span></div>${p.mode==='EXPENSE'&&p.reason?`<div class="rline"><span>Used for</span><span>${E(p.reason)}</span></div>`:''}
+   ${p.mode==='UPI'?`<div class="rline"><span>Paid on</span><span>${fmtT(p.paidAt)}</span></div>`:''}<div class="rline"><span>Entered</span><span>${fmtT(p.entryAt)} · ${E(p.by)}</span></div>${p.note?`<div class="rline"><span>Note</span><span>${E(p.note)}</span></div>`:''}`}
    <div class="rline tot"><span>Amount</span><span>${inr(p.amount)}</span></div><div class="rline"><span>Semester ${p.sem} balance now</span><span>${inr(bal)}</span></div>
    ${(p.dateEdits||[]).length?`<p class="note">Invoice date changed: ${p.dateEdits.map(x=>`${fmtD(x.from)} → ${fmtD(x.to)} (${E(x.by)})`).join('; ')}</p>`:''}</div>`;
 }
@@ -1795,7 +1896,7 @@ ACT.cancelAsk=el=>{need('fees.cancel','cancel receipts');const p=db.payments.fin
    <div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Keep receipt</button><button class="btn danger">Cancel receipt</button></div></form>`,'Cancel receipt');$('#f_reason').focus()};
 FORM.cancelReceipt=(f,d)=>{const p=db.payments.find(x=>x.id===f.dataset.id);cancelPayment(p,d.reason);const s=stu(p.studentId);
   notify('cancel',`Receipt ${p.rc} cancelled`,`${inr(p.amount)} · ${p.cancelReason}`,{students:[s.id],portal:'sfees',tone:'bad',self:true});
-  notify('cancel',`Receipt cancelled · ${s.name}`,`${p.rc} · ${inr(p.amount)} · ${p.cancelReason}`,{roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
+  notify('cancel',`Receipt cancelled · ${s.name}`,`${p.rc} · ${inr(p.amount)} · ${p.cancelReason}`,{sid:s.id,roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
   save();closeDialog();closeLayer();renderPage();toast('Receipt cancelled')};
 
 /* an inline date editor for Cash / Cheque / Expense rows; UPI and cancelled rows show plain text */
@@ -1805,17 +1906,17 @@ CHG.invDate=el=>{const kind=el.dataset.kind;const rec=db.payments.find(x=>x.id==
   if(!rec)throw new Error('Not found');const v=el.value;if(v>today())throw new Error('Invoice date cannot be in the future');
   const ch=editInvoiceDate(kind,rec,v);if(!ch)return;
   if(kind==='p'){const s=stu(rec.studentId);notify('datechange',`Invoice date changed · ${rec.rc}`,`${fmtD(rec.dateEdits.at(-1).from)} → ${fmtD(v)}. Your receipt was updated.`,{students:[s.id],portal:'sfees',self:true});
-    notify('datechange',`Invoice date changed · ${rec.rc}`,`${s.name}: ${fmtD(rec.dateEdits.at(-1).from)} → ${fmtD(v)}`,{roles:['Super Admin','Principal'],staff:'audit',tab:'activity'})}
+    notify('datechange',`Invoice date changed · ${rec.rc}`,`${s.name}: ${fmtD(rec.dateEdits.at(-1).from)} → ${fmtD(v)}`,{sid:s.id,roles:['Super Admin','Principal'],staff:'audit',tab:'activity'})}
   save();toast(`Invoice date saved: ${fmtD(v)}${kind==='p'?' · receipt regenerated':''}`);renderPage()};
 /* ---------- 3. pending dues ---------- */
 function duesFilter(){return ui.f['fees.dues']=Object.assign({q:'',course:'',sem:'',cat:'',fund:'',over:'',sort:'due',dir:-1,page:0},ui.f['fees.dues']||{})}
 function duesFiltered(){const f=duesFilter();const q=f.q.toLowerCase();
-  let l=db.students.filter(s=>s.status==='ACTIVE').map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>sm.payable>0&&(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.over||sm.overdue)&&(!q||[s.name,s.enrol,s.phone].some(v=>v.toLowerCase().includes(q))));
+  let l=vStudents().filter(s=>s.status==='ACTIVE').map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>sm.payable>0&&(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.over||sm.overdue)&&(!q||[s.name,s.enrol,s.phone].some(v=>v.toLowerCase().includes(q))));
   const k={due:x=>x.sm.payable,name:x=>x.s.name,course:x=>x.s.course+x.s.sem}[f.sort]||(x=>x.sm.payable);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
 function feeDues(){
   const f=duesFilter();const sc='fees.dues';const l=duesFiltered();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);ui.dueSel=ui.dueSel||new Set();
   return`<div class="panel"><h2>Pending dues ${pill(inr(sum(l,x=>x.sm.payable))+' · '+l.length+' students','warn')}</h2>
-   <div class="filters"><input type="search" placeholder="Search" aria-label="Search dues" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'sem','Semester',SEM_OPTS)}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'over','Overdue',[['','Due + overdue'],['1','Only overdue']])}</div>
+   <div class="filters"><input type="search" placeholder="Search" aria-label="Search dues" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'sem','Semester',SEM_OPTS_())}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'over','Overdue',[['','Due + overdue'],['1','Only overdue']])}</div>
    ${can('notices.post')?`<div class="actions" style="margin-bottom:10px"><button class="btn" data-act="remindSel" ${ui.dueSel.size?'':'disabled'}>Send reminder to selected (${ui.dueSel.size})</button><button class="btn primary" data-act="remindAll" ${l.length?'':'disabled'}>Send reminder to all ${l.length} shown</button></div>`:''}
    <div class="tablewrap"><table><thead><tr>${can('notices.post')?`<th><input type="checkbox" aria-label="Select all shown" data-change="dueAll" ${pg.length&&pg.every(x=>ui.dueSel.has(x.s.id))?'checked':''}></th>`:''}${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course · Sem')}<th>Category</th><th>Funding</th><th>Semesters due</th>${sortTh(sc,'due','Due now',1)}<th></th></tr></thead><tbody>
    ${pg.map(({s,sm})=>`<tr>${can('notices.post')?`<td><input type="checkbox" aria-label="Select ${E(s.name)}" data-change="dueSel" data-id="${E(s.id)}" ${ui.dueSel.has(s.id)?'checked':''}></td>`:''}<td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}"><b>${E(s.name)}</b></button><small class="muted" style="display:block">${E(s.enrol)} · ${E(s.phone)}</small></td><td>${E(classLabel(s))}</td><td>${E(s.category)}</td><td>${E(fundLabel(s.funding))}</td>
@@ -1843,7 +1944,7 @@ FORM.sendRemind=(f,d)=>{need('notices.post');const ids=f.dataset.ids.split(',').
 /* ---------- 4. receipts ---------- */
 function rcFilter(){return ui.f['fees.receipts']=Object.assign({q:'',mode:'',status:'',from:'',to:'',sort:'entry',dir:-1,page:0},ui.f['fees.receipts']||{})}
 function receiptsFiltered(){const f=rcFilter();const q=f.q.toLowerCase();
-  let l=db.payments.filter(p=>(!f.mode||p.mode===f.mode)&&(!f.status||p.status===f.status)&&(!f.from||p.invoiceDate>=f.from)&&(!f.to||p.invoiceDate<=f.to)&&(!q||[p.rc,stu(p.studentId).name,stu(p.studentId).enrol,p.chequeNo,p.upiRef,batchOf(p),p.reason].some(v=>String(v||'').toLowerCase().includes(q))));
+  let l=vPayments().filter(p=>(!f.mode||p.mode===f.mode)&&(!f.status||p.status===f.status)&&(!f.from||p.invoiceDate>=f.from)&&(!f.to||p.invoiceDate<=f.to)&&(!q||[p.rc,stu(p.studentId).name,stu(p.studentId).enrol,p.chequeNo,p.upiRef,batchOf(p),p.reason].some(v=>String(v||'').toLowerCase().includes(q))));
   const k={entry:p=>p.entryAt,date:p=>p.invoiceDate,amount:p=>p.amount,rc:p=>p.rc,name:p=>stu(p.studentId).name}[f.sort]||(p=>p.entryAt);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
 function feeReceipts(){
   const f=rcFilter();const sc='fees.receipts';const l=receiptsFiltered();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);
@@ -1858,11 +1959,11 @@ function feeReceipts(){
 
 /* ---------- 5. fee setup ---------- */
 function feeSetup(){
-  need('fees.setup','fee setup');const st=db.settings,c=db.college;
+  need('fees.setup','fee setup');const st=db.settings,c=db.college;const SEMS=SEMS_ALL();const cs=scopeCourses();const na='<td class="muted">—</td>';
   return`<div class="sgrid">
-  <form class="scard" data-form="feeDefaults"><h2>Default fee per semester</h2><p class="note" style="margin:0 0 10px">Used to pre-fill the 4 semesters when a student is added. Existing students keep their own amounts.</p>
-   <div class="tablewrap"><table class="matrix"><thead><tr><th>Course</th>${SEMS.map(n=>`<th>Sem ${n} (₹)</th>`).join('')}</tr></thead><tbody>${db.courses.map(co=>`<tr><td><b>${E(co.name)}</b></td>${SEMS.map(n=>`<td><input name="${co.id}_${n}" inputmode="decimal" value="${st.feeDefault[co.id][n-1]/100}" aria-label="${E(co.name)} semester ${n} fee" class="numin"></td>`).join('')}</tr>`).join('')}</tbody></table></div>
-   <h3>Due date per semester <small class="muted">(MM-DD · OPEN: confirm with the college)</small></h3><div class="tablewrap"><table class="matrix"><thead><tr><th>Course</th>${SEMS.map(n=>`<th>Sem ${n}</th>`).join('')}</tr></thead><tbody>${db.courses.map(co=>`<tr><td><b>${E(co.name)}</b></td>${SEMS.map(n=>`<td><input name="d_${co.id}_${n}" value="${E(st.dueDates[co.id][n-1]||'')}" placeholder="MM-DD" pattern="\\d{2}-\\d{2}" aria-label="${E(co.name)} semester ${n} due date" class="numin"></td>`).join('')}</tr>`).join('')}</tbody></table></div>
+  <form class="scard" data-form="feeDefaults"><h2>Default tuition fee per semester</h2><p class="note" style="margin:0 0 10px">Only tuition fee is collected. These amounts pre-fill the semesters when a student is added. Existing students keep their own amounts.</p>
+   <div class="tablewrap"><table class="matrix"><thead><tr><th>Course</th>${SEMS.map(n=>`<th>Sem ${n} (₹)</th>`).join('')}</tr></thead><tbody>${cs.map(co=>`<tr><td><b>${E(co.name)}</b></td>${SEMS.map(n=>n>co.semesters?na:`<td><input name="${co.id}_${n}" inputmode="decimal" value="${((st.feeDefault[co.id]||[])[n-1]||0)/100}" aria-label="${E(co.name)} semester ${n} tuition fee" class="numin"></td>`).join('')}</tr>`).join('')}</tbody></table></div>
+   <h3>Due date per semester <small class="muted">(MM-DD · OPEN: confirm with the college)</small></h3><div class="tablewrap"><table class="matrix"><thead><tr><th>Course</th>${SEMS.map(n=>`<th>Sem ${n}</th>`).join('')}</tr></thead><tbody>${cs.map(co=>`<tr><td><b>${E(co.name)}</b></td>${SEMS.map(n=>n>co.semesters?na:`<td><input name="d_${co.id}_${n}" value="${E((st.dueDates[co.id]||[])[n-1]||'')}" placeholder="MM-DD" pattern="\\d{2}-\\d{2}" aria-label="${E(co.name)} semester ${n} due date" class="numin"></td>`).join('')}</tr>`).join('')}</tbody></table></div>
    <div class="form" style="margin-top:10px">${F('reminderDays','Fee alert: days before due date',{type:'number',val:st.reminderDays,attrs:'min="1" max="60"'})}</div>
    <div class="actions" style="margin-top:12px"><button class="btn primary">Save fees and due dates</button></div></form>
   <form class="scard" data-form="receiptSetup"><h2>Receipt numbering</h2><div class="form">${F('receiptPrefix','Prefix',{val:c.receiptPrefix,req:true,attrs:'maxlength="16"'})}${F('nextReceipt','Next number',{type:'number',val:c.nextReceipt,req:true,attrs:'min="1"'})}</div>
@@ -1874,7 +1975,7 @@ function feeSetup(){
    <div class="actions" style="margin-top:12px"><button class="btn primary">Save UPI settings</button></div></form></div>`;
 }
 FORM.feeDefaults=(f,d)=>{need('fees.setup');const st=db.settings;const before={fees:JSON.stringify(st.feeDefault),due:JSON.stringify(st.dueDates),days:st.reminderDays};
-  const nf={},nd={};db.courses.forEach(co=>{nf[co.id]=SEMS.map(n=>{const a=toPaise(d[co.id+'_'+n]);if(!(a>=0)||a>100000000)throw new Error(`${co.name} semester ${n}: enter a valid amount`);return a});nd[co.id]=SEMS.map(n=>{const v=String(d[`d_${co.id}_${n}`]||'').trim();if(v&&!(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v)))throw new Error(`${co.name} semester ${n} due date: use MM-DD`);return v})});
+  const nf={...st.feeDefault},nd={...st.dueDates};scopeCourses().forEach(co=>{const SEMS=semsOf(co.id);nf[co.id]=SEMS.map(n=>{const a=toPaise(d[co.id+'_'+n]);if(!(a>=0)||a>100000000)throw new Error(`${co.name} semester ${n}: enter a valid amount`);return a});nd[co.id]=SEMS.map(n=>{const v=String(d[`d_${co.id}_${n}`]||'').trim();if(v&&!(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v)))throw new Error(`${co.name} semester ${n} due date: use MM-DD`);return v})});
   const rd=+d.reminderDays;if(!(rd>=1&&rd<=60))throw new Error('Reminder days must be 1 to 60');
   st.feeDefault=nf;st.dueDates=nd;st.reminderDays=rd;log('Fee setup changed','Settings','fees',before,{fees:JSON.stringify(nf),due:JSON.stringify(nd),days:rd});ntSync();save();renderPage();toast('Fee setup saved')};
 FORM.receiptSetup=(f,d)=>{need('fees.setup');const c=db.college,st=db.settings;const px=capText(d.receiptPrefix,'Prefix',16);if(!/^[A-Za-z0-9\/\-_]+$/.test(px))throw new Error('Prefix can use letters, numbers, / - _');
@@ -1925,7 +2026,8 @@ const fmtSize=n=>n<1024?n+' B':(n/1024).toFixed(1)+' KB';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 /* The PDF is rebuilt from the payment every time it is opened, so an edited invoice date always shows on the receipt.
    NOTE: this browser PDF uses Helvetica (Latin only). The real server PDF embeds Noto Sans Gujarati (spec §1). */
-function receiptPdf(p){
+/* student copy (portal download and email): the bill only, without mode of payment or office details */
+function receiptPdf(p,studentCopy){if(studentCopy===undefined)studentCopy=isStudentUser(cur());
   const s=stu(p.studentId),c=db.college;const ts=new Date(p.entryAt||Date.now());const cancelled=p.status==='CANCELLED';
   const stamp=`${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
   return makePdf(g=>{
@@ -1940,15 +2042,15 @@ function receiptPdf(p){
     if(cancelled){g.rect(40,124,515,26,'#fdeaea');g.text(52,141,`CANCELLED on ${fmtD(istDate(p.cancelledAt))} - ${p.cancelReason}`,{size:10,bold:true,color:'#b42318'})}
     else{g.rect(40,124,150,24,'#e5f6ec');g.text(52,140,'PAYMENT RECEIVED',{size:10,bold:true,color:'#1a7f45'})}
     const mode=modeName(p.mode)+(p.mode==='CHEQUE'?` No. ${p.chequeNo}, ${p.bank}, dated ${fmtD(p.chequeDate)}`:'')+(p.mode==='UPI'?` (${p.upiRef})`:'');
-    const info=[['Student',s.name],['Enrolment no.',s.enrol],['Course',course(s.course).name],['Batch',batchOf(p)],['Semester',String(p.sem)],['Mode of payment',mode],['Category',s.category],['Entered by',p.by||'-'],['Entered on',fmtT(p.entryAt)]];if(p.mode==='EXPENSE'&&p.reason)info.push(['Used for (expense)',p.reason]);
+    const info=[['Student',s.name],['Enrolment no.',s.enrol],['Course',course(s.course).name],['Batch',batchOf(p)],['Semester',String(p.sem)],...(studentCopy?[['Fee','Tuition fee']]:[['Mode of payment',mode],['Category',s.category],['Entered by',p.by||'-'],['Entered on',fmtT(p.entryAt)]])];if(!studentCopy&&p.mode==='EXPENSE'&&p.reason)info.push(['Used for (expense)',p.reason]);
     let y=180;info.forEach((r,i)=>{const cx=i%2?310:40;if(i%2===0&&i>0)y+=40;g.text(cx,y,r[0].toUpperCase(),{size:7.5,bold:true,color:MUT});g.wrap(cx,y+15,r[1],240,{size:11,color:INK})});
     y+=64;g.rect(40,y,515,24,'#eef2fb');
     g.text(50,y+16,'PARTICULARS',{size:8,bold:true,color:MUT});g.text(545,y+16,'AMOUNT',{size:8,bold:true,color:MUT,align:'right'});y+=24;
-    g.text(50,y+18,`${course(s.course).name} Semester ${p.sem} fee`,{size:11});g.text(545,y+18,rs(p.amount),{size:11,align:'right',bold:true});y+=28;g.line(40,y,555,y,LINE,.6);
+    g.text(50,y+18,`Tuition fee · ${course(s.course).name} Semester ${p.sem}`,{size:11});g.text(545,y+18,rs(p.amount),{size:11,align:'right',bold:true});y+=28;g.line(40,y,555,y,LINE,.6);
     const m=semSummary(s,p.sem);
     y+=18;g.rect(300,y,255,64,'#f3f5fa');
     g.text(314,y+22,'AMOUNT RECEIVED',{size:8,bold:true,color:MUT});g.text(541,y+50,rs(p.amount),{size:22,bold:true,color:cancelled?'#b42318':INK,align:'right'});
-    g.text(40,y+22,`Semester ${p.sem} fee ${rs(m.amount)} · paid ${rs(m.paid)}`,{size:10,color:MUT});g.text(40,y+44,'Balance '+rs(m.due),{size:14,bold:true});
+    g.text(40,y+22,`Semester ${p.sem} tuition fee ${rs(m.amount)} · paid ${rs(m.paid)}`,{size:10,color:MUT});g.text(40,y+44,'Balance '+rs(m.due),{size:14,bold:true});
     y+=92;g.line(40,y,555,y,LINE);
     g.wrap(40,y+22,'This is a computer generated receipt and does not need a signature. Please keep it for your records. For any query contact the college accounts office with the receipt number.',515,{size:9,color:MUT});
     if((p.dateEdits||[]).length)g.wrap(40,y+60,'Invoice date updated on '+fmtT(p.dateEdits.at(-1).at)+'.',515,{size:8.5,color:MUT});
@@ -1965,7 +2067,7 @@ function mailBody(rec){
   const s=stu(rec.studentId),c=db.college;
   if(rec.kind==='credentials')return{text:`Dear ${s.name},\n\nYour ${c.short} student portal is ready.\n\nPortal: ${location.origin}/\nLogin ID: ${s.enrol.toLowerCase()} (or ${s.email})\nTemporary password: ${rec.pw?'(sent in this email)':'—'}\n\nYou must choose your own password at the first sign-in.\n\nInstall as an app: open the portal in Chrome on Android and tap "Install app", or on iPhone open it in Safari, tap Share and then "Add to Home Screen".\n\n${c.name}\n${c.phone} · ${c.email}`};
   const p=db.payments.find(x=>x.id===rec.paymentId);
-  return{text:`Dear ${s.name},\n\n${p.status==='CANCELLED'?'This receipt has been cancelled.':'We have received your fee payment.'}\nReceipt: ${p.rc}\nAmount: ${rs(p.amount)}\nSemester: ${p.sem}\nMode: ${modeName(p.mode)}\nInvoice date: ${fmtD(p.invoiceDate)}\n\nThe receipt PDF is attached.\n\n${c.name}\n${c.phone} · ${c.email}`,pdf:receiptPdf(p),filename:p.rc.replace(/[^\w-]+/g,'_')+'.pdf'};
+  return{text:`Dear ${s.name},\n\n${p.status==='CANCELLED'?'This receipt has been cancelled.':'We have received your fee payment.'}\nReceipt: ${p.rc}\nAmount: ${rs(p.amount)}\nTuition fee · Semester ${p.sem}\nBatch: ${batchOf(p)}\nInvoice date: ${fmtD(p.invoiceDate)}\n\nThe receipt PDF is attached.\n\n${c.name}\n${c.phone} · ${c.email}`,pdf:receiptPdf(p,true),filename:p.rc.replace(/[^\w-]+/g,'_')+'.pdf'};
 }
 function queueMail(o){
   const rec={id:uid('o'),ts:Date.now(),kind:o.kind,paymentId:o.paymentId||'',studentId:o.studentId,to:(o.to||[]).filter(e=>MAIL_OK.test(e||'')),subject:o.subject,status:'Queued',mode:db.settings.mail.mode,attempts:0,error:'',why:o.why||''};
@@ -2011,7 +2113,8 @@ const unreadNotices=u=>{if(!u||u.role!=='Student')return 0;const s=stu(u.student
 const studentNotices=s=>db.notices.filter(n=>n.publishAt<=Date.now()&&audienceStudents(n.audience).some(x=>x.id===s.id)).sort((a,b)=>b.publishAt-a.publishAt);
 function viewNotices(){
   need('notices.post','the notice board');const f=ui.f.notices=Object.assign({q:'',kind:''},ui.f.notices||{});const q=f.q.toLowerCase();
-  const l=db.notices.filter(n=>(!f.kind||(f.kind==='fee'?n.isFeeAlert:f.kind==='public'?n.isPublic:f.kind==='scheduled'?n.publishAt>Date.now():true))&&(!q||(n.title+' '+n.body).toLowerCase().includes(q))).sort((a,b)=>b.publishAt-a.publishAt);
+  const inAud=a=>!a||a.type==='all'||(a.type==='course'||a.type==='sem')&&inScope(a.course)||a.type==='students'&&(a.ids||[]).some(id=>{const x=stu(id);return x&&inScope(x.course)});
+  const l=db.notices.filter(n=>inAud(n.audience)&&(!f.kind||(f.kind==='fee'?n.isFeeAlert:f.kind==='public'?n.isPublic:f.kind==='scheduled'?n.publishAt>Date.now():true))&&(!q||(n.title+' '+n.body).toLowerCase().includes(q))).sort((a,b)=>b.publishAt-a.publishAt);
   return head('Notice Board','Notices reach students in their portal with a live notification, sound and a phone popup.','<button class="btn primary" data-act="newNotice">New notice</button>')+
   `<div class="panel"><div class="filters"><input type="search" placeholder="Search notices" aria-label="Search notices" data-live="sq" data-scope="notices" value="${E(f.q)}">${sel('notices','kind','Type',[['','All notices'],['fee','Fee alerts'],['scheduled','Scheduled'],['public','Public (website)']])}</div>
   <div class="nlist">${l.map(n=>{const reach=audienceStudents(n.audience).length;const sched=n.publishAt>Date.now();return`<article class="ncard">
@@ -2021,12 +2124,12 @@ function viewNotices(){
    <div class="actions" style="margin-top:8px"><button class="btn sm danger" data-act="delNotice" data-id="${E(n.id)}">Delete</button></div></article>`}).join('')||'<p class="empty">No notices yet.</p>'}</div></div>`;
 }
 function noticeForm(){
-  const sts=db.students.filter(s=>s.status==='ACTIVE').sort((a,b)=>a.name.localeCompare(b.name));
+  const sts=vStudents().filter(s=>s.status==='ACTIVE').sort((a,b)=>a.name.localeCompare(b.name));
   return`<button class="btn x" data-act="close">Close</button><h2>New notice</h2>
   <form data-form="notice" class="grid" style="gap:12px;margin-top:12px">${F('title','Title',{req:true,attrs:'maxlength="100"'})}${F('body','Message',{type:'textarea',req:true,rows:5,attrs:'maxlength="2000"'})}
    <div class="field"><span class="label">Attachment (PDF or image, optional, up to 450 KB)</span><label class="btn sm" style="width:fit-content"><input type="file" class="sr" accept="application/pdf,image/*" data-change="noticeFile"> Choose file</label><small id="attName" class="muted"></small></div>
-   <div class="form">${F('aud','Send to',{opts:[['all','All students'],['BED','B.Ed (all semesters)'],['MED','M.Ed (all semesters)'],['sem','A semester'],['students','Selected students'],['one','One student']],attrs:'data-change="audType"'})}
-    <div class="field" id="audSem" hidden><label class="label" for="f_semc">Semester</label><select id="f_semc" name="semc">${db.courses.flatMap(c=>SEMS.map(n=>`<option value="${c.id}-${n}">${E(c.name)} Sem ${n}</option>`)).join('')}</select></div></div>
+   <div class="form">${F('aud','Send to',{opts:[...(myCourses().length===db.courses.length?[['all','All students']]:[]),...scopeCourses().map(c=>['c:'+c.id,c.name+' (all semesters)']),['sem','A semester'],['students','Selected students'],['one','One student']],attrs:'data-change="audType"'})}
+    <div class="field" id="audSem" hidden><label class="label" for="f_semc">Semester</label><select id="f_semc" name="semc">${scopeCourses().flatMap(c=>semsOf(c.id).map(n=>`<option value="${c.id}-${n}">${E(c.name)} Sem ${n}</option>`)).join('')}</select></div></div>
    <div class="field" id="audStu" hidden><span class="label">Students</span><input type="search" placeholder="Filter list" aria-label="Filter students" data-live="audFilter"><div class="picklist" id="audList">${sts.map(s=>`<label data-n="${E((s.name+' '+s.enrol).toLowerCase())}"><input type="checkbox" name="sid" value="${E(s.id)}"> ${E(s.name)} <small class="muted">${E(s.enrol)} · ${E(classLabel(s))}</small></label>`).join('')}</div></div>
    <div class="form">${F('when','Publish at (optional · empty = now)',{type:'datetime-local'})}<div class="field"><span class="label">Tags</span><label class="chk"><input type="checkbox" name="fee"> Fee alert</label><label class="chk"><input type="checkbox" name="pub"> Public (show on college website)</label></div></div>
    <div class="actions"><button class="btn primary big">Publish notice</button><button type="button" class="btn" data-act="close">Cancel</button></div></form>`;
@@ -2038,8 +2141,8 @@ CHG.noticeFile=el=>{const file=el.files&&el.files[0];if(!file)return;if(!/^(appl
   const r=new FileReader();r.onload=()=>{ui.att={name:file.name.slice(0,80),type:file.type,size:file.size,data:r.result};$('#attName').textContent=file.name+' · '+fmtSize(file.size)};r.readAsDataURL(file)};
 FORM.notice=(f,d)=>{
   need('notices.post');const title=capText(d.title,'Title',100),body=capText(d.body,'Message',2000);if(title.length<3||body.length<3)throw new Error('Write a title and a message');
-  let a;const t=d.aud;if(t==='all')a={type:'all'};else if(t==='BED'||t==='MED')a={type:'course',course:t};else if(t==='sem'){const[c,n]=d.semc.split('-');a={type:'sem',course:c,sem:+n}}
-  else{const ids=new FormData(f).getAll('sid');if(!ids.length)throw new Error('Choose at least one student');a={type:'students',ids:t==='one'?ids.slice(0,1):ids}}
+  let a;const t=d.aud;if(t==='all'){if(myCourses().length!==db.courses.length)throw new Error('Choose one of your courses');a={type:'all'}}else if(/^c:/.test(t)){const c=t.slice(2);if(!mayCourse(c))throw new Error('Not your course');a={type:'course',course:c}}else if(t==='sem'){const[c,n]=d.semc.split('-');if(!mayCourse(c))throw new Error('Not your course');a={type:'sem',course:c,sem:+n}}
+  else{const ids=new FormData(f).getAll('sid').filter(id=>mayStudent(id));if(!ids.length)throw new Error('Choose at least one student');a={type:'students',ids:t==='one'?ids.slice(0,1):ids}}
   let at=Date.now();if(d.when){at=new Date(d.when).getTime();if(!(at>0))throw new Error('Check the publish time');if(at<Date.now()-6e4)throw new Error('Publish time is in the past. Leave it empty to publish now.')}
   const reach=audienceStudents(a).length;if(!reach)throw new Error('No active student is in this audience');
   const n={id:uid('n'),title,body,audience:a,isFeeAlert:!!d.fee,isPublic:!!d.pub,publishAt:at,createdBy:cur().name,attachment:ui.att,sent:false};
@@ -2059,7 +2162,7 @@ function viewAudit(){
 }
 /* one row per payment or expense */
 function txAll(){
-  return db.payments.map(p=>{const s=stu(p.studentId);return{kind:'p',id:p.id,date:p.invoiceDate,entry:p.entryAt,s,sem:p.sem,mode:p.mode,amount:p.amount,ref:p.rc,status:p.status,by:p.by,rec:p,reason:p.reason||'',batch:batchOf(p)}})
+  return vPayments().map(p=>{const s=stu(p.studentId);return{kind:'p',id:p.id,date:p.invoiceDate,entry:p.entryAt,s,sem:p.sem,mode:p.mode,amount:p.amount,ref:p.rc,status:p.status,by:p.by,rec:p,reason:p.reason||'',batch:batchOf(p)}})
    ;
 }
 function txFilter(){return ui.f['audit.tx']=Object.assign({q:'',modes:[],from:'',to:'',course:'',sem:'',cat:'',fund:'',status:'',by:'',min:'',max:'',sort:'date',dir:-1,page:0},ui.f['audit.tx']||{})}
@@ -2078,7 +2181,7 @@ function auditTx(){
   <div class="panel"><div class="filters"><input type="search" placeholder="Search receipt, name, cheque, UTR, reason" aria-label="Search transactions" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
    <div class="chips" role="group" aria-label="Mode">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<button type="button" class="chip ${MODE_TONE[m]}" aria-pressed="${f.modes.includes(m)}" data-act="txMode" data-m="${m}">${modeName(m)}</button>`).join('')}</div>
    <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label>
-   ${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'sem','Semester',SEM_OPTS)}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled'],['FAILED','Failed']])}${sel(sc,'by','Entered by',[['','Anyone'],...bys.map(b=>[b,b])])}
+   ${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'sem','Semester',SEM_OPTS_())}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled'],['FAILED','Failed']])}${sel(sc,'by','Entered by',[['','Anyone'],...bys.map(b=>[b,b])])}
    <input class="numin" placeholder="Min ₹" aria-label="Minimum amount" value="${E(f.min)}" data-change="sf" data-scope="${sc}" data-k="min" inputmode="decimal"><input class="numin" placeholder="Max ₹" aria-label="Maximum amount" value="${E(f.max)}" data-change="sf" data-scope="${sc}" data-k="max" inputmode="decimal">
    <button class="btn sm" data-act="txClear">Clear</button></div>
   <div class="actions" style="margin-bottom:10px"><span class="muted">${l.length} rows</span><span style="flex:1"></span><button class="btn" data-act="txCsv">Export Excel</button><button class="btn" data-act="txPrint">Export PDF</button></div>
@@ -2112,7 +2215,7 @@ function depPeriod(){const f=ui.f.dep=Object.assign({p:'week',from:'',to:''},ui.
   return{from:f.from||addDays(T,-30),to:f.to||T,f}}
 function auditDeposit(){
   const{from,to,f}=depPeriod();const inP=p=>p.invoiceDate>=from&&p.invoiceDate<=to&&p.status==='SUCCESS';
-  const pays=db.payments.filter(inP);const und=pays.filter(p=>(p.mode==='CASH'||p.mode==='CHEQUE')&&!p.depositId);const ex=pays.filter(p=>p.mode==='EXPENSE');
+  const pays=vPayments().filter(inP);const und=pays.filter(p=>(p.mode==='CASH'||p.mode==='CHEQUE')&&!p.depositId);const ex=pays.filter(p=>p.mode==='EXPENSE');
   const col=m=>{const l=m==='EXPENSE'?ex:pays.filter(p=>p.mode===m);return{t:sum(l,x=>x.amount),n:l.length,und:m==='CASH'||m==='CHEQUE'?sum(l.filter(p=>!p.depositId),p=>p.amount):null}};
   const sc=can('audit.deposit');
   return`<div class="panel"><h2>Cash & cheque deposit report</h2>
@@ -2138,14 +2241,14 @@ FORM.deposit=(f,d)=>{need('audit.deposit','mark deposits');const l=depChecked().
   db.deposits.push(dp);l.forEach(p=>p.depositId=dp.id);log('Marked as deposited','Deposit',dp.id,null,{total:inr(dp.total),entries:dp.count,bankRef:ref,on:fmtD(dp.depositedOn)});save();renderPage();toast(`${inr(dp.total)} marked as deposited`)};
 ACT.depUndo=el=>{if(!['Super Admin','Principal'].includes(cur().role))throw new Error('Only the Principal can undo a deposit');const dp=db.deposits.find(x=>x.id===el.dataset.id);
   confirmBox('Undo deposit',`${dp.count} entries (${inr(dp.total)}) go back to "not deposited".`,'Undo',()=>{db.payments.forEach(p=>{if(p.depositId===dp.id)p.depositId=''});db.deposits=db.deposits.filter(x=>x!==dp);log('Deposit undone','Deposit',dp.id,{total:inr(dp.total)},null);save();renderPage();toast('Deposit undone')},true)};
-ACT.depPrint=()=>{const{from,to}=depPeriod();const l=db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&(p.mode==='CASH'||p.mode==='CHEQUE'));const t=m=>inr(sum(db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&p.mode===m),p=>p.amount));
+ACT.depPrint=()=>{const{from,to}=depPeriod();const l=vPayments().filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&(p.mode==='CASH'||p.mode==='CHEQUE'));const t=m=>inr(sum(db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&p.mode===m),p=>p.amount));
   printReport('Cash & cheque deposit report',`${fmtD(from)} to ${fmtD(to)}`,['Invoice date','Receipt','Student','Mode','Cheque','Amount','Deposited'],l.map(p=>[fmtD(p.invoiceDate),p.rc,stu(p.studentId).name,modeName(p.mode),p.mode==='CHEQUE'?p.chequeNo+' '+p.bank:'',inr(p.amount),p.depositId?'Yes':'No']),
    `<p class="pt">Cash ${t('CASH')} · Cheque ${t('CHEQUE')} · UPI ${t('UPI')} · Expense ${t('EXPENSE')} · Not deposited ${inr(sum(l.filter(p=>!p.depositId),p=>p.amount))}</p><p class="pt">Deposited by: ____________________ &nbsp; Checked by: ____________________</p>`)};
 
 /* activity log (§7B): read-only, Principal and Super Admin */
 function auditActivity(){
   need('activity.view');const f=ui.f.act=Object.assign({q:'',role:'',from:'',to:'',page:0},ui.f.act||{});const q=f.q.toLowerCase();
-  const l=db.audit.filter(a=>(!f.role||a.role===f.role)&&(!f.from||istDate(a.at)>=f.from)&&(!f.to||istDate(a.at)<=f.to)&&(!q||[a.action,a.actor,a.entity,a.entityId,a.detail,JSON.stringify(a.after||''),JSON.stringify(a.before||'')].some(v=>String(v).toLowerCase().includes(q))));
+  const l=auditVisible().filter(a=>(!f.role||a.role===f.role)&&(!f.from||istDate(a.at)>=f.from)&&(!f.to||istDate(a.at)<=f.to)&&(!q||[a.action,a.actor,a.entity,a.entityId,a.detail,JSON.stringify(a.after||''),JSON.stringify(a.before||'')].some(v=>String(v).toLowerCase().includes(q))));
   const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);
   return`<div class="panel"><h2>Activity log ${pill(l.length+' actions')}<button class="btn" data-act="actCsv">Export Excel</button></h2>
    <div class="filters"><input type="search" placeholder="Search action, person, receipt, value" aria-label="Search activity" data-live="sq" data-scope="act" value="${E(f.q)}">${sel('act','role','Role',[['','All roles'],...ROLE_NAMES.map(r=>[r,r]),['System','System']])}
@@ -2154,14 +2257,17 @@ function auditActivity(){
    ${pg.map(a=>`<tr><td><small>${fmtT(a.at)}</small></td><td>${E(a.actor)}<small class="muted" style="display:block">${E(a.role)}</small></td><td><b>${E(a.action)}</b>${a.detail?`<small class="muted" style="display:block">${E(a.detail)}</small>`:''}</td><td class="mono">${E(a.entity)}${a.entityId?' · '+E(a.entityId):''}</td><td><small>${E(diffText(a.before,a.after))||'—'}</small></td><td><small>${E(a.ip)}<br>${E(a.device)}</small></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Nothing found.</td></tr>'}</tbody></table></div>${pager('act',l.length)}
    <p class="note">Read-only. Nobody can edit or delete these entries.</p></div>`;
 }
-ACT.actCsv=()=>{need('activity.view');showCsv('NPCTE activity log',['Time','Who','Role','Action','Entity','Record','Before','After','Detail','IP','Device'],db.audit.map(a=>[fmtT(a.at),a.actor,a.role,a.action,a.entity,a.entityId,JSON.stringify(a.before||''),JSON.stringify(a.after||''),a.detail,a.ip,a.device]))};
+ACT.actCsv=()=>{need('activity.view');showCsv('NPCTE activity log',['Time','Who','Role','Action','Entity','Record','Before','After','Detail','IP','Device'],auditVisible().map(a=>[fmtT(a.at),a.actor,a.role,a.action,a.entity,a.entityId,JSON.stringify(a.before||''),JSON.stringify(a.after||''),a.detail,a.ip,a.device]))};
 
 /* ---------- settings ---------- */
+/* activity log: Super Admin sees everything; others see actions of logins that share one of their courses */
+function auditVisible(){const u=cur();if(u.role==='Super Admin')return db.audit;const mine=new Set(myCourses());
+  const ok=new Set(db.users.filter(x=>x.role==='Super Admin'?false:x.role==='Student'?mine.has((stu(x.studentId)||{}).course):(x.courses||[]).some(c=>mine.has(c))).map(x=>x.id));return db.audit.filter(a=>ok.has(a.actorId))}
 function viewSettings(){
   const tabs=[];if(can('settings.manage'))tabs.push(['college','College profile']);if(can('fees.setup'))tabs.push(['fees','Fees & receipts']);if(can('roles.manage'))tabs.push(['roles','Roles & permissions']);
-  if(cur().role==='Super Admin')tabs.push(['users','Staff logins']);if(can('settings.manage'))tabs.push(['mail','Email & alerts'],['flags','Open items']);if(cur().role==='Super Admin')tabs.push(['data','Data']);
+  if(cur().role==='Super Admin')tabs.push(['courses','Courses'],['users','Staff logins']);if(can('settings.manage'))tabs.push(['mail','Email & alerts'],['flags','Open items']);if(cur().role==='Super Admin')tabs.push(['data','Data']);
   let t=ui.tab.settings||tabs[0][0];if(!tabs.some(x=>x[0]===t))t=tabs[0][0];ui.tab.settings=t;
-  return head('Settings',`${db.college.short} · ${db.college.trust}`,'')+tabsBar('settings',tabs,t)+({college:setCollege,fees:()=>feeSetup(),roles:setRoles,users:setUsers,mail:setMail,flags:setFlags,data:setData}[t])();
+  return head('Settings',`${db.college.short} · ${db.college.trust}`,'')+tabsBar('settings',tabs,t)+({college:setCollege,fees:()=>feeSetup(),roles:setRoles,courses:setCourses,users:setUsers,mail:setMail,flags:setFlags,data:setData}[t])();
 }
 function setCollege(){need('settings.manage');const c=db.college;
   return`<form class="scard" data-form="college" style="max-width:820px"><h2>College profile</h2><p class="note" style="margin:0 0 12px">Shown on receipts, reports and the login screen.</p><div class="form">
@@ -2179,13 +2285,44 @@ CHG.perm=el=>{need('roles.manage');const r=el.dataset.r,p=el.dataset.p;if(!STAFF
   const l=db.roles[r]=db.roles[r]||[];const had=l.includes(p);if(el.checked&&!had)l.push(p);if(!el.checked&&had)l.splice(l.indexOf(p),1);log('Permission changed','Role',r,{[p]:had},{[p]:el.checked});save();toast(`${r}: ${PERMS.find(x=>x[0]===p)[1]} ${el.checked?'allowed':'removed'}`)};
 ACT.permReset=()=>{need('roles.manage');confirmBox('Restore default permissions','Principal and Clerk go back to the permissions in the spec.','Restore',()=>{const before=JSON.stringify(db.roles);const d=DEFAULT_ROLES();if(cur().role!=='Super Admin')d.Principal=db.roles.Principal;db.roles=d;log('Permissions reset','Role','',{roles:before},{roles:JSON.stringify(d)});save();renderPage();toast('Defaults restored')})};
 function setUsers(){if(cur().role!=='Super Admin')throw new Error('Only the Super Admin manages staff logins');const l=db.users.filter(u=>u.role!=='Student');
-  return`<div class="scard"><h2>Staff logins <button class="btn primary" data-act="newUser">Add Clerk / Principal login</button></h2><div class="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Username</th><th>Email</th><th>Last sign-in</th><th>Status</th><th></th></tr></thead><tbody>
-  ${l.map(u=>`<tr><td><b>${E(u.name)}</b></td><td>${E(u.role)}</td><td class="mono">${E(u.username)}</td><td>${E(u.email)}</td><td><small>${u.lastLoginAt?fmtT(u.lastLoginAt):'Never'}</small></td><td>${u.active?pill('Active','good'):pill('Off','bad')}</td><td>${u.id===cur().id?'<small class="muted">You</small>':`<div class="actions nowrap"><button class="btn sm" data-act="userToggle" data-id="${E(u.id)}">${u.active?'Switch off':'Switch on'}</button><button class="btn sm" data-act="userPw" data-id="${E(u.id)}">Reset password</button></div>`}</td></tr>`).join('')}</tbody></table></div></div>`}
-ACT.newUser=()=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');drawer(`<button class="btn x" data-act="close">Close</button><h2>Add staff login</h2><form data-form="newUser" class="form" style="margin-top:12px">${F('name','Full name',{req:true,span:1})}${F('role','Role',{opts:STAFF_ROLES})}${F('username','Username',{req:true,attrs:'autocapitalize="off" maxlength="30"'})}${F('email','Email',{type:'email',req:true,span:1})}<p class="note span">A temporary password is created; they must change it at first sign-in.</p><div class="actions span"><button class="btn primary">Create login</button></div></form>`)};
+  return`<div class="scard"><h2>Staff logins <button class="btn primary" data-act="newUser">Add Principal / Clerk login</button></h2><div class="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Courses</th><th>Username</th><th>Email</th><th>Last sign-in</th><th>Status</th><th></th></tr></thead><tbody>
+  ${l.map(u=>`<tr><td><b>${E(u.name)}</b></td><td>${E(u.role)}</td><td>${u.role==='Super Admin'?'<small class="muted">All courses</small>':(u.courses||[]).map(id=>course(id)?pill(course(id).name,'acc'):'').join(' ')||pill('None','bad')}</td><td class="mono">${E(u.username)}</td><td>${E(u.email)}</td><td><small>${u.lastLoginAt?fmtT(u.lastLoginAt):'Never'}</small></td><td>${u.active?pill('Active','good'):pill('Off','bad')}</td><td>${u.id===cur().id?'<small class="muted">You</small>':`<div class="actions nowrap"><button class="btn sm" data-act="userCourses" data-id="${E(u.id)}">Courses</button><button class="btn sm" data-act="userToggle" data-id="${E(u.id)}">${u.active?'Switch off':'Switch on'}</button><button class="btn sm" data-act="userPw" data-id="${E(u.id)}">Reset password</button></div>`}</td></tr>`).join('')}</tbody></table></div></div>`}
+ACT.newUser=()=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');drawer(`<button class="btn x" data-act="close">Close</button><h2>Add staff login</h2><form data-form="newUser" class="form" style="margin-top:12px">${F('name','Full name',{req:true,span:1})}${F('role','Role',{opts:STAFF_ROLES})}${courseChecks([])}${F('username','Username',{req:true,attrs:'autocapitalize="off" maxlength="30"'})}${F('email','Email',{type:'email',req:true,span:1})}<p class="note span">A temporary password is created; they must change it at first sign-in.</p><div class="actions span"><button class="btn primary">Create login</button></div></form>`)};
 FORM.newUser=(f,d)=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const un=String(d.username||'').trim().toLowerCase();if(!/^[a-z0-9._-]{3,30}$/.test(un))throw new Error('Username: 3-30 letters, numbers, . _ -');if(db.users.some(u=>u.username.toLowerCase()===un))throw new Error('This username is taken');
-  const email=String(d.email||'').trim().toLowerCase();if(!MAIL_OK.test(email))throw new Error('Enter a valid email');if(!STAFF_ROLES.includes(d.role))throw new Error('Choose a role');const name=capText(d.name,'Name');if(name.length<2)throw new Error('Enter the name');
-  const pw=tempPassword();const u={id:uid('u'),role:d.role,name,username:un,email,phone:'',password:pw,mustChange:true,active:true,lastLoginAt:0};db.users.push(u);log('Staff login created','User',un,null,{role:u.role,email});save();closeLayer();renderPage();
+  const email=String(d.email||'').trim().toLowerCase();if(!MAIL_OK.test(email))throw new Error('Enter a valid email');if(!STAFF_ROLES.includes(d.role))throw new Error('Choose a role');const courses=readCourseChecks(f);const name=capText(d.name,'Name');if(name.length<2)throw new Error('Enter the name');
+  const pw=tempPassword();const u={id:uid('u'),role:d.role,name,username:un,email,phone:'',password:pw,mustChange:true,active:true,lastLoginAt:0,courses};db.users.push(u);log('Staff login created','User',un,null,{role:u.role,email,courses:courses.join(', ')});save();closeLayer();renderPage();
   dialog(`<h3>Login created</h3><p class="muted">Give these to ${E(name)}. Shown once.</p><div class="panel" style="padding:12px"><div class="rline"><span>Username</span><b class="mono">${E(un)}</b></div><div class="rline"><span>Temporary password</span><b class="mono">${E(pw)}</b></div></div><div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn primary" data-act="closeDialog">Done</button></div>`,'Login created',true)};
+/* course assignment: a Principal or Clerk sees only these courses (one, several or all) */
+const courseChecks=sel=>`<fieldset class="field span fs-plain"><legend class="label">Courses this login can see *</legend><div class="chkrow">${db.courses.map(c=>`<label class="chk"><input type="checkbox" name="course" value="${E(c.id)}" ${sel.includes(c.id)?'checked':''}> ${E(c.name)}${c.active===false?' <small class="muted">(off)</small>':''}</label>`).join('')}</div><small class="muted">Example: one Principal for B.Ed and another for M.Ed, and one Clerk for both.</small></fieldset>`;
+function readCourseChecks(f){const l=new FormData(f).getAll('course').filter(id=>course(id));if(!l.length)throw new Error('Tick at least one course');return l}
+ACT.userCourses=el=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const u=db.users.find(x=>x.id===el.dataset.id);if(!u||!STAFF_ROLES.includes(u.role))throw new Error('Login not found');
+  drawer(`<button class="btn x" data-act="close">Close</button><h2>Courses for ${E(u.name)}</h2><p class="muted">${E(u.role)} · ${E(u.username)}</p><form data-form="userCourses" data-id="${E(u.id)}" class="form" style="margin-top:12px">${courseChecks(u.courses||[])}<div class="actions span"><button class="btn primary">Save</button></div></form>`,false,'Courses')};
+FORM.userCourses=(f,d)=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const u=db.users.find(x=>x.id===f.dataset.id);const before=(u.courses||[]).join(', ');u.courses=readCourseChecks(f);log('Login courses changed','User',u.username,{courses:before},{courses:u.courses.join(', ')});save();closeLayer();renderPage();toast('Courses saved')};
+/* ---------- courses (Super Admin): B.Ed, M.Ed, add PhD or any other course ---------- */
+function setCourses(){if(cur().role!=='Super Admin')throw new Error('Only the Super Admin manages courses');
+  return`<div class="scard"><h2>Courses <button class="btn primary" data-act="newCourse">Add course</button></h2><p class="note" style="margin:0 0 12px">Each course has its own students, fees, Principal and Clerk logins. The switch in the top bar shows one course or all of them.</p>
+  <div class="tablewrap"><table><thead><tr><th>Course</th><th>Code</th><th>Duration</th><th>Semesters</th><th>Default tuition / sem</th><th>Students</th><th>Staff</th><th>Status</th><th></th></tr></thead><tbody>
+  ${db.courses.map(c=>{const n=db.students.filter(s=>s.course===c.id).length;const st=db.users.filter(u=>STAFF_ROLES.includes(u.role)&&(u.courses||[]).includes(c.id)).length;return`<tr><td><b>${E(c.name)}</b></td><td class="mono">${E(c.id)}</td><td>${c.years} year${c.years>1?'s':''} · batch e.g. ${E(batchLabel(c.id,+today().slice(0,4)))}</td><td>${c.semesters}</td><td>${inr(((db.settings.feeDefault[c.id]||[])[0])||0)}</td><td>${n}</td><td>${st}</td><td>${c.active!==false?pill('On','good'):pill('Off','bad')}</td><td><button class="btn sm" data-act="editCourse" data-id="${E(c.id)}">Edit</button></td></tr>`}).join('')}</tbody></table></div></div>`}
+function courseForm(c){const isNew=!c;c=c||{name:'',id:'',years:2,semesters:4,active:true};const has=!isNew&&db.students.some(s=>s.course===c.id);
+  return`<button class="btn x" data-act="close">Close</button><h2>${isNew?'Add course':'Edit '+E(c.name)}</h2><form data-form="course" ${isNew?'':`data-id="${E(c.id)}"`} class="form" style="margin-top:12px">
+   ${F('name','Course name',{val:c.name,req:true,ph:'e.g. Ph.D',attrs:'maxlength="30"'})}${isNew?F('code','Short code (used in enrolment no.)',{req:true,ph:'e.g. PHD',attrs:'maxlength="6" autocapitalize="characters"'}):`<div class="field"><span class="label">Code</span><div class="ro mono">${E(c.id)}</div></div>`}
+   ${F('years','Duration (years)',{val:c.years,opts:[1,2,3,4,5,6].map(n=>[n,n+(n>1?' years':' year')])})}
+   ${has?`<div class="field"><span class="label">Semesters</span><div class="ro">${c.semesters} <small class="muted">(fixed: students already added)</small></div></div>`:F('semesters','Semesters',{val:c.semesters,opts:[1,2,3,4,5,6,7,8,9,10,11,12].map(n=>[n,n])})}
+   ${isNew?F('fee','Default tuition fee per semester (₹)',{req:true,val:'30000',attrs:'inputmode="decimal"'}):`<label class="chk span"><input type="checkbox" name="active" ${c.active!==false?'checked':''}> Course is on (off = hidden when adding students)</label>`}
+   <p class="note span">${isNew?'After saving, give this course to a Principal and a Clerk in Staff logins. Fees per semester can be changed in Fees & receipts.':'Fees per semester are in Fees & receipts.'}</p>
+   <div class="actions span"><button class="btn primary">${isNew?'Add course':'Save'}</button></div></form>`}
+ACT.newCourse=()=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');drawer(courseForm(null),false,'Add course')};
+ACT.editCourse=el=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');drawer(courseForm(course(el.dataset.id)),false,'Edit course')};
+FORM.course=(f,d)=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const name=capText(d.name,'Course name',30);if(name.length<2)throw new Error('Enter the course name');
+  const years=+d.years;if(!(years>=1&&years<=6))throw new Error('Choose the duration');
+  if(db.courses.some(c=>c.name.toLowerCase()===name.toLowerCase()&&c.id!==f.dataset.id))throw new Error('A course with this name already exists');
+  if(!f.dataset.id){const id=String(d.code||'').trim().toUpperCase();if(!/^[A-Z]{2,6}$/.test(id))throw new Error('Code: 2 to 6 letters, e.g. PHD');if(course(id))throw new Error('This code is already used');
+    const sems=+d.semesters;if(!(sems>=1&&sems<=12))throw new Error('Choose the semesters');const fee=toPaise(d.fee);if(!(fee>=0)||fee>100000000)throw new Error('Enter a valid tuition fee');
+    const c={id,name,years,semesters:sems,active:true};db.courses.push(c);db.settings.feeDefault[id]=Array(sems).fill(fee);db.settings.dueDates[id]=Array(sems).fill('');
+    log('Course added','Course',id,null,{name,years,semesters:sems,fee:inr(fee)});save();closeLayer();renderApp();toast(name+' added. Now give it to a Principal and a Clerk in Staff logins.');return}
+  const c=course(f.dataset.id);const before={name:c.name,years:c.years,semesters:c.semesters,active:c.active!==false};c.name=name;c.years=years;c.active=!!d.active;
+  if(d.semesters&&!db.students.some(s=>s.course===c.id)){const n=+d.semesters;if(n>=1&&n<=12&&n!==c.semesters){c.semesters=n;const fd=db.settings.feeDefault[c.id]||[];db.settings.feeDefault[c.id]=Array.from({length:n},(_,i)=>fd[i]??fd[0]??0);const dd=db.settings.dueDates[c.id]||[];db.settings.dueDates[c.id]=Array.from({length:n},(_,i)=>dd[i]||'')}}
+  log('Course edited','Course',c.id,before,{name:c.name,years:c.years,semesters:c.semesters,active:c.active});save();closeLayer();renderApp();toast('Saved')};
 ACT.userToggle=el=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const u=db.users.find(x=>x.id===el.dataset.id);u.active=!u.active;log(u.active?'Login switched on':'Login switched off','User',u.username,{active:!u.active},{active:u.active});save();renderPage()};
 ACT.userPw=el=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const u=db.users.find(x=>x.id===el.dataset.id);const pw=tempPassword();u.password=pw;u.mustChange=true;log('Password reset','User',u.username);save();dialog(`<h3>New temporary password</h3><div class="panel" style="padding:12px"><div class="rline"><span>${E(u.username)}</span><b class="mono">${E(pw)}</b></div></div><div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn primary" data-act="closeDialog">Done</button></div>`,'Password reset',true)};
 function setMail(){const m=db.settings.mail;
@@ -2211,7 +2348,7 @@ function accountPanel(){return`<form class="panel" data-form="myPw"><h2>Change p
 FORM.myPw=(f,d)=>{const u=cur();if(d.old!==u.password)throw new Error('Current password is wrong');if(!pwOk(d.p1))throw new Error('Use at least 8 characters with a letter and a number');if(d.p1!==d.p2)throw new Error('The two new passwords are not the same');u.password=d.p1;log('Password changed','User',u.username);save();f.reset();toast('Password changed')};
 function staffProfileHtml(){const u=cur();const L=(k,v)=>`<div class="rline"><span>${k}</span><b style="font-weight:500;text-align:right;overflow-wrap:anywhere">${E(v||'-')}</b></div>`;
   return`<button class="btn x" data-act="close">Close</button><div class="who" style="margin:4px 0 14px"><div class="av lg">${E(initials(u.name))}</div><div><h2 style="margin:0">${E(u.name)}</h2><small class="muted">${E(u.role)}</small></div></div>
-  <div class="panel">${L('Username',u.username)}${L('Email',u.email)}${L('Last sign-in',fmtT(u.lastLoginAt))}</div><div class="panel" style="margin-top:12px"><h2>What you can open</h2><div class="actions">${navFor(u).map(n=>pill(n[1])).join('')}</div></div><div class="panel" style="margin-top:12px"><h2>App</h2><div id="profileInstall">${installPanelHtml()}</div></div><div style="margin-top:12px">${accountPanel()}</div>`}
+  <div class="panel">${L('Username',u.username)}${L('Email',u.email)}${L('Last sign-in',fmtT(u.lastLoginAt))}</div><div class="panel" style="margin-top:12px"><h2>What you can open</h2><div class="actions">${navFor(u).map(n=>pill(n[1])).join('')}</div></div><div class="panel" style="margin-top:12px"><h2>Notifications</h2><div id="notifyPanel">${notifyPanelHtml()}</div></div><div class="panel" style="margin-top:12px"><h2>App</h2><div id="profileInstall">${installPanelHtml()}</div></div><div style="margin-top:12px">${accountPanel()}</div>`}
 /* =====================================================================
    Student portal (spec §9): Home · Fees · Notices · Profile, installable PWA
    ===================================================================== */
@@ -2229,12 +2366,12 @@ function viewStudentHome(){
 }
 function viewStudentFees(){
   const s=me();const sm=feeSum(s);const pays=db.payments.filter(p=>p.studentId===s.id).sort((a,b)=>b.entryAt-a.entryAt);
-  return head('My fees',`Total ${inr(sm.total)} · paid ${inr(sm.paid)} · due now ${inr(sm.payable)}`)+semCards(s,{pay:true})+
-  `<div class="panel" style="margin-top:16px"><h2>Receipts</h2><div class="list">${pays.map(p=>`<div class="li"><div><b>${E(p.rc)} · ${inr(p.amount)}</b><small>Batch ${E(batchOf(p))} · Semester ${p.sem} · ${modeName(p.mode)} · invoice ${fmtD(p.invoiceDate)}</small></div><div class="actions nowrap">${p.status==='SUCCESS'?'':payPill(p.status)}<button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button><button class="btn sm" data-act="dlPdf" data-id="${E(p.id)}">PDF</button></div></div>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
+  return head('My fees',`Tuition fee: total ${inr(sm.total)} · paid ${inr(sm.paid)} · due now ${inr(sm.payable)}`)+semCards(s,{pay:true})+
+  `<div class="panel" style="margin-top:16px"><h2>Receipts</h2><div class="list">${pays.map(p=>`<div class="li"><div><b>${E(p.rc)} · ${inr(p.amount)}</b><small>Tuition fee · Semester ${p.sem} · Batch ${E(batchOf(p))} · invoice ${fmtD(p.invoiceDate)}</small></div><div class="actions nowrap">${p.status==='SUCCESS'?'':payPill(p.status)}<button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button><button class="btn sm" data-act="dlPdf" data-id="${E(p.id)}">PDF</button></div></div>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
   <p class="note">Paying with UPI: your receipt is ready as soon as the bank confirms. Its invoice date is the next day (college rule).</p>`;
 }
 ACT.payNow=el=>{const s=me();const m=semSummary(s,+el.dataset.sem);if(!(m.due>0))throw new Error('Nothing due for this semester');
-  dialog(`<h3>Pay semester ${m.sem} fee</h3><p class="muted" style="margin:0 0 10px">Due ${inr(m.due)}. You can pay the full amount or a part.</p>
+  dialog(`<h3>Pay semester ${m.sem} tuition fee</h3><p class="muted" style="margin:0 0 10px">Due ${inr(m.due)}. You can pay the full amount or a part.</p>
    <form data-form="upiPay" data-sem="${m.sem}" class="grid" style="gap:10px">${F('amount','Amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}"`})}
    <p class="note" style="margin:0">Invoice date will be ${fmtD(upiInvoiceDate(Date.now()))}.</p><div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Cancel</button><button class="btn primary">Continue to UPI</button></div></form>`,'Pay fee')};
 function viewStudentNotices(){
@@ -2249,26 +2386,25 @@ ACT.readAllNotices=()=>{const u=cur();const s=me();u.readNotices=studentNotices(
 function viewStudentProfile(){
   const s=me();const L=(k,v)=>`<div><span class="label">${E(k)}</span><b>${E(v||'—')}</b></div>`;const perm='Notification' in window?Notification.permission:'unsupported';
   return head('My profile',s.enrol)+`<div class="grid two-col"><div class="panel"><div class="who" style="margin-bottom:12px">${avatar(s)}<div><b>${E(s.name)}</b><small class="muted" style="display:block">${E(classLabel(s))}</small></div></div>
-   <div class="facts">${L('Enrolment no.',s.enrol)}${L('Course',course(s.course).name)}${L('Semester',s.sem)}${L('Admission year',s.admissionYear)}${L('Category',s.category)}${L('Email',s.email)}${L('Date of birth',fmtD(s.dob))}${L('Address',s.address)}</div>
+   <div class="facts">${L('Enrolment no.',s.enrol)}${L('Course',course(s.course).name)}${L('Semester',s.sem)}${L('Batch',defaultBatch(s))}${L('Category',s.category)}${L('Email',s.email)}${L('Date of birth',fmtD(s.dob))}${L('Address',s.address)}</div>
    <form data-form="myPhone" class="form" style="margin-top:8px">${F('phone','Mobile',{type:'tel',val:s.phone,attrs:'maxlength="10" inputmode="numeric"'})}<div class="field" style="justify-content:flex-end"><button class="btn">Update mobile</button></div></form>
    <p class="note">To change other details, contact the college office.</p></div>
    <div class="grid" style="align-content:start">${accountPanel()}
-    <div class="panel"><h2>Notifications</h2><p class="note" style="margin:0 0 8px">Get a popup on this phone for fee alerts and notices, even when the app is closed.</p>
-     <div class="rline"><span>Phone popups</span><b>${perm==='granted'?'On':perm==='denied'?'Blocked in browser settings':perm==='unsupported'?'Not supported here':'Off'}</b></div>
-     ${perm==='default'?'<button class="btn primary" data-act="askNotify">Turn on notifications</button>':''}
-     <label class="chk" style="margin-top:8px"><input type="checkbox" data-change="mute" ${muted()?'':'checked'}> Sound for live notifications</label></div>
+    <div class="panel"><h2>Notifications</h2><div id="notifyPanel">${notifyPanelHtml()}</div></div>
     <div class="panel"><h2>App</h2><div id="profileInstall">${installPanelHtml()}</div></div>
     <button class="btn danger" data-act="logout">Sign out</button></div></div>`;
 }
 FORM.myPhone=(f,d)=>{const s=me();const ph=String(d.phone||'').replace(/\D/g,'');if(!/^[6-9]\d{9}$/.test(ph))throw new Error('Enter a 10-digit mobile number');const old=s.phone;s.phone=ph;const u=cur();u.phone=ph;log('Student changed mobile','Student',s.enrol,{phone:old},{phone:ph});
-  notify('system',`${s.name} changed mobile`,`${old} → ${ph}`,{roles:['Principal','Clerk'],staff:'students'});save();renderPage();toast('Mobile updated')};
+  notify('system',`${s.name} changed mobile`,`${old} → ${ph}`,{sid:s.id,roles:['Principal','Clerk'],staff:'students'});save();renderPage();toast('Mobile updated')};
 
 /* ---------- notification permission (install logic lives in p7_pwa.js) ---------- */
 function askNotifyGently(){if(!('Notification' in window)||Notification.permission!=='default'||lsGet('npcte_ask_notify')==='1')return;lsSet('npcte_ask_notify','1');
   dialog(`<h3>Get fee alerts and notices?</h3><p class="muted" style="margin:0 0 12px">NPCTE can show a popup on this device when a payment is received, a fee is due, or the college posts a notice. You can turn this off any time.</p><div class="actions" style="justify-content:flex-end"><button class="btn" data-act="closeDialog">Not now</button><button class="btn primary" data-act="askNotify">Allow notifications</button></div>`,'Notifications')}
 ACT.askNotify=async()=>{closeDialog();if(!('Notification' in window))throw new Error('This browser does not support notifications');const r=await Notification.requestPermission();
-  if(r==='granted'){toast('Notifications on');try{const reg=navigator.serviceWorker&&await navigator.serviceWorker.ready;if(reg)reg.showNotification('Notifications are on',{body:'You will get NPCTE fee alerts and notices here.',icon:'/icons/icon-192.png'})}catch(e){}}else toast('Notifications not allowed',true);if(ui.route==='sprofile')renderPage()};
+  if(r==='granted'){toast('Notifications on');showPopup('Notifications are on','You will get NPCTE fee alerts and notices here.','on')}else toast('Notifications not allowed',true);const np=$('#notifyPanel');if(np)np.innerHTML=notifyPanelHtml();if(ui.route==='sprofile')renderPage()};
 if('serviceWorker' in navigator&&location.protocol!=='file:')addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+ACT.testPop=el=>{const d=+el.dataset.d||0;const u=cur();const run=()=>showPopup('NPCTE · test notification',`Hello ${u?u.name:''}, popups work on this device.`,'test-'+Date.now()).then(ok=>{if(!ok)toast('Could not show a popup. Check the notification settings.',true)});
+  if(d){toast(`Popup in ${d} seconds. Lock the phone now.`);setTimeout(run,d*1000)}else run()};
 /* =====================================================================
    Install as an app (PWA) — for every login and on the sign-in screen.
    Phone: a banner + a button in the top bar. Computer (Chrome / Edge): an
@@ -2334,8 +2470,8 @@ if('serviceWorker' in navigator&&location.protocol!=='file:')addEventListener('l
    Dashboard (spec §4): KPI cards, 4 charts, lists. Every card and chart links to the list behind it.
    Charts are plain SVG (no library; works offline and under the strict CSP).
    ===================================================================== */
-const live=()=>db.students.filter(s=>s.status==='ACTIVE');
-const okP=()=>db.payments.filter(p=>p.status==='SUCCESS');
+const live=()=>vStudents().filter(s=>s.status==='ACTIVE');
+const okP=()=>vPayments().filter(p=>p.status==='SUCCESS');
 const J=o=>E(JSON.stringify(o));
 const kpi=(label,v,sub,to,sub2,f,tone)=>`<button class="kpi ${tone||''}" data-act="goto" data-to="${E(to)}" ${sub2?`data-sub="${E(sub2)}"`:''} ${f?`data-f="${J(f)}"`:''}><span class="label">${E(label)}</span><div class="v">${E(v)}</div><div class="s">${E(sub)}</div></button>`;
 function monthKeys(n){const T=today();let y=+T.slice(0,4),m=+T.slice(5,7);const out=[];for(let i=0;i<n;i++){out.unshift(`${y}-${pad(m)}`);m--;if(!m){m=12;y--}}return out}
@@ -2356,7 +2492,7 @@ function barsH(items){/* items: [label, value, cls, link{to,sub,f}] */
   return`<div class="hbars">${items.map(([l,v,c,k])=>`<button class="hb" data-act="goto" data-to="${E(k.to)}" ${k.sub?`data-sub="${E(k.sub)}"`:''} data-f="${J(k.f)}"><span class="hl">${E(l)}</span><span class="ht"><i class="${E(c||'')}" style="width:${Math.max(v?2:0,v/max*100)}%"></i></span><b class="hv">${typeof v==='number'&&k.money?inr(v):E(String(v))}</b></button>`).join('')}</div>`;
 }
 function groupedBars(){
-  const W=640,H=230,L=56,R=12,T=14,B=44;const cs=db.courses;
+  const W=640,H=230,L=56,R=12,T=14,B=44;const cs=scopeCourses();const SEMS=SEMS_ALL();
   const data=SEMS.map(n=>cs.map(c=>sum(live().filter(s=>s.course===c.id),s=>{const m=semSummary(s,n);return m.started?m.due:0})));
   const max=Math.max(1,...data.flat());const nice=Math.pow(10,Math.floor(Math.log10(max)));const top=Math.ceil(max/nice)*nice;
   const gw=(W-L-R)/SEMS.length,bw=Math.min(36,(gw-24)/cs.length),y=v=>T+(H-T-B)*(1-v/top);

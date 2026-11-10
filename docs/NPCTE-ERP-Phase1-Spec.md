@@ -52,6 +52,13 @@ Folder layout:
 - Permissions are stored per role (matrix screen under Settings → Roles & Permissions, editable by Super Admin/Principal) and checked **on the server**, not only by hiding buttons.
 - Super Admin can create additional Clerk logins.
 
+### 2.1 Courses and course scope
+- **Courses** (B.Ed, M.Ed, and any new one such as PhD) are managed by the Super Admin in Settings → Courses: name, short code (used in enrolment no.), duration in years, number of semesters, default tuition fee per semester, on/off.
+- Every Principal / Clerk login is assigned **one or more courses** (Settings → Staff logins → Courses). Examples: one Principal for B.Ed and another for M.Ed; one Clerk for both.
+- A login sees and changes **only students, payments, receipts, dues, notices, dashboard figures, audit rows and notifications of its own courses**. Opening another course's student returns 403. The Super Admin sees every course.
+- **Course switch in the top bar** (for logins with 2+ courses): *All courses* (default) / B.Ed / M.Ed / … — every screen is filtered to the chosen course. The server applies the same filter on every query (`courseId IN (user's courses)`).
+- **Batch** = a course's admission year + duration, e.g. B.Ed `2025-27`. It is a dropdown (8 years back to 1 year ahead), pre-filled from the student and required on every receipt.
+
 ---
 
 ## 3. Data model (minimum)
@@ -94,9 +101,9 @@ Principal & Super Admin see the full dashboard; Clerk sees a fee-focused version
 
 ## 5. Module: Fee Collection
 
-Keep it to **4 tabs** (replace the demo's 8–9). There is **no separate Expenses section**: an expense is only recorded as a student fee taken **By Expense** (§5.3).
+Keep it to **4 tabs** (replace the demo's 8–9). There is **no separate Expenses section**: an expense is only recorded as a student fee taken **By Expense** (§5.3). **Only tuition fee** is collected (no other fee heads for now).
 
-1. **Collect payment**
+1. **Collect fee** — every student of the selected course(s), one row each (cards on a phone): name, enrolment no., course · semester, batch, a cell per semester (Paid ✓ / ₹ due / part paid / overdue / upcoming), total paid, due now and a **Collect** button. Filters: search, course, batch, semester, status. Collect opens a panel: pick the semester → **Mode of payment dropdown** (Cash / Cheque / UPI / Expense) → amount, batch dropdown, mode fields → save → receipt.
 2. **Pending dues**
 3. **Receipts** (all payments, cancel with reason)
 4. **Fee setup** (Principal/Super Admin only: default fee per course × semester, receipt prefix, UPI settings)
@@ -188,6 +195,8 @@ Two parts:
 - WhatsApp/SMS: **not in Phase 1** — keep a `MessageChannel` interface so it can be added later.
 
 ## 9. Student Portal (PWA — installable app)
+
+- The student sees **bills only**: receipt no., invoice date, tuition fee, semester, batch, amount and balance. The **mode of payment (Cash / Cheque / UPI / Expense) and office notes are not shown** to the student, in the portal, the PDF or the email.
 
 Same website, installable like the ABCD learning app:
 - `manifest.json` (name "NPCTE", icons 192/512, theme colour, `display: standalone`), service worker, offline fallback page.

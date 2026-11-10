@@ -2,8 +2,8 @@
    Dashboard (spec §4): KPI cards, 4 charts, lists. Every card and chart links to the list behind it.
    Charts are plain SVG (no library; works offline and under the strict CSP).
    ===================================================================== */
-const live=()=>db.students.filter(s=>s.status==='ACTIVE');
-const okP=()=>db.payments.filter(p=>p.status==='SUCCESS');
+const live=()=>vStudents().filter(s=>s.status==='ACTIVE');
+const okP=()=>vPayments().filter(p=>p.status==='SUCCESS');
 const J=o=>E(JSON.stringify(o));
 const kpi=(label,v,sub,to,sub2,f,tone)=>`<button class="kpi ${tone||''}" data-act="goto" data-to="${E(to)}" ${sub2?`data-sub="${E(sub2)}"`:''} ${f?`data-f="${J(f)}"`:''}><span class="label">${E(label)}</span><div class="v">${E(v)}</div><div class="s">${E(sub)}</div></button>`;
 function monthKeys(n){const T=today();let y=+T.slice(0,4),m=+T.slice(5,7);const out=[];for(let i=0;i<n;i++){out.unshift(`${y}-${pad(m)}`);m--;if(!m){m=12;y--}}return out}
@@ -24,7 +24,7 @@ function barsH(items){/* items: [label, value, cls, link{to,sub,f}] */
   return`<div class="hbars">${items.map(([l,v,c,k])=>`<button class="hb" data-act="goto" data-to="${E(k.to)}" ${k.sub?`data-sub="${E(k.sub)}"`:''} data-f="${J(k.f)}"><span class="hl">${E(l)}</span><span class="ht"><i class="${E(c||'')}" style="width:${Math.max(v?2:0,v/max*100)}%"></i></span><b class="hv">${typeof v==='number'&&k.money?inr(v):E(String(v))}</b></button>`).join('')}</div>`;
 }
 function groupedBars(){
-  const W=640,H=230,L=56,R=12,T=14,B=44;const cs=db.courses;
+  const W=640,H=230,L=56,R=12,T=14,B=44;const cs=scopeCourses();const SEMS=SEMS_ALL();
   const data=SEMS.map(n=>cs.map(c=>sum(live().filter(s=>s.course===c.id),s=>{const m=semSummary(s,n);return m.started?m.due:0})));
   const max=Math.max(1,...data.flat());const nice=Math.pow(10,Math.floor(Math.log10(max)));const top=Math.ceil(max/nice)*nice;
   const gw=(W-L-R)/SEMS.length,bw=Math.min(36,(gw-24)/cs.length),y=v=>T+(H-T-B)*(1-v/top);

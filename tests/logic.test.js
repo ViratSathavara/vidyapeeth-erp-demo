@@ -64,4 +64,20 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  ok(/2025-27/.test(A.receiptHtml(pe))&&/Exam fees/.test(A.receiptHtml(pe)),'receipt shows batch + reason');
  A.ui.f['audit.tx']={modes:['EXPENSE']};ok(A.txFiltered().some(r=>r.id===pe.id&&r.batch==='2025-27'),'audit has expense fee');
  ok(A.receiptPdf(pe).startsWith('%PDF'),'expense pdf');}
+// ---- course scope (B.Ed / M.Ed principals, one clerk for both, Super Admin all) ----
+{const bed=db.students.filter(x=>x.course==='BED').length,med=db.students.filter(x=>x.course==='MED').length;
+ login('principal');A.setPickedCourse('');ok(A.vStudents().length===bed&&A.vStudents().every(x=>x.course==='BED'),'B.Ed principal sees only B.Ed');
+ const ms=db.students.find(x=>x.course==='MED');threw=false;try{A.guardStudent(ms.id)}catch(e){threw=true}ok(threw,'B.Ed principal blocked from M.Ed student');
+ ok(A.vPayments().every(p=>db.students.find(x=>x.id===p.studentId).course==='BED'),'B.Ed principal payments scoped');
+ login('principalmed');ok(A.vStudents().length===med,'M.Ed principal sees only M.Ed');
+ login('clerk');A.setPickedCourse('');ok(A.vStudents().length===bed+med,'clerk sees both');A.setPickedCourse('MED');ok(A.vStudents().length===med,'course switch narrows to M.Ed');
+ A.setPickedCourse('');login('principal');A.setPickedCourse('MED');ok(A.vStudents().length===bed,'cannot switch to a course not assigned');A.setPickedCourse('');
+ ok(A.batchOptions('BED').includes('2025-27')&&A.batchOptions('BED').includes('2026-28'),'batch dropdown options');
+ login('admin');ok(A.myCourses().length===2,'admin all courses');
+ const fake={dataset:{}};try{A.FORM.course(fake,{name:'Ph.D',code:'PHD',years:'3',semesters:'6',fee:'40000'})}catch(e){if(!/firstElementChild|null/.test(e.message))console.log('course err',e.message)}ok(db.courses.some(c=>c.id==='PHD')&&A.semsOf('PHD').length===6&&A.batchOptions('PHD')[0].length===7,'add PhD course');
+ ok(/Ph\.D/.test(A.setCourses()),'courses tab lists PhD');ok(/Courses/.test(A.setUsers()),'staff logins show courses');
+ for(const un of ['admin','principal','clerk']){login(un);for(const fn of ['viewDashboard','feeCollect']){try{A[fn]()}catch(e){ok(false,un+' '+fn+': '+e.message)}}}
+ login('clerk');ok(A.colRows().length===db.students.filter(x=>x.status==='ACTIVE').length,'collect list shows every active student');
+ const pp=db.payments.find(p=>p.status==='SUCCESS');const su=db.users.find(u=>u.studentId===pp.studentId);A.sesSet(su.id);ok(!/>Mode</.test(A.receiptHtml(pp))&&/Tuition fee/.test(A.receiptHtml(pp)),'student receipt hides mode, shows tuition fee');
+ login('clerk');ok(/>Mode</.test(A.receiptHtml(pp)),'office receipt shows mode');}
 console.log('pass',pass,'fail',fail);

@@ -4,7 +4,7 @@
    Spec: docs/NPCTE-ERP-Phase1-Spec.md. Money is stored as integer paise.
    Dates are kept as ISO yyyy-mm-dd (Asia/Kolkata) and shown as DD-MM-YYYY.
    ===================================================================== */
-const LS_KEY='npcte_erp_v1', SES_KEY='npcte_erp_session_v1', THEME_KEY='npcte_erp_theme', DB_VER=1;
+const LS_KEY='npcte_erp_v1', SES_KEY='npcte_erp_session_v1', THEME_KEY='npcte_erp_theme', DB_VER=2;
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 /* inr takes PAISE */
@@ -54,6 +54,8 @@ function migrate(){
   const s=db.settings;s.flags=Object.assign({fundingAllCategories:false,lateFee:false},s.flags||{});delete s.flags.expenseReducesDue;delete s.expenseCats;
   if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no separate expense ledger: an expense is a fee taken By Expense */
   if(!db.enquiries)db.enquiries=[];
+  db.courses.forEach(c=>{if(!c.years)c.years=Math.max(1,Math.ceil((c.semesters||4)/2));if(c.active===undefined)c.active=true});
+  db.users.forEach(u=>{if(STAFF_ROLES.includes(u.role)&&!Array.isArray(u.courses))u.courses=db.courses.map(c=>c.id)});
 }
 const NAME_MAX=80;
 const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)throw new Error(`${label} is too long (${v.length} characters; the limit is ${max}).`);return v};
@@ -79,7 +81,7 @@ const canAny=(...p)=>p.some(can);
 const need=(p,what)=>{if(!can(p))throw new Error('You do not have access'+(what?' to '+what:''))};
 const isStudentUser=u=>!!u&&u.role==='Student';
 /* a student login may open only its own record (spec §14: another student's id -> 403) */
-const mayStudent=id=>{const u=cur();if(!u)return false;if(u.role==='Student')return !!id&&u.studentId===id;return can('students.view')};
+const mayStudent=id=>{const u=cur();if(!u)return false;if(u.role==='Student')return !!id&&u.studentId===id;const s=stu(id);return can('students.view')&&!!s&&mayCourse(s.course)};
 function guardStudent(id){if(!mayStudent(id))throw new Error('403 · You can only open your own record')}
 
 /* ---------- lookups ---------- */
@@ -88,6 +90,27 @@ const course=id=>db.courses.find(c=>c.id===id);
 const CATS=['General','OBC','SC','ST','EWS'];
 const fundingApplies=cat=>db.settings.flags.fundingAllCategories||cat==='SC'||cat==='ST';
 const classLabel=s=>`${course(s.course).name} · Sem ${s.sem}`;
+/* semesters of a course (B.Ed / M.Ed = 4; a new course such as PhD can have more) */
+const semsOf=cid=>{const c=course(cid);return Array.from({length:c?c.semesters:4},(_,i)=>i+1)};
+
+/* ---------- course scope ----------
+   Super Admin: every course. Principal / Clerk: only the courses the Super Admin assigned to that login.
+   The course switch in the top bar (All / B.Ed / M.Ed) narrows every screen further. The real server applies the same filter on every query. */
+const SCOPE_KEY='npcte_erp_course';
+const myCourses=()=>{const u=cur();if(!u)return[];if(u.role==='Super Admin')return db.courses.map(c=>c.id);
+  if(u.role==='Student'){const s=stu(u.studentId);return s?[s.course]:[]}return(u.courses||[]).filter(id=>course(id))};
+const pickedCourse=()=>{let v='';try{v=sessionStorage.getItem(SCOPE_KEY)||''}catch(e){v=memStore[SCOPE_KEY]||''}return myCourses().includes(v)?v:''};
+function setPickedCourse(v){try{v?sessionStorage.setItem(SCOPE_KEY,v):sessionStorage.removeItem(SCOPE_KEY)}catch(e){memStore[SCOPE_KEY]=v}}
+const scopeIds=()=>{const p=pickedCourse();return p?[p]:myCourses()};
+const inScope=cid=>scopeIds().includes(cid);
+const mayCourse=cid=>myCourses().includes(cid);
+const scopeCourses=()=>db.courses.filter(c=>inScope(c.id));
+const vStudents=()=>db.students.filter(s=>inScope(s.course));
+const payCourse=p=>(stu(p.studentId)||{}).course;
+const vPayments=()=>db.payments.filter(p=>inScope(payCourse(p)));
+const scopeLabel=()=>{const p=pickedCourse();return p?course(p).name:myCourses().length===db.courses.length?'All courses':myCourses().map(id=>course(id).name).join(' + ')};
+const maxSems=()=>Math.max(4,...scopeCourses().map(c=>c.semesters));
+const SEMS_ALL=()=>Array.from({length:maxSems()},(_,i)=>i+1);
 
 /* ---------- audit log: every action with before / after ---------- */
 const device=()=>{const ua=navigator.userAgent;const t=/Mobi|Android|iPhone/i.test(ua)?'Phone':'Desktop';const b=/Edg\//.test(ua)?'Edge':/Chrome\//.test(ua)?'Chrome':/Firefox\//.test(ua)?'Firefox':/Safari\//.test(ua)?'Safari':'Browser';return t+' · '+b};
@@ -116,7 +139,7 @@ function semSummary(s,n){
   return{sem:n,amount,paid,adj,due,dueDate,started,overdue,status};
 }
 function feeSum(s){
-  const sems=[1,2,3,4].map(n=>semSummary(s,n));
+  const sems=semsOf(s.course).map(n=>semSummary(s,n));
   const cur_=sems.filter(x=>x.started);
   return{sems,total:sum(sems,x=>x.amount),paid:sum(sems,x=>x.paid),payable:s.status==='ACTIVE'?sum(cur_,x=>x.due):0,upcoming:sum(sems.filter(x=>!x.started),x=>x.due),overdue:cur_.some(x=>x.overdue)};
 }
@@ -126,7 +149,11 @@ function feeSum(s){
 const upiInvoiceDate=paidAt=>addDays(istDate(paidAt),1);
 function nextReceiptNo(){const c=db.college;const n=c.nextReceipt++;return`${c.receiptPrefix}${pad(n,4)}`}
 /* batch = the student's 2-year course batch, typed by the clerk on every receipt, e.g. 2025-27 */
-const defaultBatch=s=>s&&s.admissionYear?`${s.admissionYear}-${String(s.admissionYear+2).slice(2)}`:'';
+const courseYears=cid=>(course(cid)||{}).years||2;
+const batchLabel=(cid,y)=>`${y}-${String(+y+courseYears(cid)).slice(2)}`;
+const defaultBatch=s=>s&&s.admissionYear?batchLabel(s.course,s.admissionYear):'';
+/* batch dropdown: 8 years back to 2 years ahead, newest first */
+function batchOptions(cid){const y=+today().slice(0,4);const out=[];for(let a=y+1;a>=y-8;a--)out.push(batchLabel(cid,a));return out}
 const batchOf=p=>p.batch||defaultBatch(stu(p.studentId));
 function cleanBatch(v){const t=String(v||'').replace(/\s+/g,'').replace(/[–—\/]/g,'-');
   const m=t.match(/^(20\d{2})-(\d{2}|20\d{2})$/);if(!m)throw new Error('Enter the batch like 2025-27');
@@ -177,7 +204,7 @@ function makeStudent(d){
   const s={id:uid('s'),enrol:d.enrol||nextEnrol(d.course,d.admissionYear),name:d.name,gender:d.gender||'',dob:d.dob||'',phone:d.phone||'',email:d.email||'',address:d.address||'',photo:d.photo||'',
     course:d.course,admissionYear:+d.admissionYear,sem:+d.sem||1,category:d.category||'General',funding:d.funding||'CASH',scholarshipNote:d.scholarshipNote||'',status:d.status||'ACTIVE',
     createdBy:d.createdBy||'System',createdAt:d.createdAt||Date.now(),
-    fees:[1,2,3,4].map(n=>({sem:n,amount:d.fees?d.fees[n-1]:db.settings.feeDefault[d.course][n-1],due:d.dues?d.dues[n-1]:defaultDue(d.course,d.admissionYear,n)}))};
+    fees:semsOf(d.course).map(n=>({sem:n,amount:d.fees?d.fees[n-1]:(db.settings.feeDefault[d.course]||[])[n-1]||0,due:d.dues?d.dues[n-1]:defaultDue(d.course,d.admissionYear,n)}))};
   if(!fundingApplies(s.category))s.funding='CASH';
   return s;
 }
@@ -197,12 +224,13 @@ function seed(){
       upi:{provider:'Razorpay',vpa:'npcte@okaxis',mode:'Sandbox',googlePay:false},
       mail:{mode:'demo',fromName:"NPCTE Accounts",replyTo:'npcte@yahoo.co.in',sendReceipts:true,sendCredentials:true},
       sound:true},
-    courses:[{id:'BED',name:'B.Ed',semesters:4},{id:'MED',name:'M.Ed',semesters:4}],
+    courses:[{id:'BED',name:'B.Ed',semesters:4,years:2,active:true},{id:'MED',name:'M.Ed',semesters:4,years:2,active:true}],
     roles:DEFAULT_ROLES(),
     users:[
       {id:'u_admin',role:'Super Admin',name:'Virat Sathavara',username:'admin',email:'admin@npcte.org',phone:'',password:'admin123',mustChange:false,active:true,lastLoginAt:0},
-      {id:'u_prin',role:'Principal',name:'Principal, NPCTE',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0},
-      {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0}],
+      {id:'u_prin',role:'Principal',name:'Principal, B.Ed',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['BED']},
+      {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
+      {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
     students:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],outbox:[],upiOrders:[],enquiries:[],
     counters:{enrol:{},exp:1}};
   /* sample names only (demo) */
@@ -228,7 +256,7 @@ function seed(){
     else if(i%5===2)mk(s,1,'CHEQUE',Math.round(f1/2),4+i,{f:{chequeNo:String(100200+i),bank:['SBI','Bank of Baroda','Mehsana Urban Co-op Bank'][i%3],chequeDate:addDays(today(),-6-i)}});
     else if(i%5===3)mk(s,1,'CASH',1500000,1+i);
     else if(i%10===4)mk(s,1,'EXPENSE',1000000,5+i,{f:{reason:['Exam form fees paid to the university','Practice-teaching school material'][i%2]}});
-    if(s.sem===3){mk(s,2,i%2?'UPI':'CASH',semFee(s,2).amount,60+i);mk(s,1,'CASH',f1,200+i)}
+    if(s.sem===3){mk(s,2,i%2?'UPI':'CASH',semFee(s,2).amount,60+i);const r1=semSummary(s,1).due;if(r1>0)mk(s,1,'CASH',r1,200+i)}
   });
   /* one cancelled receipt */
   const pc=db.payments.find(p=>p.mode==='CASH');if(pc){const s=stu(pc.studentId);const extra={id:uid('p'),studentId:s.id,sem:pc.sem,mode:'CASH',amount:500000,invoiceDate:addDays(today(),-9),entryAt:Date.now()-9*864e5,paidAt:Date.now()-9*864e5,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'CANCELLED',cancelReason:'Entered twice by mistake',cancelledAt:Date.now()-9*864e5+6e5,cancelledBy:by.name,rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:by.name,byId:by.id,dateEdits:[]};db.payments.push(extra)}

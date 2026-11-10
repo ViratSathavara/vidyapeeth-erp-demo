@@ -14,7 +14,7 @@ http.createServer((req,res)=>{
   if(url.pathname==='/api/send-receipt'&&mail){res.setHeader('Access-Control-Allow-Origin',`http://${req.headers.host}`);return mail(req,res)}
   let p=decodeURIComponent(url.pathname);if(p.endsWith('/'))p+='index.html';if(p==='/')p='/index.html';
   const f=path.normalize(path.join(ROOT,p));
-  const PUBLIC=['index.html','manifest.webmanifest','sw.js','offline.html','icons/icon-192.png','icons/icon-512.png','icons/maskable-512.png','icons/apple-touch-icon.png'].map(x=>path.join(ROOT,x));
+  const PUBLIC=['index.html','manifest.webmanifest','sw.js','offline.html','icons/icon-192.png','icons/icon-512.png','icons/maskable-512.png','icons/apple-touch-icon.png','icons/badge-96.png'].map(x=>path.join(ROOT,x));
   const allowed=PUBLIC.includes(f); /* only the app files are public: src, api and config files are not served */
   if(!allowed){res.writeHead(404,{'Content-Type':'text/plain'});return res.end('Not found')}
   fs.readFile(f,(e,b)=>{if(e){res.writeHead(404);return res.end('Not found')}

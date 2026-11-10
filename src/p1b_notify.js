@@ -26,7 +26,9 @@ const audienceLabel=a=>!a||a.type==='all'?'All students':a.type==='course'?cours
 function ntRecipients(o){
   const out=new Map();const act=cur();
   (o.users||[]).forEach(id=>{const u=db.users.find(x=>x.id===id&&x.active);if(u)out.set(u.id,u)});
-  (o.roles||[]).forEach(r=>db.users.filter(u=>u.active&&u.role===r).forEach(u=>out.set(u.id,u)));
+  /* staff only hear about students of their own courses */
+  const oc=o.course||(o.sid&&stu(o.sid)?stu(o.sid).course:'');
+  (o.roles||[]).forEach(r=>db.users.filter(u=>u.active&&u.role===r&&(!oc||u.role==='Super Admin'||(u.courses||[]).includes(oc))).forEach(u=>out.set(u.id,u)));
   const sids=o.students||(o.audience?audienceStudents(o.audience).map(s=>s.id):[]);
   sids.forEach(id=>{const s=stu(id);const u=s&&db.users.find(x=>x.id===s.userId&&x.active);if(u)out.set(u.id,u)});
   if(act&&!o.self)out.delete(act.id);
@@ -78,11 +80,24 @@ function ding(){
   try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();const t=audioCtx.currentTime;
     [[880,0],[1320,.12]].forEach(([f,d])=>{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(.0001,t+d);g.gain.exponentialRampToValueAtTime(.18,t+d+.02);g.gain.exponentialRampToValueAtTime(.0001,t+d+.25);o.connect(g);g.connect(audioCtx.destination);o.start(t+d);o.stop(t+d+.3)})}catch(e){}
 }
-function sysPopup(n){
-  try{if(!('Notification' in window)||Notification.permission!=='granted'||!document.hidden)return;
-    const show=()=>{const x=new Notification(n.t,{body:n.x||'',tag:n.id,icon:'/icons/icon-192.png'});x.onclick=()=>{window.focus();x.close()}};
-    if(navigator.serviceWorker&&navigator.serviceWorker.controller)navigator.serviceWorker.ready.then(r=>r.showNotification(n.t,{body:n.x||'',tag:n.id,icon:'/icons/icon-192.png',badge:'/icons/icon-192.png'})).catch(show);else show()}catch(e){}
-}
+/* phone / desktop popup. Android only allows popups through the service worker (new Notification() throws there),
+   so the service worker is always used when it is ready. vibrate + renotify make Android treat it as an alert, not a silent entry. */
+const POP_OPTS=(body,tag,link)=>({body:body||'',tag,renotify:true,requireInteraction:false,silent:false,vibrate:[200,100,200],icon:'/icons/icon-192.png',badge:'/icons/badge-96.png',timestamp:Date.now(),data:{link:link||'/'}});
+async function showPopup(title,body,tag,link){
+  if(!('Notification' in window)||Notification.permission!=='granted')return false;
+  try{const reg=navigator.serviceWorker&&await Promise.race([navigator.serviceWorker.ready,new Promise(r=>setTimeout(()=>r(null),3000))]);
+    if(reg){await reg.showNotification(title,POP_OPTS(body,tag,link));return true}
+    const x=new Notification(title,POP_OPTS(body,tag,link));x.onclick=()=>{window.focus();x.close()};return true}catch(e){return false}}
+function sysPopup(n){if(!document.hidden)return;showPopup(n.t,n.x,n.id)}
+/* "Test notification" on every profile: shows a popup now, or after 10 s so the phone can be locked first */
+function notifyPanelHtml(){const perm=!('Notification' in window)?'unsupported':Notification.permission;
+  return`<p class="note" style="margin:0 0 8px">Popups for payments, fee alerts and notices on this device.</p>
+   <div class="rline"><span>Popups on this device</span><b>${perm==='granted'?'On':perm==='denied'?'Blocked in phone settings':perm==='unsupported'?'Not supported here':'Off'}</b></div>
+   ${perm==='default'?'<button class="btn primary" data-act="askNotify">Turn on notifications</button>':''}
+   ${perm==='granted'?'<div class="actions" style="margin-top:8px"><button class="btn" data-act="testPop" data-d="0">Test popup now</button><button class="btn" data-act="testPop" data-d="10">Test in 10 seconds (lock the phone)</button></div>':''}
+   ${perm==='denied'?'<p class="note">Open the phone Settings → Apps → NPCTE (or your browser) → Notifications, and allow them.</p>':''}
+   <label class="chk" style="margin-top:8px"><input type="checkbox" data-change="mute" ${muted()?'':'checked'}> Sound for live notifications</label>
+   <details class="note" style="margin-top:8px"><summary>No popup on the lock screen?</summary><p>Android: Settings → Apps → NPCTE (or Chrome / Samsung Internet) → Notifications → turn on <b>Pop on screen</b> / <b>Alert</b> and <b>Lock screen</b>. Also allow the app in Battery → <b>Unrestricted</b>.<br>iPhone: add the app to the Home Screen from Safari first; then Settings → Notifications → NPCTE → Lock Screen + Banners.</p></details>`}
 /* a toast that names the notification and opens it on tap */
 function liveToast(n){
   const box=document.getElementById('livebox')||(()=>{const b=document.createElement('div');b.id='livebox';b.setAttribute('aria-live','polite');document.body.appendChild(b);return b})();
