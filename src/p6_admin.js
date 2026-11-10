@@ -57,10 +57,10 @@ ACT.openAtt=el=>{const n=db.notices.find(x=>x.id===el.dataset.id);if(!n||!n.atta
 
 /* ---------- audit ---------- */
 function viewAudit(){
-  const tabs=[];if(can('audit.view'))tabs.push(['tx','Transactions'],['deposit','Cash & cheque deposit']);if(can('activity.view'))tabs.push(['activity','Activity log']);
+  const tabs=[];if(can('audit.view'))tabs.push(['tx','Transactions'],['deposit','Cash & cheque deposit']);if(can('activity.view'))tabs.push(['activity','Activity log'],['events','Event log']);
   let t=ui.tab.audit||tabs[0][0];if(!tabs.some(x=>x[0]===t))t=tabs[0][0];ui.tab.audit=t;
-  if(t==='activity')need('activity.view','the activity log');else need('audit.view','the audit');
-  return head('Audit','Every payment and expense, with filters, totals and exports.','')+tabsBar('audit',tabs,t)+({tx:auditTx,deposit:auditDeposit,activity:auditActivity}[t])();
+  if(t==='activity'||t==='events')need('activity.view','the activity log');else need('audit.view','the audit');
+  return head('Audit','Every payment and expense, with filters, totals and exports.','')+tabsBar('audit',tabs,t)+({tx:auditTx,deposit:auditDeposit,activity:auditActivity,events:auditEvents}[t])();
 }
 /* one row per payment or expense */
 function txAll(){
@@ -161,6 +161,23 @@ function auditActivity(){
 }
 ACT.actCsv=()=>{need('activity.view');showCsv('NPCTE activity log',['Time','Who','Role','Action','Entity','Record','Before','After','Detail','IP','Device'],auditVisible().map(a=>[fmtT(a.at),a.actor,a.role,a.action,a.entity,a.entityId,JSON.stringify(a.before||''),JSON.stringify(a.after||''),a.detail,a.ip,a.device]))};
 
+/* event log: every sign-in, page, click, form, filter and error of every login (read-only) */
+const EV_CATS=['Auth','Page','Click','Form','Change','Error'];
+function eventsVisible(){evMerge();const u=cur();const l=db.events||[];if(u.role==='Super Admin')return l;const ok=new Set(auditVisible().map(a=>a.actorId));
+  const mine=new Set(myCourses());db.users.forEach(x=>{if(x.role==='Student'?mine.has((stu(x.studentId)||{}).course):STAFF_ROLES.includes(x.role)&&(x.courses||[]).some(c=>mine.has(c)))ok.add(x.id)});return l.filter(e=>ok.has(e.actorId))}
+function evFiltered(){const f=ui.f.evl=Object.assign({q:'',cat:'',who:'',role:'',from:'',to:'',page:0},ui.f.evl||{});const q=f.q.toLowerCase();
+  return eventsVisible().filter(e=>(!f.cat||e.cat===f.cat)&&(!f.who||e.actorId===f.who)&&(!f.role||e.role===f.role)&&(!f.from||istDate(e.at)>=f.from)&&(!f.to||istDate(e.at)<=f.to)&&(!q||[e.label,e.detail,e.actor,e.route].some(v=>String(v||'').toLowerCase().includes(q))))}
+function auditEvents(){
+  need('activity.view');const l=evFiltered();const f=ui.f.evl;const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);const who=[...new Map(eventsVisible().filter(e=>e.actorId).map(e=>[e.actorId,e.actor])).entries()];
+  const tone={Auth:'acc',Page:'',Click:'',Form:'good',Change:'',Error:'bad'};
+  return`<div class="panel"><h2>Event log ${pill(l.length+' events')}<button class="btn" data-act="evCsv">Export Excel</button></h2>
+   <p class="note" style="margin:0 0 10px">Every sign-in, page, tab, button, form, filter and error, for every login. Data changes with before → after are in the Activity log.</p>
+   <div class="filters"><input type="search" placeholder="Search button, page, person, detail" aria-label="Search events" data-live="sq" data-scope="evl" value="${E(f.q)}">${sel('evl','cat','Type',[['','All types'],...EV_CATS.map(c=>[c,c])])}${sel('evl','role','Role',[['','All roles'],...ROLE_NAMES.map(r=>[r,r]),['Guest','Guest (signed out)']])}${sel('evl','who','Person',[['','Everyone'],...who.map(([id,n])=>[id,n])])}
+    <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="evl" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="evl" data-k="to"></label></div>
+   <div class="tablewrap"><table class="dense"><thead><tr><th>Time</th><th>Who</th><th>Type</th><th>What</th><th>Detail</th><th>Page</th><th>Device</th></tr></thead><tbody>
+   ${pg.map(e=>`<tr><td><small>${fmtT(e.at)}</small></td><td>${E(e.actor)}<small class="muted" style="display:block">${E(e.role)}</small></td><td>${pill(e.cat,e.status==='fail'?'bad':tone[e.cat]||'')}</td><td><b>${E(e.label)}</b></td><td><small>${E(e.detail)||'—'}</small></td><td><small>${E(humanize(e.route))||'—'}${e.course?' · '+E((course(e.course)||{}).name||e.course):''}</small></td><td><small>${E(e.device)}</small></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No events for these filters.</td></tr>'}</tbody></table></div>${pager('evl',l.length)}
+   <p class="note">Read-only. The newest ${EV_MAX} events are kept in this demo; the live system keeps them on the server.</p></div>`}
+ACT.evCsv=()=>{need('activity.view');showCsv('NPCTE event log',['Time','Who','Role','Type','What','Detail','Page','Course','Status','Device'],evFiltered().map(e=>[fmtT(e.at),e.actor,e.role,e.cat,e.label,e.detail,e.route,e.course,e.status,e.device]))};
 /* ---------- settings ---------- */
 /* activity log: Super Admin sees everything; others see actions of logins that share one of their courses */
 function auditVisible(){const u=cur();if(u.role==='Super Admin')return db.audit;const mine=new Set(myCourses());

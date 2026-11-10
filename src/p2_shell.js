@@ -27,10 +27,11 @@ FORM.login=(f,d)=>{
   const st=db.students.find(s=>s.email&&s.email.toLowerCase()===id);
   const u=db.users.find(x=>x.active&&x.password===d.p&&(x.username.toLowerCase()===id||(x.email&&x.email.toLowerCase()===id)||(st&&x.studentId===st.id)));
   if(!u){const ex=db.users.find(x=>x.username.toLowerCase()===id||(x.email||'').toLowerCase()===id);l.push(now);ntFailed(id,!!ex);
-    if(ex)log('Sign-in failed','User',ex.username,null,null,'Wrong password');save();renderLogin(ex&&!ex.active?'This account is switched off. Ask the office.':'Wrong login or password.');return}
+    if(ex)log('Sign-in failed','User',ex.username,null,null,'Wrong password');ev('Auth','Sign-in failed',id,{status:'fail',who:id});save();renderLogin(ex&&!ex.active?'This account is switched off. Ask the office.':'Wrong login or password.');return}
   delete LOCK[id];sesSet(u.id);u.lastLoginAt=now;ui.route=u.role==='Student'?'shome':'dashboard';ui.tab={};ui.f={};
-  log('Signed in','User',u.username,null,null,u.role);ntSync();save();
+  log('Signed in','User',u.username,null,null,u.role);ev('Auth','Signed in',u.username+' · '+device());ntSync();save();
   if(u.mustChange){renderForceChange();return}
+  setTimeout(()=>{if(typeof askNotifyGently==='function'&&cur())askNotifyGently()},1200);
   renderApp();
 };
 /* first login: the temporary password must be changed before anything else (spec §6.2) */
@@ -47,7 +48,7 @@ function renderForceChange(msg){
 const pwOk=p=>p.length>=8&&/[A-Za-z]/.test(p)&&/\d/.test(p);
 FORM.forcePw=(f,d)=>{const u=cur();if(!pwOk(d.p1))return renderForceChange('Use at least 8 characters with a letter and a number.');if(d.p1!==d.p2)return renderForceChange('The two passwords are not the same.');if(d.p1===u.password)return renderForceChange('Choose a password different from the temporary one.');
   u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();renderApp();toast('Password saved. Welcome!');setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
-ACT.logout=()=>{const u=cur();if(u)log('Signed out','User',u.username);save();sesDel();closeLayer();renderLogin();const h=$('.login-form h2');if(h){h.tabIndex=-1;softFocus(h)}};
+ACT.logout=()=>{const u=cur();if(u){log('Signed out','User',u.username);ev('Auth','Signed out',u.username)}save();sesDel();closeLayer();renderLogin();const h=$('.login-form h2');if(h){h.tabIndex=-1;softFocus(h)}};
 ACT.resetDemo=()=>{const u=cur();if(u&&u.role!=='Super Admin')throw new Error('Only the Super Admin can reset the data');confirmBox('Reset demo data','All students, payments and changes in this browser will be replaced by fresh sample data.','Reset',()=>{seed();save();sesDel();closeLayer();renderLogin();toast('Demo data reset')},true)};
 
 /* ---------- shell ---------- */
@@ -127,7 +128,7 @@ function courseSwitch(){const my=myCourses();if(my.length<2)return'';const p=pic
   return`<label class="cswitch" title="Show data for"><span class="sr">Show data for</span><select data-change="pickCourse" aria-label="Show data for course"><option value="">${my.length===db.courses.length?'All courses':'All my courses'}</option>${my.map(id=>`<option value="${E(id)}" ${p===id?'selected':''}>${E(course(id).name)}</option>`).join('')}</select></label>`}
 CHG.pickCourse=el=>{setPickedCourse(el.value);ui.f={};ui.col=null;renderApp();toast('Showing '+scopeLabel())};
 function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();keepFocus(pg,()=>{pg.innerHTML=n?n[3]():''});renderNav()}
-function go(route,tab){if(tab)ui.tab[route]=tab;const prev=ui.route;ui.route=route;renderPage();window.scrollTo(0,0);playEnter('enter');const a=document.activeElement;if(route!==prev||!a||a===document.body)focusH1()}
+function go(route,tab){if(tab)ui.tab[route]=tab;const prev=ui.route;ui.route=route;ev('Page','Opened page',humanize(route)+(ui.tab[route]?' › '+humanize(ui.tab[route]):''));renderPage();window.scrollTo(0,0);playEnter('enter');const a=document.activeElement;if(route!==prev||!a||a===document.body)focusH1()}
 ACT.nav=el=>{closeLayer();railClose();go(el.dataset.id)};
 function refresh(){save();renderPage()}
 /* drill-down links: data-to=route, data-sub=tab, data-f=JSON filters */

@@ -46,4 +46,5 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden||!cur())ret
 /* ---------- boot ---------- */
 load();applyTheme();
 if(cur()){ntSync();save();renderApp()}else renderLogin();
+setTimeout(()=>{ntLive=true},1500);
 themeLabels();new MutationObserver(themeLabels).observe($('#root'),{childList:true,subtree:true});try{matchMedia('(prefers-color-scheme:dark)').addEventListener('change',themeLabels)}catch(e){}

@@ -34,13 +34,20 @@ function ntRecipients(o){
   if(act&&!o.self)out.delete(act.id);
   return[...out.values()];
 }
+/* ntLive is switched on after boot: from then on every new notification pops up at once in this tab
+   (in-app card + sound + browser / phone popup), and the person who did the action gets a browser popup too */
+let ntLive=false;
+/* one browser popup per action for the person who did it (an action can notify several groups) */
+let actorPopT=0,actorPopV=null;const actorPop=(t,x)=>{actorPopV=[t,x];clearTimeout(actorPopT);actorPopT=setTimeout(()=>{showPopup(actorPopV[0],actorPopV[1],'a'+Date.now(),'/')},250)};
 function notify(cat,title,text,o={}){
-  ntInit();const rs=ntRecipients(o);if(!rs.length)return 0;let n=0;const act=cur();
+  ntInit();const rs=ntRecipients(o);const act=cur();
+  if(!rs.length){if(ntLive&&act&&!o.key)actorPop(title,text);return 0}let n=0;
   rs.forEach(u=>{
     const key=o.key?o.key+'|'+u.id:'';if(key&&db.notifs.some(x=>x.key===key))return;
     const portal=u.role==='Student';
     db.notifs.unshift({id:uid('nt'),ts:o.ts||Date.now(),uid:u.id,k:cat,t:title,x:text||'',tone:o.tone||'info',route:portal?(o.portal||''):(o.staff||''),tab:portal?'':(o.tab||''),sid:o.sid||'',read:false,key,by:act?act.name:'System'});n++;
   });
+  if(ntLive&&act){const mine=db.notifs.slice(0,n).filter(x=>x.uid===act.id);if(mine.length)setTimeout(()=>deliverLive(mine),0);else if(!o.key)actorPop(title,text)}
   if(n)ntPrune();
   if(n&&typeof updateBell==='function')updateBell();
   return n;
@@ -88,7 +95,7 @@ async function showPopup(title,body,tag,link){
   try{const reg=navigator.serviceWorker&&await Promise.race([navigator.serviceWorker.ready,new Promise(r=>setTimeout(()=>r(null),3000))]);
     if(reg){await reg.showNotification(title,POP_OPTS(body,tag,link));return true}
     const x=new Notification(title,POP_OPTS(body,tag,link));x.onclick=()=>{window.focus();x.close()};return true}catch(e){return false}}
-function sysPopup(n){if(!document.hidden)return;showPopup(n.t,n.x,n.id)}
+function sysPopup(n){showPopup(n.t,n.x,n.id)}
 /* "Test notification" on every profile: shows a popup now, or after 10 s so the phone can be locked first */
 function notifyPanelHtml(){const perm=!('Notification' in window)?'unsupported':Notification.permission;
   return`<p class="note" style="margin:0 0 8px">Popups for payments, fee alerts and notices on this device.</p>
@@ -105,4 +112,4 @@ function liveToast(n){
   el.innerHTML=`<span class="ldot" aria-hidden="true"></span><span><b>${E(n.t)}</b>${n.x?`<small>${E(n.x)}</small>`:''}</span>`;
   box.prepend(el);while(box.children.length>3)box.lastChild.remove();setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),300)},6500);
 }
-function deliverLive(list){if(!list.length)return;list.slice(0,3).forEach(liveToast);ding();list.forEach(sysPopup)}
+function deliverLive(list){if(!list.length)return;list.slice(0,3).forEach(liveToast);ding();list.slice(0,3).forEach(sysPopup)}

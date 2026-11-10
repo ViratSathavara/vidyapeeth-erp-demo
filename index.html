@@ -834,12 +834,12 @@ function saveBanner(on){
   if(!b){b=document.createElement('div');b.id='savebar';b.setAttribute('role','alert');b.textContent=SAVE_FAIL_MSG+'. Browser storage is full or blocked.';document.body.insertBefore(b,document.body.firstChild)}
   document.body.classList.add('save-bad');
 }
-function save(){const ok=lsSet(LS_KEY,JSON.stringify(db));saveBad=!ok;if(!ok){saveTick=true;Promise.resolve().then(()=>{saveTick=false})}saveBanner(!ok);return ok}
+function save(){if(typeof evMerge==='function')evMerge();const ok=lsSet(LS_KEY,JSON.stringify(db));saveBad=!ok;if(!ok){saveTick=true;Promise.resolve().then(()=>{saveTick=false})}saveBanner(!ok);return ok}
 function load(){const raw=lsGet(LS_KEY);if(raw){try{db=JSON.parse(raw);if(db&&db.ver===DB_VER){migrate();return}}catch(e){}}seed();save()}
 function migrate(){
   const s=db.settings;s.flags=Object.assign({fundingAllCategories:false,lateFee:false},s.flags||{});delete s.flags.expenseReducesDue;delete s.expenseCats;
   if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no separate expense ledger: an expense is a fee taken By Expense */
-  if(!db.enquiries)db.enquiries=[];
+  if(!db.enquiries)db.enquiries=[];if(!Array.isArray(db.events))db.events=[];
   db.courses.forEach(c=>{if(!c.years)c.years=Math.max(1,Math.ceil((c.semesters||4)/2));if(c.active===undefined)c.active=true});
   db.users.forEach(u=>{if(STAFF_ROLES.includes(u.role)&&!Array.isArray(u.courses))u.courses=db.courses.map(c=>c.id)});
 }
@@ -905,11 +905,18 @@ function log(action,entity,entityId,before,after,detail){
   db.audit.unshift({id:uid('a'),at:Date.now(),actorId:u?u.id:'',actor:u?u.name:'System',role:u?u.role:'System',action,entity:entity||'',entityId:entityId||'',before:before??null,after:after??null,detail:detail||'',ip:'127.0.0.1 (demo)',device:device()});
   if(db.audit.length>1500)db.audit.length=1500;
 }
-/* kept for the shared UI plumbing: page views and clicks are not stored in this build */
+/* ---------- event log: every sign-in, page, tab, click, form, filter change and error, for every role ----------
+   Kept apart from the activity log (which holds data changes with before/after). Buffered and saved every 1.5 s
+   so a click does not rewrite the whole store. The real server writes these rows from the API middleware. */
 const humanize=n=>String(n||'').replace(/([a-z0-9])([A-Z])/g,'$1 $2').replace(/[_-]+/g,' ').replace(/^./,c=>c.toUpperCase());
-function ev(){}
-function evFlush(){}
-const EV_KEY='npcte_events_unused';let evBuf=[];
+const EV_MAX=4000;let evBuf=[],evTimer=0;
+function ev(cat,label,detail,x){try{if(!db)return;const u=cur();
+  evBuf.push({id:uid('e'),at:Date.now(),actorId:u?u.id:'',actor:u?u.name:(x&&x.who)||'Guest',role:u?u.role:'Guest',cat:cat||'Other',label:String(label||'').slice(0,80),detail:String(detail??'').slice(0,160),
+    route:(typeof ui!=='undefined'&&ui.route)||'',course:(u&&typeof pickedCourse==='function'&&pickedCourse())||'',status:(x&&x.status)||'ok',device:device()});
+  clearTimeout(evTimer);evTimer=setTimeout(evFlush,1500)}catch(e){}}
+function evMerge(){if(!evBuf.length||!db)return;if(!Array.isArray(db.events))db.events=[];db.events.unshift(...evBuf.reverse());evBuf=[];if(db.events.length>EV_MAX)db.events.length=EV_MAX}
+function evFlush(){clearTimeout(evTimer);if(evBuf.length&&db)save()}
+if(typeof addEventListener==='function'){addEventListener('pagehide',evFlush);addEventListener('visibilitychange',()=>{if(typeof document!=='undefined'&&document.hidden)evFlush()})}
 
 /* ---------- fees: per semester ---------- */
 const semFee=(s,n)=>s.fees.find(f=>f.sem===n);
@@ -1017,7 +1024,7 @@ function seed(){
       {id:'u_prin',role:'Principal',name:'Principal, B.Ed',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['BED']},
       {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
-    students:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],outbox:[],upiOrders:[],enquiries:[],
+    students:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
     counters:{enrol:{},exp:1}};
   /* sample names only (demo) */
   const names=[['Riya Joshi','F'],['Hardik Patel','M'],['Kinjal Prajapati','F'],['Mehul Chaudhary','M'],['Nirali Desai','F'],['Jignesh Rabari','M'],['Pooja Solanki','F'],['Ankit Thakor','M'],['Bhumi Modi','F'],['Kaushal Vaghela','M'],
@@ -1094,13 +1101,20 @@ function ntRecipients(o){
   if(act&&!o.self)out.delete(act.id);
   return[...out.values()];
 }
+/* ntLive is switched on after boot: from then on every new notification pops up at once in this tab
+   (in-app card + sound + browser / phone popup), and the person who did the action gets a browser popup too */
+let ntLive=false;
+/* one browser popup per action for the person who did it (an action can notify several groups) */
+let actorPopT=0,actorPopV=null;const actorPop=(t,x)=>{actorPopV=[t,x];clearTimeout(actorPopT);actorPopT=setTimeout(()=>{showPopup(actorPopV[0],actorPopV[1],'a'+Date.now(),'/')},250)};
 function notify(cat,title,text,o={}){
-  ntInit();const rs=ntRecipients(o);if(!rs.length)return 0;let n=0;const act=cur();
+  ntInit();const rs=ntRecipients(o);const act=cur();
+  if(!rs.length){if(ntLive&&act&&!o.key)actorPop(title,text);return 0}let n=0;
   rs.forEach(u=>{
     const key=o.key?o.key+'|'+u.id:'';if(key&&db.notifs.some(x=>x.key===key))return;
     const portal=u.role==='Student';
     db.notifs.unshift({id:uid('nt'),ts:o.ts||Date.now(),uid:u.id,k:cat,t:title,x:text||'',tone:o.tone||'info',route:portal?(o.portal||''):(o.staff||''),tab:portal?'':(o.tab||''),sid:o.sid||'',read:false,key,by:act?act.name:'System'});n++;
   });
+  if(ntLive&&act){const mine=db.notifs.slice(0,n).filter(x=>x.uid===act.id);if(mine.length)setTimeout(()=>deliverLive(mine),0);else if(!o.key)actorPop(title,text)}
   if(n)ntPrune();
   if(n&&typeof updateBell==='function')updateBell();
   return n;
@@ -1148,7 +1162,7 @@ async function showPopup(title,body,tag,link){
   try{const reg=navigator.serviceWorker&&await Promise.race([navigator.serviceWorker.ready,new Promise(r=>setTimeout(()=>r(null),3000))]);
     if(reg){await reg.showNotification(title,POP_OPTS(body,tag,link));return true}
     const x=new Notification(title,POP_OPTS(body,tag,link));x.onclick=()=>{window.focus();x.close()};return true}catch(e){return false}}
-function sysPopup(n){if(!document.hidden)return;showPopup(n.t,n.x,n.id)}
+function sysPopup(n){showPopup(n.t,n.x,n.id)}
 /* "Test notification" on every profile: shows a popup now, or after 10 s so the phone can be locked first */
 function notifyPanelHtml(){const perm=!('Notification' in window)?'unsupported':Notification.permission;
   return`<p class="note" style="margin:0 0 8px">Popups for payments, fee alerts and notices on this device.</p>
@@ -1165,7 +1179,7 @@ function liveToast(n){
   el.innerHTML=`<span class="ldot" aria-hidden="true"></span><span><b>${E(n.t)}</b>${n.x?`<small>${E(n.x)}</small>`:''}</span>`;
   box.prepend(el);while(box.children.length>3)box.lastChild.remove();setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),300)},6500);
 }
-function deliverLive(list){if(!list.length)return;list.slice(0,3).forEach(liveToast);ding();list.forEach(sysPopup)}
+function deliverLive(list){if(!list.length)return;list.slice(0,3).forEach(liveToast);ding();list.slice(0,3).forEach(sysPopup)}
 /* =====================================================================
    UI plumbing, login, shell, dashboard
    ===================================================================== */
@@ -1416,10 +1430,11 @@ FORM.login=(f,d)=>{
   const st=db.students.find(s=>s.email&&s.email.toLowerCase()===id);
   const u=db.users.find(x=>x.active&&x.password===d.p&&(x.username.toLowerCase()===id||(x.email&&x.email.toLowerCase()===id)||(st&&x.studentId===st.id)));
   if(!u){const ex=db.users.find(x=>x.username.toLowerCase()===id||(x.email||'').toLowerCase()===id);l.push(now);ntFailed(id,!!ex);
-    if(ex)log('Sign-in failed','User',ex.username,null,null,'Wrong password');save();renderLogin(ex&&!ex.active?'This account is switched off. Ask the office.':'Wrong login or password.');return}
+    if(ex)log('Sign-in failed','User',ex.username,null,null,'Wrong password');ev('Auth','Sign-in failed',id,{status:'fail',who:id});save();renderLogin(ex&&!ex.active?'This account is switched off. Ask the office.':'Wrong login or password.');return}
   delete LOCK[id];sesSet(u.id);u.lastLoginAt=now;ui.route=u.role==='Student'?'shome':'dashboard';ui.tab={};ui.f={};
-  log('Signed in','User',u.username,null,null,u.role);ntSync();save();
+  log('Signed in','User',u.username,null,null,u.role);ev('Auth','Signed in',u.username+' · '+device());ntSync();save();
   if(u.mustChange){renderForceChange();return}
+  setTimeout(()=>{if(typeof askNotifyGently==='function'&&cur())askNotifyGently()},1200);
   renderApp();
 };
 /* first login: the temporary password must be changed before anything else (spec §6.2) */
@@ -1436,7 +1451,7 @@ function renderForceChange(msg){
 const pwOk=p=>p.length>=8&&/[A-Za-z]/.test(p)&&/\d/.test(p);
 FORM.forcePw=(f,d)=>{const u=cur();if(!pwOk(d.p1))return renderForceChange('Use at least 8 characters with a letter and a number.');if(d.p1!==d.p2)return renderForceChange('The two passwords are not the same.');if(d.p1===u.password)return renderForceChange('Choose a password different from the temporary one.');
   u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();renderApp();toast('Password saved. Welcome!');setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
-ACT.logout=()=>{const u=cur();if(u)log('Signed out','User',u.username);save();sesDel();closeLayer();renderLogin();const h=$('.login-form h2');if(h){h.tabIndex=-1;softFocus(h)}};
+ACT.logout=()=>{const u=cur();if(u){log('Signed out','User',u.username);ev('Auth','Signed out',u.username)}save();sesDel();closeLayer();renderLogin();const h=$('.login-form h2');if(h){h.tabIndex=-1;softFocus(h)}};
 ACT.resetDemo=()=>{const u=cur();if(u&&u.role!=='Super Admin')throw new Error('Only the Super Admin can reset the data');confirmBox('Reset demo data','All students, payments and changes in this browser will be replaced by fresh sample data.','Reset',()=>{seed();save();sesDel();closeLayer();renderLogin();toast('Demo data reset')},true)};
 
 /* ---------- shell ---------- */
@@ -1516,7 +1531,7 @@ function courseSwitch(){const my=myCourses();if(my.length<2)return'';const p=pic
   return`<label class="cswitch" title="Show data for"><span class="sr">Show data for</span><select data-change="pickCourse" aria-label="Show data for course"><option value="">${my.length===db.courses.length?'All courses':'All my courses'}</option>${my.map(id=>`<option value="${E(id)}" ${p===id?'selected':''}>${E(course(id).name)}</option>`).join('')}</select></label>`}
 CHG.pickCourse=el=>{setPickedCourse(el.value);ui.f={};ui.col=null;renderApp();toast('Showing '+scopeLabel())};
 function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();keepFocus(pg,()=>{pg.innerHTML=n?n[3]():''});renderNav()}
-function go(route,tab){if(tab)ui.tab[route]=tab;const prev=ui.route;ui.route=route;renderPage();window.scrollTo(0,0);playEnter('enter');const a=document.activeElement;if(route!==prev||!a||a===document.body)focusH1()}
+function go(route,tab){if(tab)ui.tab[route]=tab;const prev=ui.route;ui.route=route;ev('Page','Opened page',humanize(route)+(ui.tab[route]?' › '+humanize(ui.tab[route]):''));renderPage();window.scrollTo(0,0);playEnter('enter');const a=document.activeElement;if(route!==prev||!a||a===document.body)focusH1()}
 ACT.nav=el=>{closeLayer();railClose();go(el.dataset.id)};
 function refresh(){save();renderPage()}
 /* drill-down links: data-to=route, data-sub=tab, data-f=JSON filters */
@@ -2155,10 +2170,10 @@ ACT.openAtt=el=>{const n=db.notices.find(x=>x.id===el.dataset.id);if(!n||!n.atta
 
 /* ---------- audit ---------- */
 function viewAudit(){
-  const tabs=[];if(can('audit.view'))tabs.push(['tx','Transactions'],['deposit','Cash & cheque deposit']);if(can('activity.view'))tabs.push(['activity','Activity log']);
+  const tabs=[];if(can('audit.view'))tabs.push(['tx','Transactions'],['deposit','Cash & cheque deposit']);if(can('activity.view'))tabs.push(['activity','Activity log'],['events','Event log']);
   let t=ui.tab.audit||tabs[0][0];if(!tabs.some(x=>x[0]===t))t=tabs[0][0];ui.tab.audit=t;
-  if(t==='activity')need('activity.view','the activity log');else need('audit.view','the audit');
-  return head('Audit','Every payment and expense, with filters, totals and exports.','')+tabsBar('audit',tabs,t)+({tx:auditTx,deposit:auditDeposit,activity:auditActivity}[t])();
+  if(t==='activity'||t==='events')need('activity.view','the activity log');else need('audit.view','the audit');
+  return head('Audit','Every payment and expense, with filters, totals and exports.','')+tabsBar('audit',tabs,t)+({tx:auditTx,deposit:auditDeposit,activity:auditActivity,events:auditEvents}[t])();
 }
 /* one row per payment or expense */
 function txAll(){
@@ -2259,6 +2274,23 @@ function auditActivity(){
 }
 ACT.actCsv=()=>{need('activity.view');showCsv('NPCTE activity log',['Time','Who','Role','Action','Entity','Record','Before','After','Detail','IP','Device'],auditVisible().map(a=>[fmtT(a.at),a.actor,a.role,a.action,a.entity,a.entityId,JSON.stringify(a.before||''),JSON.stringify(a.after||''),a.detail,a.ip,a.device]))};
 
+/* event log: every sign-in, page, click, form, filter and error of every login (read-only) */
+const EV_CATS=['Auth','Page','Click','Form','Change','Error'];
+function eventsVisible(){evMerge();const u=cur();const l=db.events||[];if(u.role==='Super Admin')return l;const ok=new Set(auditVisible().map(a=>a.actorId));
+  const mine=new Set(myCourses());db.users.forEach(x=>{if(x.role==='Student'?mine.has((stu(x.studentId)||{}).course):STAFF_ROLES.includes(x.role)&&(x.courses||[]).some(c=>mine.has(c)))ok.add(x.id)});return l.filter(e=>ok.has(e.actorId))}
+function evFiltered(){const f=ui.f.evl=Object.assign({q:'',cat:'',who:'',role:'',from:'',to:'',page:0},ui.f.evl||{});const q=f.q.toLowerCase();
+  return eventsVisible().filter(e=>(!f.cat||e.cat===f.cat)&&(!f.who||e.actorId===f.who)&&(!f.role||e.role===f.role)&&(!f.from||istDate(e.at)>=f.from)&&(!f.to||istDate(e.at)<=f.to)&&(!q||[e.label,e.detail,e.actor,e.route].some(v=>String(v||'').toLowerCase().includes(q))))}
+function auditEvents(){
+  need('activity.view');const l=evFiltered();const f=ui.f.evl;const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);const who=[...new Map(eventsVisible().filter(e=>e.actorId).map(e=>[e.actorId,e.actor])).entries()];
+  const tone={Auth:'acc',Page:'',Click:'',Form:'good',Change:'',Error:'bad'};
+  return`<div class="panel"><h2>Event log ${pill(l.length+' events')}<button class="btn" data-act="evCsv">Export Excel</button></h2>
+   <p class="note" style="margin:0 0 10px">Every sign-in, page, tab, button, form, filter and error, for every login. Data changes with before → after are in the Activity log.</p>
+   <div class="filters"><input type="search" placeholder="Search button, page, person, detail" aria-label="Search events" data-live="sq" data-scope="evl" value="${E(f.q)}">${sel('evl','cat','Type',[['','All types'],...EV_CATS.map(c=>[c,c])])}${sel('evl','role','Role',[['','All roles'],...ROLE_NAMES.map(r=>[r,r]),['Guest','Guest (signed out)']])}${sel('evl','who','Person',[['','Everyone'],...who.map(([id,n])=>[id,n])])}
+    <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="evl" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="evl" data-k="to"></label></div>
+   <div class="tablewrap"><table class="dense"><thead><tr><th>Time</th><th>Who</th><th>Type</th><th>What</th><th>Detail</th><th>Page</th><th>Device</th></tr></thead><tbody>
+   ${pg.map(e=>`<tr><td><small>${fmtT(e.at)}</small></td><td>${E(e.actor)}<small class="muted" style="display:block">${E(e.role)}</small></td><td>${pill(e.cat,e.status==='fail'?'bad':tone[e.cat]||'')}</td><td><b>${E(e.label)}</b></td><td><small>${E(e.detail)||'—'}</small></td><td><small>${E(humanize(e.route))||'—'}${e.course?' · '+E((course(e.course)||{}).name||e.course):''}</small></td><td><small>${E(e.device)}</small></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No events for these filters.</td></tr>'}</tbody></table></div>${pager('evl',l.length)}
+   <p class="note">Read-only. The newest ${EV_MAX} events are kept in this demo; the live system keeps them on the server.</p></div>`}
+ACT.evCsv=()=>{need('activity.view');showCsv('NPCTE event log',['Time','Who','Role','Type','What','Detail','Page','Course','Status','Device'],evFiltered().map(e=>[fmtT(e.at),e.actor,e.role,e.cat,e.label,e.detail,e.route,e.course,e.status,e.device]))};
 /* ---------- settings ---------- */
 /* activity log: Super Admin sees everything; others see actions of logins that share one of their courses */
 function auditVisible(){const u=cur();if(u.role==='Super Admin')return db.audit;const mine=new Set(myCourses());
@@ -2589,6 +2621,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden||!cur())ret
 /* ---------- boot ---------- */
 load();applyTheme();
 if(cur()){ntSync();save();renderApp()}else renderLogin();
+setTimeout(()=>{ntLive=true},1500);
 themeLabels();new MutationObserver(themeLabels).observe($('#root'),{childList:true,subtree:true});try{matchMedia('(prefers-color-scheme:dark)').addEventListener('change',themeLabels)}catch(e){}
 </script>
 

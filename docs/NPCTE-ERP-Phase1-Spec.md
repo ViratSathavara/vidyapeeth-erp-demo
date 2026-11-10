@@ -210,6 +210,10 @@ Same website, installable like the ABCD learning app:
 
 ## 10. Live notifications
 
+- **Every event pops up, every time**: when a notification is created for a login that is open, it shows the in-app card (top right) **and** the browser / phone notification (Chrome's own popup), with sound, whether the tab is in front or not. The person who did the action also gets one browser popup confirming it. Popups go through the service worker (`registration.showNotification`, with `vibrate`, `renotify`, a monochrome badge icon) because Android does not allow `new Notification()`.
+- Permission is asked after sign-in (once per device). Every profile has **Test popup now / in 10 seconds** and the phone steps for lock-screen popups.
+- **Event log** (Audit → Event log, read-only, Principal + Super Admin): every sign-in, failed sign-in, sign-out, page, tab, button click, form save, filter change and error, for every role including Super Admin, with time, person, role, page, course and device. Filters + Excel export. Scoped like the activity log: Super Admin sees all; a Principal sees logins of their own courses.
+
 - **Socket.IO** server with JWT auth on connect; rooms: `user:<id>`, `role:<role>`, `course:<code>`, `sem:<course>-<n>`, `college:<id>`.
 - On events (payment success/failed/cancelled, notice published, fee reminder, credentials resent, invoice date changed) the server:
   1. saves a `Notification` row,

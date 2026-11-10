@@ -48,12 +48,12 @@ function saveBanner(on){
   if(!b){b=document.createElement('div');b.id='savebar';b.setAttribute('role','alert');b.textContent=SAVE_FAIL_MSG+'. Browser storage is full or blocked.';document.body.insertBefore(b,document.body.firstChild)}
   document.body.classList.add('save-bad');
 }
-function save(){const ok=lsSet(LS_KEY,JSON.stringify(db));saveBad=!ok;if(!ok){saveTick=true;Promise.resolve().then(()=>{saveTick=false})}saveBanner(!ok);return ok}
+function save(){if(typeof evMerge==='function')evMerge();const ok=lsSet(LS_KEY,JSON.stringify(db));saveBad=!ok;if(!ok){saveTick=true;Promise.resolve().then(()=>{saveTick=false})}saveBanner(!ok);return ok}
 function load(){const raw=lsGet(LS_KEY);if(raw){try{db=JSON.parse(raw);if(db&&db.ver===DB_VER){migrate();return}}catch(e){}}seed();save()}
 function migrate(){
   const s=db.settings;s.flags=Object.assign({fundingAllCategories:false,lateFee:false},s.flags||{});delete s.flags.expenseReducesDue;delete s.expenseCats;
   if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no separate expense ledger: an expense is a fee taken By Expense */
-  if(!db.enquiries)db.enquiries=[];
+  if(!db.enquiries)db.enquiries=[];if(!Array.isArray(db.events))db.events=[];
   db.courses.forEach(c=>{if(!c.years)c.years=Math.max(1,Math.ceil((c.semesters||4)/2));if(c.active===undefined)c.active=true});
   db.users.forEach(u=>{if(STAFF_ROLES.includes(u.role)&&!Array.isArray(u.courses))u.courses=db.courses.map(c=>c.id)});
 }
@@ -119,11 +119,18 @@ function log(action,entity,entityId,before,after,detail){
   db.audit.unshift({id:uid('a'),at:Date.now(),actorId:u?u.id:'',actor:u?u.name:'System',role:u?u.role:'System',action,entity:entity||'',entityId:entityId||'',before:before??null,after:after??null,detail:detail||'',ip:'127.0.0.1 (demo)',device:device()});
   if(db.audit.length>1500)db.audit.length=1500;
 }
-/* kept for the shared UI plumbing: page views and clicks are not stored in this build */
+/* ---------- event log: every sign-in, page, tab, click, form, filter change and error, for every role ----------
+   Kept apart from the activity log (which holds data changes with before/after). Buffered and saved every 1.5 s
+   so a click does not rewrite the whole store. The real server writes these rows from the API middleware. */
 const humanize=n=>String(n||'').replace(/([a-z0-9])([A-Z])/g,'$1 $2').replace(/[_-]+/g,' ').replace(/^./,c=>c.toUpperCase());
-function ev(){}
-function evFlush(){}
-const EV_KEY='npcte_events_unused';let evBuf=[];
+const EV_MAX=4000;let evBuf=[],evTimer=0;
+function ev(cat,label,detail,x){try{if(!db)return;const u=cur();
+  evBuf.push({id:uid('e'),at:Date.now(),actorId:u?u.id:'',actor:u?u.name:(x&&x.who)||'Guest',role:u?u.role:'Guest',cat:cat||'Other',label:String(label||'').slice(0,80),detail:String(detail??'').slice(0,160),
+    route:(typeof ui!=='undefined'&&ui.route)||'',course:(u&&typeof pickedCourse==='function'&&pickedCourse())||'',status:(x&&x.status)||'ok',device:device()});
+  clearTimeout(evTimer);evTimer=setTimeout(evFlush,1500)}catch(e){}}
+function evMerge(){if(!evBuf.length||!db)return;if(!Array.isArray(db.events))db.events=[];db.events.unshift(...evBuf.reverse());evBuf=[];if(db.events.length>EV_MAX)db.events.length=EV_MAX}
+function evFlush(){clearTimeout(evTimer);if(evBuf.length&&db)save()}
+if(typeof addEventListener==='function'){addEventListener('pagehide',evFlush);addEventListener('visibilitychange',()=>{if(typeof document!=='undefined'&&document.hidden)evFlush()})}
 
 /* ---------- fees: per semester ---------- */
 const semFee=(s,n)=>s.fees.find(f=>f.sem===n);
@@ -231,7 +238,7 @@ function seed(){
       {id:'u_prin',role:'Principal',name:'Principal, B.Ed',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['BED']},
       {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
-    students:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],outbox:[],upiOrders:[],enquiries:[],
+    students:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
     counters:{enrol:{},exp:1}};
   /* sample names only (demo) */
   const names=[['Riya Joshi','F'],['Hardik Patel','M'],['Kinjal Prajapati','F'],['Mehul Chaudhary','M'],['Nirali Desai','F'],['Jignesh Rabari','M'],['Pooja Solanki','F'],['Ankit Thakor','M'],['Bhumi Modi','F'],['Kaushal Vaghela','M'],

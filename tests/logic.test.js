@@ -80,4 +80,10 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  login('clerk');ok(A.colRows().length===db.students.filter(x=>x.status==='ACTIVE').length,'collect list shows every active student');
  const pp=db.payments.find(p=>p.status==='SUCCESS');const su=db.users.find(u=>u.studentId===pp.studentId);A.sesSet(su.id);ok(!/>Mode</.test(A.receiptHtml(pp))&&/Tuition fee/.test(A.receiptHtml(pp)),'student receipt hides mode, shows tuition fee');
  login('clerk');ok(/>Mode</.test(A.receiptHtml(pp)),'office receipt shows mode');}
+// ---- event log: every role, scoped viewing ----
+{login('clerk');A.ev('Click','Collect','Riya Joshi');login('admin');A.ev('Page','Opened page','Settings');A.evFlush();
+ ok(db.events.length>=2&&db.events.some(e=>e.actor==='Accounts Clerk'&&e.cat==='Click')&&db.events.some(e=>e.role==='Super Admin'),'events logged for clerk and super admin');
+ ok(A.eventsVisible().length===db.events.length,'super admin sees every event');
+ login('principalmed');ok(A.eventsVisible().some(e=>e.actor==='Accounts Clerk')&&!A.eventsVisible().some(e=>e.role==='Super Admin'),'principal sees own-course logins only');
+ ok(/Event log/.test(A.auditEvents()),'event log tab renders');}
 console.log('pass',pass,'fail',fail);
