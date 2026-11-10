@@ -161,7 +161,7 @@ function semCards(s,o={}){
     <div class="sc-r"><span>Fee</span><b>${inr(m.amount)}</b></div><div class="sc-r"><span>Paid</span><b>${inr(m.paid)}</b></div>${m.adj?`<div class="sc-r"><span>Expense adj.</span><b>${inr(m.adj)}</b></div>`:''}<div class="sc-r"><span>Due</span><b class="${m.due?'t-'+(m.overdue?'bad':'warn'):''}">${inr(m.due)}</b></div>
     <div class="bar ${m.overdue?'bad':''}"><i style="width:${Math.min(100,pct)}%"></i></div><small class="muted">${m.dueDate?'Due date '+fmtD(m.dueDate):'No due date'}</small>
     ${o.collect&&m.due>0&&can('fees.collect')&&s.status==='ACTIVE'?`<button class="btn sm primary" data-act="collectFor" data-id="${E(s.id)}" data-sem="${m.sem}">Collect</button>`:''}
-    ${o.pay&&m.due>0&&m.started?`<button class="btn primary" data-act="payNow" data-sem="${m.sem}">Pay ${inr(m.due)} with UPI</button>`:''}</div>`}).join('')}</div>`;
+    ${o.pay&&m.due>0?`<button class="btn ${m.started?'primary':''}" data-act="payNow" data-sem="${m.sem}">Pay ${inr(m.due)} ${m.started?'with':'in advance ·'} UPI</button>`:''}</div>`}).join('')}</div>`;
 }
 function openStudent(id){
   if(!mayStudent(id))throw new Error('403 · Not allowed');const s=stu(id);if(!s)throw new Error('Student not found');const sm=feeSum(s);

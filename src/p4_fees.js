@@ -65,7 +65,7 @@ const reCol=()=>{const b=$('#colBox');if(b)b.innerHTML=collectBox()};
 function batchField(s){const b=defaultBatch(s);const opts=batchOptions(s.course);if(b&&!opts.includes(b))opts.push(b);
   return`<div class="field"><label class="label" for="f_batch">Batch *</label><select id="f_batch" name="batch" required><option value="">Choose batch</option>${opts.map(o=>`<option ${o===b?'selected':''}>${E(o)}</option>`).join('')}</select></div>`}
 function collectForm(s,m,mode){
-  const T=today();const amt=F('amount','Tuition fee amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}"`})+batchField(s);
+  const T=today();const amt=F('amount','Tuition fee amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}" data-live="colAmt"`})+batchField(s);
   if(mode==='CASH')return`<form data-form="collect" data-mode="CASH" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true})}${F('note','Note (optional)',{span:1,attrs:'maxlength="120"'})}
    <p class="note span">Invoice date = the date you enter here (default today). The receipt uses this date. You can change it later in Receipts.</p><div class="actions span"><button class="btn primary big">Save cash payment · issue receipt</button></div></form>`;
   if(mode==='CHEQUE')return`<form data-form="collect" data-mode="CHEQUE" class="form">${amt}${F('chequeNo','Cheque no.',{req:true,attrs:'inputmode="numeric" maxlength="10"'})}${F('bank','Bank',{req:true,attrs:'maxlength="60" list="banks"'})}<datalist id="banks"><option>State Bank of India</option><option>Bank of Baroda</option><option>Mehsana Urban Co-op Bank</option><option>HDFC Bank</option><option>ICICI Bank</option></datalist>
@@ -73,11 +73,39 @@ function collectForm(s,m,mode){
   if(mode==='UPI'){const pv=upiInvoiceDate(Date.now());return`<form data-form="upiPay" class="form">${amt}<div class="field"><span class="label">Invoice date</span><div class="ro">${fmtD(pv)} <small class="muted">(payment date + 1 day, set automatically)</small></div></div>
    <p class="note span">A UPI order is created with ${E(db.settings.upi.provider)} (${E(db.settings.upi.mode)}). The student scans the QR with Google Pay or any UPI app. The payment becomes Success only when the gateway's verified webhook arrives — never from this screen.</p>
    <div class="actions span"><button class="btn primary big">Create UPI request · show QR</button></div></form>`}
+  if(!ui.exp||ui.exp.sid!==s.id)ui.exp={sid:s.id,rows:[{amount:'',reason:'',doc:null}]};
   return`<form data-form="collect" data-mode="EXPENSE" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}
-   ${F('reason','Expense: what was this fee used for?',{req:true,span:1,attrs:'maxlength="160" minlength="3"'})}
+   <fieldset class="fs span expbox"><legend>Expense details</legend><p class="note" style="margin:0 0 8px">Where did this fee money go? Add one line per bill. Amount and reason are required; a bill photo or PDF is optional. <b>The lines must add up exactly to the fee amount.</b></p>
+    <div id="expRows">${expRowsHtml()}</div><div class="actions"><button type="button" class="btn sm" data-act="expAdd">+ Add another line</button></div><div id="expTotal" class="exptotal">${expTotalHtml()}</div></fieldset>
    <p class="note span">By Expense: this student's fee was used directly for a college expense. The fee counts as paid: a receipt is issued and the due goes down. It shows as Expense in Receipts, Audit and the Dashboard. The student only sees the receipt, not the mode.</p>
    <div class="actions span"><button class="btn primary big">Save fee by expense · issue receipt</button></div></form>`;
 }
+/* expense lines: amount + reason + optional bill (image or PDF) */
+const EXP_DOC_MAX=700*1024;
+function expRowsHtml(){return ui.exp.rows.map((r,i)=>`<div class="exprow" data-i="${i}"><div class="field"><label class="label" for="ea${i}">Amount (₹) *</label><input id="ea${i}" inputmode="decimal" value="${E(r.amount)}" data-live="expAmt" data-i="${i}" required></div>
+  <div class="field"><label class="label" for="er${i}">Reason *</label><input id="er${i}" maxlength="120" value="${E(r.reason)}" data-live="expReason" data-i="${i}" placeholder="e.g. University exam form fees" required></div>
+  <div class="field"><span class="label">Bill / document (optional)</span><div class="actions nowrap">${r.doc?`<button type="button" class="btn sm" data-act="expView" data-i="${i}">📎 ${E(r.doc.name.slice(0,22))}</button><button type="button" class="btn sm" data-act="expDocDel" data-i="${i}" aria-label="Remove document">✕</button>`:`<label class="btn sm"><input type="file" class="sr" accept="image/*,application/pdf" data-change="expDoc" data-i="${i}"> Upload</label>`}
+  ${ui.exp.rows.length>1?`<button type="button" class="btn sm danger" data-act="expDel" data-i="${i}">Remove line</button>`:''}</div></div></div>`).join('')}
+function expTotalHtml(){const f=$('#f_amount');const want=toPaise(f?f.value:0)||0;const got=ui.exp.rows.reduce((a,r)=>a+(toPaise(r.amount)||0),0);const ok=want>0&&got===want;
+  return`<span>Lines total <b>${inr(got)}</b> of fee amount <b>${inr(want)}</b></span>${ok?pill('Matches','good'):pill(got<want?`${inr(want-got)} still to add`:`${inr(got-want)} too much`,'bad')}`}
+const reExp=()=>{const r=$('#expRows');if(r)r.innerHTML=expRowsHtml();expTot()};
+const expTot=()=>{const t=$('#expTotal');if(t)t.innerHTML=expTotalHtml()};
+LIVE.expAmt=el=>{ui.exp.rows[+el.dataset.i].amount=el.value;expTot()};
+LIVE.expReason=el=>{ui.exp.rows[+el.dataset.i].reason=el.value};
+ACT.expAdd=()=>{ui.exp.rows.push({amount:'',reason:'',doc:null});reExp();const l=$$('#expRows input[data-live=expAmt]');l.length&&l[l.length-1].focus()};
+ACT.expDel=el=>{ui.exp.rows.splice(+el.dataset.i,1);reExp()};
+ACT.expDocDel=el=>{ui.exp.rows[+el.dataset.i].doc=null;reExp()};
+CHG.expDoc=el=>{const file=el.files&&el.files[0];const i=+el.dataset.i;if(!file)return;
+  if(/^image\//.test(file.type)){const img=new Image();const url=URL.createObjectURL(file);img.onload=()=>{const k=Math.min(1,1400/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);
+      const data=c.toDataURL('image/jpeg',.72);if(data.length*.75>EXP_DOC_MAX){toast('This photo is too large even after shrinking',true);return}ui.exp.rows[i].doc={name:file.name.replace(/\.[^.]+$/,'')+'.jpg',type:'image/jpeg',data};reExp();toast('Bill attached')};img.onerror=()=>toast('Could not read this image',true);img.src=url;return}
+  if(file.type==='application/pdf'){if(file.size>EXP_DOC_MAX)throw new Error('PDF must be under 700 KB in this demo');const fr=new FileReader();fr.onload=()=>{ui.exp.rows[i].doc={name:file.name,type:'application/pdf',data:fr.result};reExp();toast('Bill attached')};fr.readAsDataURL(file);return}
+  throw new Error('Upload a photo (JPG / PNG) or a PDF')};
+function docOpen(doc){if(!doc)return;const bin=atob(doc.data.split(',')[1]);const u8=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);const url=URL.createObjectURL(new Blob([u8],{type:doc.type}));
+  if(doc.type==='application/pdf'){window.open(url,'_blank','noopener');setTimeout(()=>URL.revokeObjectURL(url),60000);return}
+  dialog(`<h3>${E(doc.name)}</h3><img src="${url}" alt="${E(doc.name)}" style="max-width:100%;border-radius:8px;border:1px solid var(--line)"><div class="actions" style="justify-content:flex-end;margin-top:10px"><a class="btn" href="${url}" download="${E(doc.name)}">Download</a><button class="btn primary" data-act="closeDialog">Close</button></div>`,'Document')}
+ACT.expView=el=>docOpen(ui.exp.rows[+el.dataset.i].doc);
+ACT.expDocOpen=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)return;if(isStudentUser(cur()))throw new Error('Not available');guardStudent(p.studentId);docOpen((p.expenseItems||[])[+el.dataset.i].doc)};
+LIVE.colAmt=()=>expTot();
 ACT.colSem=el=>{ui.col.sem=+el.dataset.sem;reCol()};
 CHG.colMode=el=>{if(!MODE_OK(el.value))throw new Error('You do not have access to this mode');ui.col.mode=el.value;reCol();const a=$('#f_amount');if(a)a.focus()};
 ACT.collectFor=el=>{if(!canAny('fees.collect','expenses.manage'))throw new Error('You do not have access to collect fees');openCollect(el.dataset.id,+el.dataset.sem||0)};
@@ -86,11 +114,17 @@ FORM.collect=(f,d)=>{
   const mode=f.dataset.mode;if(mode==='EXPENSE')need('expenses.manage','add expenses');else need('fees.collect','collect fees');
   const c=ui.col;const s=stu(c.sid);if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');guardStudent(s.id);const m=semSummary(s,c.sem);
   const o={sem:c.sem,mode,amount:amountOf(d,m),batch:cleanBatch(d.batch),invoiceDate:d.invoiceDate,note:capText(d.note,'Note',120)};
-  if(mode==='EXPENSE'){o.reason=capText(d.reason,'Reason',160);if(o.reason.length<3)throw new Error('Write what the money was used for');if(!validIso(o.invoiceDate))throw new Error('Choose a valid invoice date')}
+  if(mode==='EXPENSE'){if(!validIso(o.invoiceDate))throw new Error('Choose a valid invoice date');const rows=(ui.exp&&ui.exp.sid===s.id?ui.exp.rows:[]);if(!rows.length)throw new Error('Add the expense details');
+    const items=rows.map((r,i)=>{const a=toPaise(r.amount);if(!(a>0))throw new Error(`Expense line ${i+1}: enter the amount`);const rs=capText(r.reason,`Expense line ${i+1} reason`,120);if(rs.length<3)throw new Error(`Expense line ${i+1}: write the reason`);return{amount:a,reason:rs,doc:r.doc||null}});
+    const tot=items.reduce((a,x)=>a+x.amount,0);if(tot!==o.amount)throw new Error(`Expense lines add up to ${inr(tot)} but the fee amount is ${inr(o.amount)}. They must match exactly.`);
+    o.expenseItems=items;o.reason=items.map(x=>x.reason).join('; ').slice(0,300)}
   if(mode==='CHEQUE'){o.chequeNo=String(d.chequeNo||'').trim();if(!/^\d{6}$/.test(o.chequeNo))throw new Error('Cheque no. must be 6 digits');o.bank=capText(d.bank,'Bank',60);if(!o.bank)throw new Error('Enter the bank name');if(!validIso(d.chequeDate))throw new Error('Enter the cheque date');o.chequeDate=d.chequeDate;
     if(db.payments.some(p=>p.status==='SUCCESS'&&p.mode==='CHEQUE'&&p.chequeNo===o.chequeNo&&p.bank.toLowerCase()===o.bank.toLowerCase()))throw new Error('This cheque no. of this bank is already entered')}
   if(o.invoiceDate>addDays(today(),0))throw new Error('Invoice date cannot be in the future');
-  const p=recordPayment(s,o);afterPayment(p);save();closeLayer();renderPage();showReceipt(p,true);
+  const p=recordPayment(s,o);if(o.expenseItems)p.expenseItems=o.expenseItems;
+  if(!save()){db.payments.splice(db.payments.indexOf(p),1);if(db.audit[0]&&db.audit[0].entityId===p.rc)db.audit.shift();db.college.nextReceipt--;save();throw new Error('Not enough browser storage for these documents. Use smaller photos or fewer documents.')}
+  afterPayment(p);save();
+  if(mode==='EXPENSE')ui.exp=null;closeLayer();renderPage();showReceipt(p,true);
 };
 /* everything that happens after a successful payment (spec §5.2): receipt no + PDF, email, notification to the student, live update for staff */
 function afterPayment(p){
@@ -122,25 +156,82 @@ function handleUpiWebhook(evt){
   notify('payfail',`UPI payment failed · ${s.name}`,`${inr(o.amount)} · semester ${o.sem}`,{sid:s.id,roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
   return null;
 }
-function upiDialog(o){
-  const s=stu(o.studentId);const upi=`upi://pay?pa=${encodeURIComponent(o.vpa)}&pn=${encodeURIComponent(db.college.short)}&am=${(o.amount/100).toFixed(2)}&tn=${encodeURIComponent(s.enrol+' Sem '+o.sem)}&tr=${o.id}`;
-  dialog(`<h3>Pay ${inr(o.amount)} with UPI</h3><p class="muted" style="margin:0 0 10px">${E(s.name)} · Semester ${o.sem} · order <span class="mono">${E(o.id)}</span></p>
-   <div class="flow" style="margin-bottom:12px"><div class="qr">${qrSvg(upi)}</div><div><p style="margin:0">Scan with Google Pay, PhonePe, Paytm or any UPI app.</p><p class="note">UPI ID: <b class="mono">${E(o.vpa)}</b><br>Invoice date will be ${fmtD(upiInvoiceDate(Date.now()))} (payment date + 1 day).</p>
-   ${isStudentUser(cur())?`<a class="btn primary" href="${E(upi)}" style="margin-top:6px;display:inline-block">Open UPI app</a>`:''}</div></div>
-   <div class="panel sim"><b>Demo gateway (sandbox)</b><p class="note" style="margin:2px 0 8px">In the live system nothing on this screen marks the payment; the gateway calls our server. Use these to simulate the gateway webhook:</p>
-   <div class="actions"><button class="btn" data-act="gwFail" data-id="${E(o.id)}">Webhook: payment failed</button><button class="btn primary" data-act="gwOk" data-id="${E(o.id)}">Webhook: payment captured</button></div></div>
-   <div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn" data-act="closeDialog">Close (keep waiting)</button></div>`,'UPI payment');
+/* ---------- UPI flow (office and student portal) ----------
+   1. An order is created for an exact amount (office: Collect → UPI; student: Fees → Pay with UPI).
+   2. A real QR code is shown. Live mode: upi://pay with the college merchant VPA (dynamic QR from the gateway).
+      Sandbox / demo: the QR opens our demo UPI payment page, so no real money can move by mistake.
+   3. The office can also send the request to the student's portal (notification + "Pay now" there).
+   4. Only the verified gateway webhook marks it paid → receipt, email, notifications; every open screen updates by itself. */
+const UPI_TTL=15*60*1000;
+const orderOf=id=>db.upiOrders.find(x=>x.id===id);
+const orderLive=o=>o&&o.status==='CREATED'&&Date.now()-o.createdAt<UPI_TTL;
+const payPageUrl=o=>`${location.origin}/?pay=${encodeURIComponent(o.id)}`;
+function upiLink(o){const s=stu(o.studentId);return`upi://pay?pa=${encodeURIComponent(o.vpa)}&pn=${encodeURIComponent(db.college.short)}&am=${(o.amount/100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(s.enrol+' Sem '+o.sem+' tuition fee')}&tr=${encodeURIComponent(o.id)}`}
+const qrTarget=o=>db.settings.upi.mode==='Live'?upiLink(o):payPageUrl(o);
+function expireOrders(){let n=0;db.upiOrders.forEach(o=>{if(o.status==='CREATED'&&Date.now()-o.createdAt>=UPI_TTL){o.status='EXPIRED';n++}});return n}
+function upiBox(o){
+  const s=stu(o.studentId);const st=isStudentUser(cur());expireOrders();const p=o.paymentId&&db.payments.find(x=>x.id===o.paymentId);
+  if(o.status==='PAID'&&p)return`<div class="paydone"><div class="tick"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14"/><path d="M10 16.5l4 4 8-9"/></svg>Payment received</div>
+    <p style="margin:6px 0 12px"><b>${inr(o.amount)}</b> · ${E(s.name)} · Semester ${o.sem} · receipt <b class="mono">${E(p.rc)}</b></p>
+    <div class="actions" style="justify-content:flex-end"><button class="btn" data-act="closeDialog">Close</button><button class="btn primary" data-act="viewReceipt" data-id="${E(p.id)}">Open receipt</button></div></div>`;
+  if(o.status!=='CREATED')return`<p class="err" style="margin:0 0 10px">${o.status==='FAILED'?'The payment failed. No money was taken.':o.status==='CANCELLED'?'This payment request was cancelled.':'This QR has expired (15 minutes).'}</p><div class="actions" style="justify-content:flex-end"><button class="btn" data-act="closeDialog">Close</button></div>`;
+  const left=Math.max(0,Math.ceil((UPI_TTL-(Date.now()-o.createdAt))/60000));const live=db.settings.upi.mode==='Live';
+  return`<div class="upi-wrap"><div class="qr">${qrSvg(qrTarget(o))}</div>
+   <div class="upi-info"><div class="amt-big">${inr(o.amount)}</div><div>${E(s.name)} · ${E(s.enrol)}</div><small class="muted">Semester ${o.sem} tuition fee · Batch ${E(o.batch||defaultBatch(s))}</small>
+    <div class="waiting"><span class="spin" aria-hidden="true"></span> Waiting for payment… <small class="muted">QR valid ${left} min</small></div>
+    <p class="note" style="margin:6px 0 0">${st?'Scan with Google Pay, PhonePe, Paytm or any UPI app, or tap the button below.':'Show this QR to the student. They scan it with any UPI app and pay. This screen updates by itself.'}
+    ${live?'':'<br><b>Demo mode:</b> the QR opens the demo UPI payment page, so no real money moves.'} Invoice date will be ${fmtD(upiInvoiceDate(Date.now()))} (payment date + 1 day).</p></div></div>
+   <div class="actions" style="margin-top:12px">
+    ${st?`<a class="btn primary big" href="${E(live?upiLink(o):payPageUrl(o))}" ${live?'':'data-act="openPayPage" data-id="'+E(o.id)+'"'}>Pay ${inr(o.amount)} in UPI app</a>`:`<button class="btn primary" data-act="upiSend" data-id="${E(o.id)}" ${o.sentAt?'disabled':''}>${o.sentAt?'Sent to student portal ✓':'Send to student portal'}</button><button class="btn" data-act="upiShare" data-id="${E(o.id)}">Share pay link</button>${live?'':`<button class="btn" data-act="openPayPage" data-id="${E(o.id)}">Open pay page (demo scan)</button>`}`}
+    <button class="btn danger" data-act="upiCancel" data-id="${E(o.id)}">Cancel request</button></div>
+   ${st||live?'':`<details class="panel sim" style="margin-top:12px"><summary><b>Demo gateway</b> <small class="muted">(in the live system the bank calls our server)</small></summary><div class="actions" style="margin-top:8px"><button class="btn" data-act="gwFail" data-id="${E(o.id)}">Webhook: payment failed</button><button class="btn primary" data-act="gwOk" data-id="${E(o.id)}">Webhook: payment captured</button></div></details>`}`;
 }
+let upiOpen='',upiTimer=0;
+function upiDialog(o){upiOpen=o.id;dialog(`<h3>Pay ${inr(o.amount)} with UPI</h3><p class="muted mono" style="margin:0 0 10px;font-size:12px">Order ${E(o.id)}</p><div id="upiBox" data-st="${E(o.status+(o.sentAt?'s':''))}">${upiBox(o)}</div>`,'UPI payment');
+  clearInterval(upiTimer);upiTimer=setInterval(upiRefresh,1500)}
+/* the waiting screen refreshes itself: a payment from another tab / the student's portal / the webhook shows up at once */
+function upiRefresh(){const box=document.getElementById('upiBox');if(!box||!upiOpen){clearInterval(upiTimer);upiOpen='';return}
+  const raw=lsGet(LS_KEY);if(raw){try{const n=JSON.parse(raw);if(n&&n.ver===DB_VER)db=n}catch(e){}}
+  expireOrders();const o=orderOf(upiOpen);if(!o)return;const was=box.dataset.st;const st=o.status+(o.sentAt?'s':'');box.dataset.st=st;
+  if(was!==st)box.innerHTML=upiBox(o);else if(o.status==='CREATED'){const m=box.querySelector('.waiting small');if(m)m.textContent=`QR valid ${Math.max(0,Math.ceil((UPI_TTL-(Date.now()-o.createdAt))/60000))} min`}
+  if(o.status!=='CREATED')clearInterval(upiTimer)}
 FORM.upiPay=(f,d)=>{
   const u=cur();let s,sem;
   if(isStudentUser(u)){s=stu(u.studentId);sem=+f.dataset.sem}else{need('fees.collect','collect fees');s=stu(ui.col.sid);sem=ui.col.sem;guardStudent(s&&s.id)}
   if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');const m=semSummary(s,sem);const amount=amountOf(d,m);
   const batch=isStudentUser(u)?(([...db.payments].reverse().find(p=>p.studentId===s.id&&p.batch)||{}).batch||defaultBatch(s)):cleanBatch(d.batch);
-  const o=provider.createOrder(s,sem,amount,u.name);o.batch=batch;log('UPI order created','UPI order',o.id,null,{student:s.enrol,sem,amount:inr(amount)});save();closeLayer();upiDialog(o);
+  const o=provider.createOrder(s,sem,amount,u.name);Object.assign(o,{batch,source:isStudentUser(u)?'portal':'office',byRole:u.role});
+  log('UPI order created','UPI order',o.id,null,{student:s.enrol,sem,amount:inr(amount),from:o.source});save();closeLayer();closeDialog();upiDialog(o);
 };
-function gwEvent(id,status){const o=db.upiOrders.find(x=>x.id===id);if(!o)throw new Error('Order not found');const paidAt=Date.now();const evt={orderId:o.id,status,amount:o.amount,paidAt,utr:'UTR'+Math.floor(Math.random()*9e11+1e11),txnId:'pay_'+Math.random().toString(36).slice(2,14)};evt.signature=sig(evt.orderId+'|'+evt.status+'|'+evt.amount+'|'+evt.paidAt);return evt}
-ACT.gwOk=el=>{const p=handleUpiWebhook(gwEvent(el.dataset.id,'captured'));save();closeDialog();renderPage();if(p){toast('UPI payment captured · '+p.rc);showReceipt(p,true)}else toast('This order was already handled')};
-ACT.gwFail=el=>{handleUpiWebhook(gwEvent(el.dataset.id,'failed'));save();closeDialog();renderPage();toast('Payment failed. No money was taken.',true)};
+ACT.upiSend=el=>{need('fees.collect');const o=orderOf(el.dataset.id);if(!orderLive(o))throw new Error('This QR is no longer valid');const s=stu(o.studentId);o.sentAt=Date.now();
+  notify('payment',`Pay ${inr(o.amount)} · Semester ${o.sem}`,`The college office sent you a UPI payment request. Open Fees and tap Pay now.`,{students:[s.id],portal:'sfees',tone:'warn',self:true});
+  log('UPI request sent to portal','UPI order',o.id,null,{student:s.enrol,amount:inr(o.amount)});save();upiRefresh();toast(`Sent to ${s.name}'s portal`)};
+ACT.upiShare=async el=>{const o=orderOf(el.dataset.id);if(!orderLive(o))throw new Error('This QR is no longer valid');const s=stu(o.studentId);
+  const text=`${db.college.short}: pay ${inr(o.amount)} tuition fee for semester ${o.sem} (${s.name}). Pay here: ${db.settings.upi.mode==='Live'?upiLink(o):payPageUrl(o)}`;
+  if(navigator.share){try{await navigator.share({title:'NPCTE fee payment',text});return}catch(e){if(e&&e.name==='AbortError')return}}
+  window.open(`https://wa.me/${s.phone?'91'+s.phone:''}?text=${encodeURIComponent(text)}`,'_blank','noopener')};
+ACT.upiCancel=el=>{const o=orderOf(el.dataset.id);if(!o||o.status!=='CREATED')return closeDialog();const u=cur();if(isStudentUser(u))guardStudent(o.studentId);else need('fees.collect');
+  o.status='CANCELLED';log('UPI request cancelled','UPI order',o.id);save();upiRefresh();toast('Payment request cancelled')};
+ACT.openPayPage=(el,e)=>{if(e)e.preventDefault();const o=orderOf(el.dataset.id);if(!o)return;
+  if(isStudentUser(cur())){location.href=payPageUrl(o);return}window.open(payPageUrl(o),'_blank','noopener')};
+function gwEvent(id,status){const o=orderOf(id);if(!o)throw new Error('Order not found');const paidAt=Date.now();const evt={orderId:o.id,status,amount:o.amount,paidAt,utr:'UTR'+Math.floor(Math.random()*9e11+1e11),txnId:'pay_'+Math.random().toString(36).slice(2,14)};evt.signature=sig(evt.orderId+'|'+evt.status+'|'+evt.amount+'|'+evt.paidAt);return evt}
+ACT.gwOk=el=>{const p=handleUpiWebhook(gwEvent(el.dataset.id,'captured'));save();renderPage();upiRefresh();toast(p?'UPI payment captured · '+p.rc:'This order was already handled')};
+ACT.gwFail=el=>{handleUpiWebhook(gwEvent(el.dataset.id,'failed'));save();renderPage();upiRefresh();toast('Payment failed. No money was taken.',true)};
+
+/* ---------- demo UPI payment page (what a UPI app shows after scanning). Opened from the QR: /?pay=<order id> ---------- */
+function renderPayPage(id){
+  const root=$('#root');const o=orderOf(id);expireOrders();const s=o&&stu(o.studentId);
+  const shell=b=>`<main class="paypage"><div class="pp-card"><div class="pp-h"><div class="seal" aria-hidden="true">₹</div><div><b>UPI payment</b><small>Demo UPI app · sandbox</small></div></div>${b}</div></main>`;
+  if(!o){root.innerHTML=shell(`<p>This payment request is not on this device.</p><p class="note">The demo keeps its data in one browser. Open the QR on the same device as the office screen, or ask the office to use “Webhook: payment captured”. In the live system any phone can pay.</p><a class="btn primary" href="/">Open NPCTE</a>`);return}
+  if(o.status==='PAID'){const p=db.payments.find(x=>x.id===o.paymentId);root.innerHTML=shell(`<div class="paydone"><div class="tick"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14"/><path d="M10 16.5l4 4 8-9"/></svg>Paid ${inr(o.amount)}</div><p>To ${E(db.college.short)} · ${E(s.name)} · Semester ${o.sem}</p>${p?`<p class="mono">UTR ${E(p.upiRef)} · Receipt ${E(p.rc)}</p>`:''}<a class="btn primary big" href="/">Done</a></div>`);return}
+  if(o.status!=='CREATED'){root.innerHTML=shell(`<p class="err">${o.status==='EXPIRED'?'This QR has expired.':o.status==='CANCELLED'?'This request was cancelled.':'This payment failed.'}</p><a class="btn" href="/">Back</a>`);return}
+  root.innerHTML=shell(`<div class="pp-amt">${inr(o.amount)}</div><div class="rline"><span>Pay to</span><b>${E(db.college.name)}</b></div><div class="rline"><span>UPI ID</span><span class="mono">${E(o.vpa)}</span></div>
+   <div class="rline"><span>For</span><span>${E(s.name)} · Sem ${o.sem} tuition fee</span></div><div class="rline"><span>Order</span><span class="mono" style="font-size:12px">${E(o.id)}</span></div>
+   <div class="actions" style="margin-top:16px"><button class="btn big" data-act="ppDecline" data-id="${E(o.id)}">Decline</button><button class="btn primary big" data-act="ppPay" data-id="${E(o.id)}">Pay ${inr(o.amount)}</button></div>
+   <p class="note">Demo: no real money moves. Tapping Pay sends the signed gateway webhook; the office screen and the student portal update at once.</p>`);
+}
+ACT.ppPay=el=>{const p=handleUpiWebhook(gwEvent(el.dataset.id,'captured'));save();ev('Form','UPI paid on pay page',el.dataset.id);renderPayPage(el.dataset.id);if(p)toast('Payment successful · '+p.rc)};
+ACT.ppDecline=el=>{handleUpiWebhook(gwEvent(el.dataset.id,'failed'));save();renderPayPage(el.dataset.id)};
 
 /* ---------- receipt view ---------- */
 function receiptHtml(p){
@@ -148,7 +239,7 @@ function receiptHtml(p){
   return`<div class="receipt ${p.status==='CANCELLED'?'cancelled':''}"><div class="hd"><div><b>${E(c.name)}</b><div class="muted" style="font-size:12px">${E(c.trust)} · ${E(c.address)}</div></div><div class="right"><b class="mono">${E(p.rc)}</b><div class="muted" style="font-size:12px">Invoice date ${fmtD(p.invoiceDate)}</div></div></div>
    ${p.status==='CANCELLED'?`<p class="err" style="margin:0 0 10px">Cancelled on ${fmtT(p.cancelledAt)} by ${E(p.cancelledBy)} · ${E(p.cancelReason)}</p>`:`<div class="tick"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14"/><path d="M10 16.5l4 4 8-9"/></svg>Payment received</div>`}
    <div class="rline"><span>Student</span><b>${E(s.name)}</b></div><div class="rline"><span>Enrolment no.</span><span class="mono">${E(s.enrol)}</span></div><div class="rline"><span>Course</span><span>${E(course(s.course).name)} · Semester ${p.sem}</span></div><div class="rline"><span>Batch</span><b>${E(batchOf(p))}</b></div><div class="rline"><span>Fee</span><span>Tuition fee</span></div>
-   ${sv?'':`<div class="rline"><span>Mode</span><span>${modeName(p.mode)}${p.mode==='CHEQUE'?` · No. ${E(p.chequeNo)}, ${E(p.bank)}, dated ${fmtD(p.chequeDate)}`:''}${p.mode==='UPI'?` · ${E(p.upiRef)}`:''}</span></div>${p.mode==='EXPENSE'&&p.reason?`<div class="rline"><span>Used for</span><span>${E(p.reason)}</span></div>`:''}
+   ${sv?'':`<div class="rline"><span>Mode</span><span>${modeName(p.mode)}${p.mode==='CHEQUE'?` · No. ${E(p.chequeNo)}, ${E(p.bank)}, dated ${fmtD(p.chequeDate)}`:''}${p.mode==='UPI'?` · ${E(p.upiRef)}`:''}</span></div>${p.mode==='EXPENSE'?(p.expenseItems&&p.expenseItems.length?`<div class="expitems"><b>Expense details</b>${p.expenseItems.map((x,i)=>`<div class="rline"><span>${E(x.reason)}${x.doc?` <button class="lnk" data-act="expDocOpen" data-id="${E(p.id)}" data-i="${i}">📎 bill</button>`:''}</span><span>${inr(x.amount)}</span></div>`).join('')}</div>`:p.reason?`<div class="rline"><span>Used for</span><span>${E(p.reason)}</span></div>`:''):''}
    ${p.mode==='UPI'?`<div class="rline"><span>Paid on</span><span>${fmtT(p.paidAt)}</span></div>`:''}<div class="rline"><span>Entered</span><span>${fmtT(p.entryAt)} · ${E(p.by)}</span></div>${p.note?`<div class="rline"><span>Note</span><span>${E(p.note)}</span></div>`:''}`}
    <div class="rline tot"><span>Amount</span><span>${inr(p.amount)}</span></div><div class="rline"><span>Semester ${p.sem} balance now</span><span>${inr(bal)}</span></div>
    ${(p.dateEdits||[]).length?`<p class="note">Invoice date changed: ${p.dateEdits.map(x=>`${fmtD(x.from)} → ${fmtD(x.to)} (${E(x.by)})`).join('; ')}</p>`:''}</div>`;

@@ -35,16 +35,17 @@ ACT.ntOpen=el=>{
 window.addEventListener('storage',e=>{
   if(e.key!==LS_KEY||!e.newValue)return;let n;try{n=JSON.parse(e.newValue)}catch(x){return}if(!n||n.ver!==DB_VER)return;
   const u0=cur();const known=ntKnown||new Set(ntMine(u0).map(x=>x.id));
-  db=n;const u=cur();if(!u){if(!$('form[data-form=login]'))renderLogin();return}
+  db=n;if(typeof PAY_ID!=='undefined'&&PAY_ID){renderPayPage(PAY_ID);return}const u=cur();if(!u){if(!$('form[data-form=login]'))renderLogin();return}
   const fresh=ntMine(u).filter(x=>!x.read&&!known.has(x.id));
   if($('#page')){const busy=$('#layer').innerHTML||$('#dlg').innerHTML||/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||'');if(!busy)renderPage();else if($('.drawer')&&/^Notifications/.test($('.drawer h2')?.textContent||''))ntRedraw()}
   updateBell();deliverLive(fresh);
 });
 /* coming back to the tab (= socket reconnect): sync anything missed since last seen */
-document.addEventListener('visibilitychange',()=>{if(document.hidden||!cur())return;const raw=lsGet(LS_KEY);if(raw){try{const n=JSON.parse(raw);if(n&&n.ver===DB_VER)db=n}catch(e){}}const n0=db.notifs.length;ntSync();if(db.notifs.length!==n0)save();updateBell();if($('#page')&&!$('#layer').innerHTML&&!$('#dlg').innerHTML)renderPage()});
+document.addEventListener('visibilitychange',()=>{if(document.hidden||!cur()||(typeof PAY_ID!=='undefined'&&PAY_ID))return;const raw=lsGet(LS_KEY);if(raw){try{const n=JSON.parse(raw);if(n&&n.ver===DB_VER)db=n}catch(e){}}const n0=db.notifs.length;ntSync();if(db.notifs.length!==n0)save();updateBell();if($('#page')&&!$('#layer').innerHTML&&!$('#dlg').innerHTML)renderPage()});
 
 /* ---------- boot ---------- */
 load();applyTheme();
-if(cur()){ntSync();save();renderApp()}else renderLogin();
+const PAY_ID=new URLSearchParams(location.search).get('pay');
+if(PAY_ID)renderPayPage(PAY_ID);else if(cur()){ntSync();save();renderApp()}else renderLogin();
 setTimeout(()=>{ntLive=true},1500);
 themeLabels();new MutationObserver(themeLabels).observe($('#root'),{childList:true,subtree:true});try{matchMedia('(prefers-color-scheme:dark)').addEventListener('change',themeLabels)}catch(e){}

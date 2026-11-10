@@ -76,7 +76,10 @@ const DEFAULT_ROLES=()=>({
  'Principal':ALL_STAFF_PERMS.slice(),
  'Clerk':['dashboard.view','students.view','students.edit','fees.view','fees.collect','fees.cancel','fees.editdate','expenses.manage','audit.view','audit.deposit','notices.post','enquiries.view']});
 const cur=()=>db&&db.users.find(u=>u.id===sesGet()&&u.active);
-const can=p=>{const u=cur();if(!u)return false;if(u.role==='Super Admin')return true;if(u.role==='Student')return false;return (db.roles[u.role]||[]).includes(p)};
+/* hierarchy: Super Admin > Principal > Clerk > Student. A lower role never gets a higher role's settings or sees its logs. */
+const ROLE_RANK={'Super Admin':3,'Principal':2,'Clerk':1,'Student':0};
+const PRINCIPAL_ONLY=['roles.manage','settings.manage','fees.setup'];
+const can=p=>{const u=cur();if(!u)return false;if(u.role==='Super Admin')return true;if(u.role==='Student')return false;if(u.role==='Clerk'&&PRINCIPAL_ONLY.includes(p))return false;return (db.roles[u.role]||[]).includes(p)};
 const canAny=(...p)=>p.some(can);
 const need=(p,what)=>{if(!can(p))throw new Error('You do not have access'+(what?' to '+what:''))};
 const isStudentUser=u=>!!u&&u.role==='Student';

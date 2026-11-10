@@ -10,17 +10,22 @@ function viewStudentHome(){
   <div class="duecard ${sm.payable?(sm.overdue?'bad':'warn'):'good'}"><span class="label">Fee due now</span><div class="v">${inr(sm.payable)}</div>
    <small>${sm.payable?(next?`Semester ${next.sem}${next.dueDate?' · due '+fmtD(next.dueDate):''}${next.overdue?' · overdue':''}`:''):'You have no pending fee. Thank you!'}</small>
    ${next?`<button class="btn primary big" data-act="payNow" data-sem="${next.sem}">Pay ${inr(next.due)} with UPI</button>`:''}</div>
+  ${payRequestsHtml(s)}
   ${alerts.length?`<div class="panel"><h2>Alerts</h2><div class="list">${alerts.map(n=>`<button class="li pick" data-act="ntOpen" data-id="${E(n.id)}"><div><b>${E(n.t)}</b><small>${E(n.x)} · ${E(ago(n.ts))}</small></div></button>`).join('')}</div></div>`:''}
   <div class="panel"><h2>Latest notices <button class="btn sm" data-act="nav" data-id="snotices">All notices</button></h2><div class="list">${nn.map(n=>`<button class="li pick ${r.has(n.id)?'':'unread'}" data-act="readNotice" data-id="${E(n.id)}"><div><b>${E(n.title)}</b><small>${E(fmtT(n.publishAt))}</small></div>${n.isFeeAlert?pill('Fee','warn'):''}</button>`).join('')||'<p class="note">No notices yet.</p>'}</div></div>`;
 }
 function viewStudentFees(){
   const s=me();const sm=feeSum(s);const pays=db.payments.filter(p=>p.studentId===s.id).sort((a,b)=>b.entryAt-a.entryAt);
-  return head('My fees',`Tuition fee: total ${inr(sm.total)} · paid ${inr(sm.paid)} · due now ${inr(sm.payable)}`)+semCards(s,{pay:true})+
+  return head('My fees',`Tuition fee: total ${inr(sm.total)} · paid ${inr(sm.paid)} · due now ${inr(sm.payable)}`)+payRequestsHtml(s)+semCards(s,{pay:true})+
   `<div class="panel" style="margin-top:16px"><h2>Receipts</h2><div class="list">${pays.map(p=>`<div class="li"><div><b>${E(p.rc)} · ${inr(p.amount)}</b><small>Tuition fee · Semester ${p.sem} · Batch ${E(batchOf(p))} · invoice ${fmtD(p.invoiceDate)}</small></div><div class="actions nowrap">${p.status==='SUCCESS'?'':payPill(p.status)}<button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button><button class="btn sm" data-act="dlPdf" data-id="${E(p.id)}">PDF</button></div></div>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
   <p class="note">Paying with UPI: your receipt is ready as soon as the bank confirms. Its invoice date is the next day (college rule).</p>`;
 }
+/* payment requests the office sent to this student (UPI QR orders still open) */
+function payRequestsHtml(s){expireOrders();const l=db.upiOrders.filter(o=>o.studentId===s.id&&o.sentAt&&orderLive(o));if(!l.length)return'';
+  return`<div class="panel payreq"><h2>Payment requests from the office</h2><div class="list">${l.map(o=>`<div class="li"><div><b>${inr(o.amount)} · Semester ${o.sem}</b><small>Tuition fee · sent ${E(ago(o.sentAt))} by ${E(o.by)}</small></div><button class="btn primary" data-act="payReq" data-id="${E(o.id)}">Pay now</button></div>`).join('')}</div></div>`}
+ACT.payReq=el=>{const o=orderOf(el.dataset.id);guardStudent(o&&o.studentId);if(!orderLive(o))throw new Error('This request has expired. Ask the office for a new one, or pay from your fee card.');upiDialog(o)};
 ACT.payNow=el=>{const s=me();const m=semSummary(s,+el.dataset.sem);if(!(m.due>0))throw new Error('Nothing due for this semester');
-  dialog(`<h3>Pay semester ${m.sem} tuition fee</h3><p class="muted" style="margin:0 0 10px">Due ${inr(m.due)}. You can pay the full amount or a part.</p>
+  dialog(`<h3>Pay semester ${m.sem} tuition fee</h3><p class="muted" style="margin:0 0 10px">${m.started?'Due':'Upcoming (pay in advance)'} ${inr(m.due)}. You can pay the full amount or a part.</p>
    <form data-form="upiPay" data-sem="${m.sem}" class="grid" style="gap:10px">${F('amount','Amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}"`})}
    <p class="note" style="margin:0">Invoice date will be ${fmtD(upiInvoiceDate(Date.now()))}.</p><div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Cancel</button><button class="btn primary">Continue to UPI</button></div></form>`,'Pay fee')};
 function viewStudentNotices(){

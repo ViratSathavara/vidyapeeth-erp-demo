@@ -112,12 +112,6 @@ const pill=(t,tone='')=>`<span class="pill ${tone}">${E(t)}</span>`;
 function feePill(sm){return (sm.status==='Paid'?pill('Paid','good'):sm.status==='Partial'?pill('Partial','warn'):pill('Not paid','bad'))+(sm.overdue&&sm.status!=='Paid'?' '+pill('Overdue','bad'):'')}
 function head(title,sub,actions=''){return`<div class="top"><div><h1>${E(title)}</h1>${sub?`<p>${E(sub)}</p>`:''}</div><div class="actions">${actions}</div></div>`}
 function tabsBar(key,items,cur){return`<div class="tabs" role="tablist">${items.map(([id,l])=>`<button role="tab" aria-selected="${cur===id}" data-act="tab" data-key="${E(key)}" data-id="${E(id)}">${E(l)}</button>`).join('')}</div>`}
-function qrSvg(seed){let h=0;for(const ch of seed)h=(h*31+ch.charCodeAt(0))>>>0;h=h||1;
-  const r=()=>{h^=h<<13;h>>>=0;h^=h>>>17;h^=h<<5;h>>>=0;return h/4294967296};
-  const fz=(x,y)=>`<rect x="${x}" y="${y}" width="7" height="7" fill="#000"/><rect x="${x+1}" y="${y+1}" width="5" height="5" fill="#fff"/><rect x="${x+2}" y="${y+2}" width="3" height="3" fill="#000"/>`;
-  let s='';for(let y=0;y<21;y++)for(let x=0;x<21;x++){if((x<8&&y<8)||(x>12&&y<8)||(x<8&&y>12))continue;if(r()>.52)s+=`<rect x="${x}" y="${y}" width="1" height="1" fill="#000"/>`}
-  return`<svg viewBox="-2 -2 25 25" width="132" height="132" role="img" aria-label="Sample UPI QR code"><rect x="-2" y="-2" width="25" height="25" fill="#fff"/>${fz(0,0)}${fz(14,0)}${fz(0,14)}${s}</svg>`;
-}
 function csvOf(cols,rows){const q=v=>{v=String(v??'');return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};return [cols.map(q).join(','),...rows.map(r=>r.map(q).join(','))].join('\n')}
 function download(name,data,type){const blob=new Blob([data],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
 /* CSV opens straight in Excel (UTF-8 BOM keeps the rupee sign and Gujarati names) */

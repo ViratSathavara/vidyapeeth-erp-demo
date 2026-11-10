@@ -20,11 +20,13 @@ function receiptPdf(p,studentCopy){if(studentCopy===undefined)studentCopy=isStud
     if(cancelled){g.rect(40,124,515,26,'#fdeaea');g.text(52,141,`CANCELLED on ${fmtD(istDate(p.cancelledAt))} - ${p.cancelReason}`,{size:10,bold:true,color:'#b42318'})}
     else{g.rect(40,124,150,24,'#e5f6ec');g.text(52,140,'PAYMENT RECEIVED',{size:10,bold:true,color:'#1a7f45'})}
     const mode=modeName(p.mode)+(p.mode==='CHEQUE'?` No. ${p.chequeNo}, ${p.bank}, dated ${fmtD(p.chequeDate)}`:'')+(p.mode==='UPI'?` (${p.upiRef})`:'');
-    const info=[['Student',s.name],['Enrolment no.',s.enrol],['Course',course(s.course).name],['Batch',batchOf(p)],['Semester',String(p.sem)],...(studentCopy?[['Fee','Tuition fee']]:[['Mode of payment',mode],['Category',s.category],['Entered by',p.by||'-'],['Entered on',fmtT(p.entryAt)]])];if(!studentCopy&&p.mode==='EXPENSE'&&p.reason)info.push(['Used for (expense)',p.reason]);
+    const info=[['Student',s.name],['Enrolment no.',s.enrol],['Course',course(s.course).name],['Batch',batchOf(p)],['Semester',String(p.sem)],...(studentCopy?[['Fee','Tuition fee']]:[['Mode of payment',mode],['Category',s.category],['Entered by',p.by||'-'],['Entered on',fmtT(p.entryAt)]])];if(!studentCopy&&p.mode==='EXPENSE'&&p.reason&&!(p.expenseItems||[]).length)info.push(['Used for (expense)',p.reason]);
     let y=180;info.forEach((r,i)=>{const cx=i%2?310:40;if(i%2===0&&i>0)y+=40;g.text(cx,y,r[0].toUpperCase(),{size:7.5,bold:true,color:MUT});g.wrap(cx,y+15,r[1],240,{size:11,color:INK})});
     y+=64;g.rect(40,y,515,24,'#eef2fb');
     g.text(50,y+16,'PARTICULARS',{size:8,bold:true,color:MUT});g.text(545,y+16,'AMOUNT',{size:8,bold:true,color:MUT,align:'right'});y+=24;
-    g.text(50,y+18,`Tuition fee · ${course(s.course).name} Semester ${p.sem}`,{size:11});g.text(545,y+18,rs(p.amount),{size:11,align:'right',bold:true});y+=28;g.line(40,y,555,y,LINE,.6);
+    g.text(50,y+18,`Tuition fee · ${course(s.course).name} Semester ${p.sem}`,{size:11});g.text(545,y+18,rs(p.amount),{size:11,align:'right',bold:true});y+=28;
+    if(!studentCopy&&(p.expenseItems||[]).length){p.expenseItems.forEach(x=>{g.text(64,y+12,'Expense: '+x.reason.slice(0,70)+(x.doc?' (bill attached)':''),{size:9,color:MUT});g.text(545,y+12,rs(x.amount),{size:9,align:'right',color:MUT});y+=16});y+=6}
+    g.line(40,y,555,y,LINE,.6);
     const m=semSummary(s,p.sem);
     y+=18;g.rect(300,y,255,64,'#f3f5fa');
     g.text(314,y+22,'AMOUNT RECEIVED',{size:8,bold:true,color:MUT});g.text(541,y+50,rs(p.amount),{size:22,bold:true,color:cancelled?'#b42318':INK,align:'right'});

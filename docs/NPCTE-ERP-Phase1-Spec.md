@@ -52,6 +52,9 @@ Folder layout:
 - Permissions are stored per role (matrix screen under Settings → Roles & Permissions, editable by Super Admin/Principal) and checked **on the server**, not only by hiding buttons.
 - Super Admin can create additional Clerk logins.
 
+### 2.0 Role hierarchy
+- Super Admin > Principal > Clerk > Student. A lower role never gets a higher role's rights and never sees its activity / event logs: a Principal never sees the Super Admin's actions; a Clerk never gets Roles, College settings or Fee setup (Principal only) and never sees a Principal's actions.
+
 ### 2.1 Courses and course scope
 - **Courses** (B.Ed, M.Ed, and any new one such as PhD) are managed by the Super Admin in Settings → Courses: name, short code (used in enrolment no.), duration in years, number of semesters, default tuition fee per semester, on/off.
 - Every Principal / Clerk login is assigned **one or more courses** (Settings → Staff logins → Courses). Examples: one Principal for B.Ed and another for M.Ed; one Clerk for both.
@@ -130,6 +133,8 @@ Flow: search student (name / enrolment no / phone) → see 4 semester cards with
 - After a successful payment: receipt number (prefix + running number), PDF receipt, email to student, in-app + push notification to the student, live update on dashboards via Socket.IO.
 
 ### 5.3 By Expense (no separate expense ledger)
+
+- **Expense details** (required section when mode = Expense): one or more lines, each with **amount** (required), **reason** (required) and **bill photo / PDF** (optional). The lines must add up **exactly** to the fee amount (₹10,000 = e.g. 4,000 + 6,000). Bills can be opened later from the office receipt; the student never sees them.
 - When a student's fee money is used directly for a college expense, the clerk collects that fee with mode **By Expense** in Collect payment.
 - Fields: amount, batch, invoice date, **what the fee was used for** (required).
 - Effect: it is a normal successful payment: receipt number + PDF + email, the semester due goes down, it can be cancelled with a reason, and the invoice date can be edited.
@@ -137,6 +142,10 @@ Flow: search student (name / enrolment no / phone) → see 4 semester cards with
 - There is no "Add expense" form, expenses list, expense categories or `expenseReducesDue` setting.
 
 ### 5.4 UPI / Google Pay
+
+- **Office (Clerk):** Collect → mode **UPI** → amount + batch → **a real QR code** for that exact amount is shown with a live "Waiting for payment…" status (valid 15 min). The clerk can **Send to student portal** (request + notification, "Pay now" in the portal), **Share pay link** (WhatsApp / share sheet) or cancel. When the gateway confirms, the office screen turns to "Payment received" with the receipt — no manual entry.
+- **Student portal:** UPI only. Pay any semester that has a balance — due now or **in advance** — full or part amount; office requests appear at the top of Fees with **Pay now**.
+- **Live mode** QR = `upi://pay` with the college merchant VPA / gateway dynamic QR. **Demo (sandbox)** QR opens the demo UPI payment page (`/?pay=<order>`) so no real money can move by mistake.
 - Build a `PaymentProvider` interface (`createOrder`, `verifyWebhook`, `getStatus`) so the provider can be swapped.
 - Requirement from client: Google Pay / UPI. Google Pay for Business does not openly offer a general collection API; check availability for the college's bank account first. Implement in this order:
   1. **UPI intent / QR** with the college's merchant VPA + payment-gateway webhook (Razorpay / Cashfree / PhonePe PG) — works with Google Pay and any UPI app.

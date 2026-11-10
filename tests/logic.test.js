@@ -56,10 +56,12 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'CASH'};const n0=db.payments.length;
  threw=false;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'1000',batch:'',invoiceDate:'2026-11-08'})}catch(e){threw=/batch/i.test(e.message)}ok(threw&&db.payments.length===n0,'cash without batch refused');
  A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'EXPENSE'};const due0=A.semSummary(s2,m2.sem).due;
- threw=false;try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'1000',batch:'2025-27',invoiceDate:'2026-11-08',reason:''})}catch(e){threw=true}ok(threw,'expense needs reason');
+ threw=false;A.ui.exp={sid:s2.id,rows:[{amount:'1000',reason:'',doc:null}]};try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'1000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){threw=true}ok(threw,'expense needs reason');
+ A.ui.exp={sid:s2.id,rows:[{amount:'4000',reason:'Exam fees paid to university',doc:null},{amount:'5000',reason:'Teaching material',doc:null}]};threw=false;try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){threw=/match exactly/.test(e.message)}ok(threw,'expense lines must add up exactly');
+ A.ui.exp.rows[1].amount='6000';
  A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'EXPENSE'};
- try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08',reason:'Exam fees paid to university',category:''})}catch(e){if(!/showReceipt|not defined|drawer/.test(e.message))console.log('collect err',e.message)}
- const pe=db.payments.at(-1);ok(pe.mode==='EXPENSE'&&pe.batch==='2025-27'&&pe.reason==='Exam fees paid to university'&&pe.invoiceDate==='2026-11-08','expense payment saved');
+ try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){if(!/showReceipt|not defined|drawer/.test(e.message))console.log('collect err',e.message)}
+ const pe=db.payments.at(-1);ok(pe.mode==='EXPENSE'&&pe.batch==='2025-27'&&/Exam fees paid to university/.test(pe.reason)&&pe.expenseItems.length===2&&pe.invoiceDate==='2026-11-08','expense payment saved');
  ok(A.semSummary(s2,m2.sem).due===due0-1000000,'expense reduces due');ok(!A.db.expenses&&!A.feeTabs().some(t=>t[0]==='expenses'),'no separate expense section');
  ok(/2025-27/.test(A.receiptHtml(pe))&&/Exam fees/.test(A.receiptHtml(pe)),'receipt shows batch + reason');
  A.ui.f['audit.tx']={modes:['EXPENSE']};ok(A.txFiltered().some(r=>r.id===pe.id&&r.batch==='2025-27'),'audit has expense fee');
@@ -86,4 +88,9 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  ok(A.eventsVisible().length===db.events.length,'super admin sees every event');
  login('principalmed');ok(A.eventsVisible().some(e=>e.actor==='Accounts Clerk')&&!A.eventsVisible().some(e=>e.role==='Super Admin'),'principal sees own-course logins only');
  ok(/Event log/.test(A.auditEvents()),'event log tab renders');}
+// ---- role hierarchy ----
+{login('admin');A.ev('Click','Admin only thing','x');A.evFlush();
+ login('principal');ok(!A.eventsVisible().some(e=>e.role==='Super Admin')&&!A.auditVisible().some(a=>a.role==='Super Admin'),'principal never sees super admin logs');
+ login('clerk');ok(!A.can('fees.setup')&&!A.can('roles.manage')&&!A.can('settings.manage'),'clerk never gets principal-only rights');
+ const r=db.roles.Clerk;r.push('activity.view');ok(!A.eventsVisible().some(e=>e.role==='Principal'||e.role==='Super Admin'),'clerk never sees principal logs');r.pop();}
 console.log('pass',pass,'fail',fail);
