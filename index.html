@@ -7,7 +7,7 @@
 <title>NPCTE ERP</title>
 <meta name="description" content="NPCTE College ERP - The New Progressive College of Teachers' Education, Mehsana">
 <meta name="theme-color" content="#14284b">
-<link rel="manifest" href="/manifest.webmanifest">
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
 <link rel="icon" href="/icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -781,6 +781,7 @@ table.dense th,table.dense td{padding:7px 8px;font-size:13px}
 .feetable td{vertical-align:middle}
 .scard>h2{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
 .scard>h2 .btn{font:600 14px/1.2 var(--body);letter-spacing:0;padding:9px 14px;min-height:0;height:auto}
+#notifySlot{max-width:1560px;margin-inline:auto}.nbar .seal{font-size:18px}
 </style>
 <div id="root"></div><div id="layer"></div><div id="dlg"></div>
 <script>
@@ -1163,6 +1164,12 @@ async function showPopup(title,body,tag,link){
     if(reg){await reg.showNotification(title,POP_OPTS(body,tag,link));return true}
     const x=new Notification(title,POP_OPTS(body,tag,link));x.onclick=()=>{window.focus();x.close()};return true}catch(e){return false}}
 function sysPopup(n){showPopup(n.t,n.x,n.id)}
+/* a bar on every screen while notifications are not on for this device (the installed app has its own permission) */
+function renderNotifyBar(){const slot=document.getElementById('notifySlot');if(!slot)return;let perm='unsupported';try{perm='Notification' in window?Notification.permission:'unsupported'}catch(e){}
+  let hide=false;try{hide=sessionStorage.getItem('npcte_nbar')==='1'}catch(e){}
+  if(perm==='granted'||perm==='unsupported'||hide){slot.innerHTML='';return}
+  slot.innerHTML=`<div class="installbar ib-app nbar" role="region" aria-label="Notifications"><div class="seal" aria-hidden="true">🔔</div><div><b>${perm==='denied'?'Notifications are blocked on this device':'Turn on notifications'}</b><small>${perm==='denied'?'Fee alerts and notices cannot pop up. Phone Settings → Apps → NPCTE → Notifications → Allow.':'Get fee alerts, payments and notices as phone notifications, like WhatsApp.'}</small></div>
+   <div class="actions nowrap">${perm==='default'?'<button class="btn primary" data-act="askNotify">Turn on</button>':'<button class="btn" data-act="notifCheck">Check</button>'}<button class="btn" data-act="nbarHide" aria-label="Hide">Later</button></div></div>`}
 /* "Test notification" on every profile: shows a popup now, or after 10 s so the phone can be locked first */
 function notifyPanelHtml(){const perm=!('Notification' in window)?'unsupported':Notification.permission;
   return`<p class="note" style="margin:0 0 8px">Popups for payments, fee alerts and notices on this device.</p>
@@ -1496,10 +1503,10 @@ function renderApp(){
     <div class="tb-brand">${LOGO()}<b>${E(db.college.short)}</b></div><div class="crumb" id="crumb"></div>
     <div class="tb-end">${portal?'':courseSwitch()}<span id="tbInstall" class="install-holder"></span>${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button>
     ${portal?'':`<button class="iconbtn" data-act="logout" type="button" title="Sign out" aria-label="Sign out">${ICON_OUT}</button>`}</div></div>
-    <div id="installSlot" class="install-holder"></div><div id="page"></div></main>
+    <div id="installSlot" class="install-holder"></div><div id="notifySlot" class="install-holder"></div><div id="page"></div></main>
    ${portal?`<nav class="btabs" id="btabs" aria-label="Student menu"></nav>`:''}</div>`;
   renderNav();renderPage();playEnter('enter');
-  if(typeof renderInstallUI==='function')renderInstallUI();
+  if(typeof renderInstallUI==='function')renderInstallUI();renderNotifyBar();
   if(userDriven&&(!document.activeElement||document.activeElement===document.body))focusH1();
 }
 function renderNav(){
@@ -2433,7 +2440,7 @@ FORM.myPhone=(f,d)=>{const s=me();const ph=String(d.phone||'').replace(/\D/g,'')
 function askNotifyGently(){if(!('Notification' in window)||Notification.permission!=='default'||lsGet('npcte_ask_notify')==='1')return;lsSet('npcte_ask_notify','1');
   dialog(`<h3>Get fee alerts and notices?</h3><p class="muted" style="margin:0 0 12px">NPCTE can show a popup on this device when a payment is received, a fee is due, or the college posts a notice. You can turn this off any time.</p><div class="actions" style="justify-content:flex-end"><button class="btn" data-act="closeDialog">Not now</button><button class="btn primary" data-act="askNotify">Allow notifications</button></div>`,'Notifications')}
 ACT.askNotify=async()=>{closeDialog();if(!('Notification' in window))throw new Error('This browser does not support notifications');const r=await Notification.requestPermission();
-  if(r==='granted'){toast('Notifications on');showPopup('Notifications are on','You will get NPCTE fee alerts and notices here.','on')}else toast('Notifications not allowed',true);const np=$('#notifyPanel');if(np)np.innerHTML=notifyPanelHtml();if(ui.route==='sprofile')renderPage()};
+  if(r==='granted'){toast('Notifications on');showPopup('Notifications are on','You will get NPCTE fee alerts and notices here.','on')}else toast('Notifications not allowed',true);const np=$('#notifyPanel');if(np)np.innerHTML=notifyPanelHtml();renderNotifyBar();if(ui.route==='sprofile')renderPage()};
 if('serviceWorker' in navigator&&location.protocol!=='file:')addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 ACT.testPop=async el=>{const d=+el.dataset.d||0;const u=cur();
   if(!('Notification' in window))throw new Error('This browser does not support notifications');
@@ -2442,6 +2449,7 @@ ACT.testPop=async el=>{const d=+el.dataset.d||0;const u=cur();
   if(!reg||!reg.active)throw new Error('The app\'s service worker is not running yet. Reload the app once and try again.');
   reg.active.postMessage({type:'notify',delay:d*1000,title:'NPCTE · test notification',body:`Hello ${u?u.name:''}, notifications work on this device.`,tag:'test-'+Date.now()});
   ev('Click','Test notification',d?d+' s':'now');toast(d?`Notification in ${d} seconds. Close the app or lock the phone now.`:'Notification sent. Pull down the notification shade.')};
+ACT.nbarHide=()=>{try{sessionStorage.setItem('npcte_nbar','1')}catch(e){}renderNotifyBar()};
 ACT.notifCheck=async()=>{const r=[];const perm=!('Notification' in window)?'not supported':Notification.permission;r.push(['Permission',perm]);
   let sw='not supported';if('serviceWorker' in navigator){const reg=await navigator.serviceWorker.getRegistration();sw=reg&&reg.active?'running':reg?'installing':'not registered'}r.push(['Service worker',sw]);
   r.push(['Opened as installed app',matchMedia('(display-mode: standalone)').matches?'yes':'no (browser tab)']);r.push(['Browser',device()]);r.push(['Secure (https)',isSecureContext?'yes':'no']);

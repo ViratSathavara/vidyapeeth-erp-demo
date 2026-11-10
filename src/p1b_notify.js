@@ -96,6 +96,12 @@ async function showPopup(title,body,tag,link){
     if(reg){await reg.showNotification(title,POP_OPTS(body,tag,link));return true}
     const x=new Notification(title,POP_OPTS(body,tag,link));x.onclick=()=>{window.focus();x.close()};return true}catch(e){return false}}
 function sysPopup(n){showPopup(n.t,n.x,n.id)}
+/* a bar on every screen while notifications are not on for this device (the installed app has its own permission) */
+function renderNotifyBar(){const slot=document.getElementById('notifySlot');if(!slot)return;let perm='unsupported';try{perm='Notification' in window?Notification.permission:'unsupported'}catch(e){}
+  let hide=false;try{hide=sessionStorage.getItem('npcte_nbar')==='1'}catch(e){}
+  if(perm==='granted'||perm==='unsupported'||hide){slot.innerHTML='';return}
+  slot.innerHTML=`<div class="installbar ib-app nbar" role="region" aria-label="Notifications"><div class="seal" aria-hidden="true">🔔</div><div><b>${perm==='denied'?'Notifications are blocked on this device':'Turn on notifications'}</b><small>${perm==='denied'?'Fee alerts and notices cannot pop up. Phone Settings → Apps → NPCTE → Notifications → Allow.':'Get fee alerts, payments and notices as phone notifications, like WhatsApp.'}</small></div>
+   <div class="actions nowrap">${perm==='default'?'<button class="btn primary" data-act="askNotify">Turn on</button>':'<button class="btn" data-act="notifCheck">Check</button>'}<button class="btn" data-act="nbarHide" aria-label="Hide">Later</button></div></div>`}
 /* "Test notification" on every profile: shows a popup now, or after 10 s so the phone can be locked first */
 function notifyPanelHtml(){const perm=!('Notification' in window)?'unsupported':Notification.permission;
   return`<p class="note" style="margin:0 0 8px">Popups for payments, fee alerts and notices on this device.</p>

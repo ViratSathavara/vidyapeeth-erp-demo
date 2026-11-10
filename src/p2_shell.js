@@ -93,10 +93,10 @@ function renderApp(){
     <div class="tb-brand">${LOGO()}<b>${E(db.college.short)}</b></div><div class="crumb" id="crumb"></div>
     <div class="tb-end">${portal?'':courseSwitch()}<span id="tbInstall" class="install-holder"></span>${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button>
     ${portal?'':`<button class="iconbtn" data-act="logout" type="button" title="Sign out" aria-label="Sign out">${ICON_OUT}</button>`}</div></div>
-    <div id="installSlot" class="install-holder"></div><div id="page"></div></main>
+    <div id="installSlot" class="install-holder"></div><div id="notifySlot" class="install-holder"></div><div id="page"></div></main>
    ${portal?`<nav class="btabs" id="btabs" aria-label="Student menu"></nav>`:''}</div>`;
   renderNav();renderPage();playEnter('enter');
-  if(typeof renderInstallUI==='function')renderInstallUI();
+  if(typeof renderInstallUI==='function')renderInstallUI();renderNotifyBar();
   if(userDriven&&(!document.activeElement||document.activeElement===document.body))focusH1();
 }
 function renderNav(){

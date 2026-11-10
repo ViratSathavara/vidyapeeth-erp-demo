@@ -50,7 +50,7 @@ FORM.myPhone=(f,d)=>{const s=me();const ph=String(d.phone||'').replace(/\D/g,'')
 function askNotifyGently(){if(!('Notification' in window)||Notification.permission!=='default'||lsGet('npcte_ask_notify')==='1')return;lsSet('npcte_ask_notify','1');
   dialog(`<h3>Get fee alerts and notices?</h3><p class="muted" style="margin:0 0 12px">NPCTE can show a popup on this device when a payment is received, a fee is due, or the college posts a notice. You can turn this off any time.</p><div class="actions" style="justify-content:flex-end"><button class="btn" data-act="closeDialog">Not now</button><button class="btn primary" data-act="askNotify">Allow notifications</button></div>`,'Notifications')}
 ACT.askNotify=async()=>{closeDialog();if(!('Notification' in window))throw new Error('This browser does not support notifications');const r=await Notification.requestPermission();
-  if(r==='granted'){toast('Notifications on');showPopup('Notifications are on','You will get NPCTE fee alerts and notices here.','on')}else toast('Notifications not allowed',true);const np=$('#notifyPanel');if(np)np.innerHTML=notifyPanelHtml();if(ui.route==='sprofile')renderPage()};
+  if(r==='granted'){toast('Notifications on');showPopup('Notifications are on','You will get NPCTE fee alerts and notices here.','on')}else toast('Notifications not allowed',true);const np=$('#notifyPanel');if(np)np.innerHTML=notifyPanelHtml();renderNotifyBar();if(ui.route==='sprofile')renderPage()};
 if('serviceWorker' in navigator&&location.protocol!=='file:')addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 ACT.testPop=async el=>{const d=+el.dataset.d||0;const u=cur();
   if(!('Notification' in window))throw new Error('This browser does not support notifications');
@@ -59,6 +59,7 @@ ACT.testPop=async el=>{const d=+el.dataset.d||0;const u=cur();
   if(!reg||!reg.active)throw new Error('The app\'s service worker is not running yet. Reload the app once and try again.');
   reg.active.postMessage({type:'notify',delay:d*1000,title:'NPCTE · test notification',body:`Hello ${u?u.name:''}, notifications work on this device.`,tag:'test-'+Date.now()});
   ev('Click','Test notification',d?d+' s':'now');toast(d?`Notification in ${d} seconds. Close the app or lock the phone now.`:'Notification sent. Pull down the notification shade.')};
+ACT.nbarHide=()=>{try{sessionStorage.setItem('npcte_nbar','1')}catch(e){}renderNotifyBar()};
 ACT.notifCheck=async()=>{const r=[];const perm=!('Notification' in window)?'not supported':Notification.permission;r.push(['Permission',perm]);
   let sw='not supported';if('serviceWorker' in navigator){const reg=await navigator.serviceWorker.getRegistration();sw=reg&&reg.active?'running':reg?'installing':'not registered'}r.push(['Service worker',sw]);
   r.push(['Opened as installed app',matchMedia('(display-mode: standalone)').matches?'yes':'no (browser tab)']);r.push(['Browser',device()]);r.push(['Secure (https)',isSecureContext?'yes':'no']);

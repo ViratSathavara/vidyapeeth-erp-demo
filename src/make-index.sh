@@ -23,7 +23,7 @@ head='''<!doctype html>
 <title>NPCTE ERP</title>
 <meta name="description" content="NPCTE College ERP - The New Progressive College of Teachers' Education, Mehsana">
 <meta name="theme-color" content="#14284b">
-<link rel="manifest" href="/manifest.webmanifest">
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
 <link rel="icon" href="/icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
