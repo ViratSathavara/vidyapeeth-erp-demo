@@ -66,10 +66,10 @@ function batchField(s){const b=defaultBatch(s);const opts=batchOptions(s.course)
   return`<div class="field"><label class="label" for="f_batch">Batch *</label><select id="f_batch" name="batch" required><option value="">Choose batch</option>${opts.map(o=>`<option ${o===b?'selected':''}>${E(o)}</option>`).join('')}</select></div>`}
 function collectForm(s,m,mode){
   const T=today();const amt=F('amount','Tuition fee amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}" data-live="colAmt"`})+batchField(s);
-  if(mode==='CASH')return`<form data-form="collect" data-mode="CASH" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true})}${F('note','Note (optional)',{span:1,attrs:'maxlength="120"'})}
+  if(mode==='CASH')return`<form data-form="collect" data-mode="CASH" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}${F('note','Note (optional)',{span:1,attrs:'maxlength="120"'})}
    <p class="note span">Invoice date = the date you enter here (default today). The receipt uses this date. You can change it later in Receipts.</p><div class="actions span"><button class="btn primary big">Save cash payment · issue receipt</button></div></form>`;
   if(mode==='CHEQUE')return`<form data-form="collect" data-mode="CHEQUE" class="form">${amt}${F('chequeNo','Cheque no.',{req:true,attrs:'inputmode="numeric" maxlength="10"'})}${F('bank','Bank',{req:true,attrs:'maxlength="60" list="banks"'})}<datalist id="banks"><option>State Bank of India</option><option>Bank of Baroda</option><option>Mehsana Urban Co-op Bank</option><option>HDFC Bank</option><option>ICICI Bank</option></datalist>
-   ${F('chequeDate','Cheque date',{type:'date',val:T,req:true})}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true})}<div class="actions span"><button class="btn primary big">Save cheque payment · issue receipt</button></div></form>`;
+   ${F('chequeDate','Cheque date',{type:'date',val:T,req:true})}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}<div class="actions span"><button class="btn primary big">Save cheque payment · issue receipt</button></div></form>`;
   if(mode==='UPI'){const pv=upiInvoiceDate(Date.now());return`<form data-form="upiPay" class="form">${amt}<div class="field"><span class="label">Invoice date</span><div class="ro">${fmtD(pv)} <small class="muted">(payment date + 1 day, set automatically)</small></div></div>
    <p class="note span">A UPI order is created with ${E(db.settings.upi.provider)} (${E(db.settings.upi.mode)}). The student scans the QR with Google Pay or any UPI app. The payment becomes Success only when the gateway's verified webhook arrives — never from this screen.</p>
    <div class="actions span"><button class="btn primary big">Create UPI request · show QR</button></div></form>`}
@@ -280,9 +280,9 @@ FORM.cancelReceipt=(f,d)=>{const p=db.payments.find(x=>x.id===f.dataset.id);canc
 
 /* an inline date editor for Cash / Cheque / Expense rows; UPI and cancelled rows show plain text */
 function dateCell(kind,rec,iso){const editable=can('fees.editdate')&&rec.mode!=='UPI'&&rec.status==='SUCCESS';
-  return editable?`<input type="date" class="inl" value="${E(iso)}" max="${today()}" aria-label="Invoice date of ${E(kind==='x'?rec.ref:rec.rc)}" data-change="invDate" data-kind="${kind}" data-id="${E(rec.id)}">`:`<span>${fmtD(iso)}</span>${kind==='p'&&rec.mode==='UPI'?' <small class="muted" title="Payment date + 1 day">auto</small>':''}`}
+  return editable?`<input type="date" class="inl" value="${E(iso)}" max="${today()}" required aria-label="Invoice date of ${E(kind==='x'?rec.ref:rec.rc)}" data-change="invDate" data-kind="${kind}" data-id="${E(rec.id)}">`:`<span>${fmtD(iso)}</span>${kind==='p'&&rec.mode==='UPI'?' <small class="muted" title="Payment date + 1 day">auto</small>':''}`}
 CHG.invDate=el=>{const kind=el.dataset.kind;const rec=db.payments.find(x=>x.id===el.dataset.id);
-  if(!rec)throw new Error('Not found');const v=el.value;if(v>today())throw new Error('Invoice date cannot be in the future');
+  if(!rec)throw new Error('Not found');const v=el.value;if(!validIso(v)){el.value=rec.invoiceDate;throw new Error('Choose a valid invoice date')}if(v>today())throw new Error('Invoice date cannot be in the future');
   const ch=editInvoiceDate(kind,rec,v);if(!ch)return;
   if(kind==='p'){const s=stu(rec.studentId);notify('datechange',`Invoice date changed · ${rec.rc}`,`${fmtD(rec.dateEdits.at(-1).from)} → ${fmtD(v)}. Your receipt was updated.`,{students:[s.id],portal:'sfees',self:true});
     notify('datechange',`Invoice date changed · ${rec.rc}`,`${s.name}: ${fmtD(rec.dateEdits.at(-1).from)} → ${fmtD(v)}`,{sid:s.id,roles:['Super Admin','Principal'],staff:'audit',tab:'activity'})}
