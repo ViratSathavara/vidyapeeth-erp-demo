@@ -1,3 +1,6 @@
 src/demo.html
 node_modules/
 _legacy-demo/
+__pycache__/
+*.pyc
+*.xlsx
