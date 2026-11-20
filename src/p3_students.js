@@ -143,11 +143,8 @@ FORM.addStudent=(f,d)=>{
   const s=makeStudent({...v,fees:v.fees.map(x=>x.amount),dues:v.fees.map(x=>x.due),createdBy:cur().name,createdAt:Date.now()});
   db.students.push(s);const pw=tempPassword();createStudentLogin(s,pw,true);
   log('Student added','Student',s.enrol,null,{name:s.name,course:s.course,sem:s.sem,category:s.category,funding:s.funding,fees:s.fees.map(x=>inr(x.amount)).join(' / ')});
-  sendCredentials(s,pw,'new');save();closeLayer();renderPage();
-  dialog(`<h3>Student added · ${E(s.enrol)}</h3><p class="muted" style="margin:0 0 10px">A login was created and the details were emailed to <b>${E(s.email)}</b>.</p>
-   <div class="panel" style="padding:12px"><div class="rline"><span>Login ID</span><b class="mono">${E(s.enrol.toLowerCase())}</b></div><div class="rline"><span>or</span><b class="mono">${E(s.email)}</b></div><div class="rline"><span>Temporary password</span><b class="mono">${E(pw)}</b></div></div>
-   <p class="note">Shown here only because this is a demo. In the live system it is only in the email. The student must change it at first login.</p>
-   <div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn" data-act="closeDialog">Close</button><button class="btn primary" data-act="openStudentD" data-id="${E(s.id)}">Open profile</button></div>`,'Student added',true);
+  sendCredentials(s,pw,'new');save();closeLayer();renderPage();openStudent(s.id);
+  toast(`${s.name} added · login details are being emailed to ${s.email}`);
 };
 ACT.openStudentD=el=>{closeDialog();openStudent(el.dataset.id)};
 FORM.editStudent=(f,d)=>{
@@ -171,7 +168,7 @@ function sendCredentials(s,pw,why){
   notify('credentials',why==='new'?'Welcome to the NPCTE student portal':'Your login details were sent again',`Check ${s.email} for your login ID and temporary password.`,{students:[s.id],portal:'sprofile',self:true});
 }
 ACT.resendCred=el=>{need('students.edit','resend logins');const s=stu(el.dataset.id);const u=db.users.find(x=>x.id===s.userId);const pw=tempPassword();u.password=pw;u.mustChange=true;
-  log('Login details resent','Student',s.enrol,null,null,'New temporary password emailed');sendCredentials(s,pw,'resend');save();openStudent(s.id);toast('New temporary password emailed to '+s.email)};
+  log('Login details resent','Student',s.enrol,null,null,'New temporary password emailed');sendCredentials(s,pw,'resend');save();openStudent(s.id);toast('New password is being emailed to '+s.email)};
 ACT.resetPw=el=>{need('students.edit','reset passwords');const s=stu(el.dataset.id);confirmBox('Reset password',`${s.name} gets a new temporary password by email and must change it at the next sign-in.`,'Reset password',()=>ACT.resendCred(el))};
 
 /* ---------- profile ---------- */

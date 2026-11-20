@@ -100,36 +100,111 @@ function receiptPdf(p,studentCopy){if(studentCopy===undefined)studentCopy=isStud
 async function savePdf(p){download(p.rc.replace(/[^\w-]+/g,'_')+'.pdf',pdfBytes(receiptPdf(p)),'application/pdf');}
 ACT.dlPdf=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)throw new Error('Receipt not found');guardStudent(p.studentId);savePdf(p)};
 
-/* ---------- email outbox (receipts, login details). Demo mode: shown, nothing sent. Live: /api/send-receipt (Resend) ---------- */
-const MAIL_DELAY=900;
-function mailBody(rec){
-  const s=stu(rec.studentId),c=db.college;
-  if(rec.kind==='credentials')return{text:`Dear ${s.name},\n\nYour ${c.short} student portal is ready.\n\nPortal: ${location.origin}/\nLogin ID: ${s.enrol.toLowerCase()} (or ${s.email})\nTemporary password: ${rec.pw?'(sent in this email)':'—'}\n\nYou must choose your own password at the first sign-in.\n\nInstall as an app: open the portal in Chrome on Android and tap "Install app", or on iPhone open it in Safari, tap Share and then "Add to Home Screen".\n\n${c.name}\n${c.phone} · ${c.email}`};
-  const p=db.payments.find(x=>x.id===rec.paymentId);
-  return{text:`Dear ${s.name},\n\n${p.status==='CANCELLED'?'This receipt has been cancelled.':'We have received your fee payment.'}\nReceipt: ${p.rc}\nAmount: ${rs(p.amount)}\nTuition fee · Semester ${p.sem}\nBatch: ${batchOf(p)}\nInvoice date: ${fmtD(p.invoiceDate)}\n\nThe receipt PDF is attached.\n\n${c.name}\n${c.phone} · ${c.email}`,pdf:receiptPdf(p,true),filename:p.rc.replace(/[^\w-]+/g,'_')+'.pdf'};
+/* ---------- email: real sending through /api/send-mail (Resend) when the server is set up, otherwise demo ----------
+   Every email is listed in db.outbox (status Queued / Sending / Sent / Sent (demo) / Failed / Skipped).
+   A password is never saved: it lives only in the in-memory copy of the email until it is sent.
+   Mode: GET /api/send-mail tells whether the server has RESEND_API_KEY + MAIL_FROM + MAIL_ACCESS_KEY. */
+const MAIL_DELAY=500,MAIL_GAP=700;
+let MAIL_MODE='checking';
+const mailReady=(async()=>{try{const r=await fetch('/api/send-mail',{cache:'no-store'});const j=await r.json();MAIL_MODE=j&&j.configured?'live':'demo'}catch(e){MAIL_MODE='demo'}return MAIL_MODE})();
+const mailLive=()=>MAIL_MODE==='live'&&typeof REAL!=='undefined'&&REAL&&REAL.mailKey;
+const portalUrl=()=>location.origin+'/';
+
+/* ---------- the email layout: header, title, intro, details table, button, notes, footer (inline styles for mail apps) ---------- */
+function mailHtml(o){
+  const c=db.college,R=Object.assign(RCPT_DEFAULT(),c.rcpt||{});const esc=v=>E(String(v??''));
+  const rows=(o.rows||[]).map(([k,v,strong],i)=>`<tr><td style="padding:9px 14px;color:#5f6a82;font-size:13px;border-top:${i?'1px solid #e6e9f0':'0'};white-space:nowrap;vertical-align:top">${esc(k)}</td><td style="padding:9px 14px;color:#18202f;font-size:14px;font-weight:${strong?'700':'500'};border-top:${i?'1px solid #e6e9f0':'0'};text-align:right;${String(v??'').length<=22?'white-space:nowrap':'word-break:break-word'}">${esc(v)}</td></tr>`).join('');
+  const btn=o.button?`<tr><td style="padding:22px 0 4px" align="center"><a href="${esc(o.button.url)}" style="display:inline-block;background:#b8862b;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 26px;border-radius:10px">${esc(o.button.label)}</a></td></tr><tr><td align="center" style="padding:6px 0 0;font-size:12px;color:#8a93a8">or open <a href="${esc(o.button.url)}" style="color:#2b2c7e">${esc(o.button.url.replace(/^https?:\/\//,''))}</a></td></tr>`:'';
+  const notes=(o.notes||[]).length?`<tr><td style="padding:20px 0 0"><div style="font-size:13px;font-weight:700;color:#18202f;margin-bottom:6px">${esc(o.notesTitle||'Please note')}</div><ul style="margin:0;padding-left:18px;color:#5f6a82;font-size:13px;line-height:1.6">${o.notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul></td></tr>`:'';
+  const big=o.big?`<tr><td style="padding:16px 0 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${o.big.tone==='bad'?'#fdecec':'#f6ecd8'};border-radius:12px"><tr><td style="padding:16px 18px"><div style="font-size:12px;color:#5f6a82;text-transform:uppercase;letter-spacing:.05em">${esc(o.big.label)}</div><div style="font-size:28px;font-weight:800;color:${o.big.tone==='bad'?'#a3262a':'#14284b'};margin-top:2px">${esc(o.big.value)}</div>${o.big.sub?`<div style="font-size:13px;color:#5f6a82;margin-top:2px">${esc(o.big.sub)}</div>`:''}</td></tr></table></td></tr>`:'';
+  return`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(o.subject)}</title></head>
+<body style="margin:0;padding:0;background:#eef1f6;font-family:Arial,Helvetica,sans-serif">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(o.preheader||o.intro||'')}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #dfe3ec">
+ <tr><td style="background:#14284b;padding:20px 24px">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+   <td width="52" style="vertical-align:middle"><img src="${esc(location.origin)}/icons/icon-192.png" width="44" height="44" alt="${esc(c.short)}" style="display:block;border-radius:10px;background:#ffffff"></td>
+   <td style="vertical-align:middle;padding-left:12px"><div style="font-family:Georgia,'Times New Roman',serif;font-style:italic;font-weight:700;font-size:17px;color:#ffffff;line-height:1.25">${esc(R.fullName)}</div><div style="font-size:12px;color:#c9d2e6;margin-top:2px">${esc(R.trustLine)}</div></td>
+  </tr></table></td></tr>
+ <tr><td style="height:4px;background:#b8862b;font-size:0;line-height:0">&nbsp;</td></tr>
+ <tr><td style="padding:26px 26px 8px">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+   <tr><td style="font-size:22px;font-weight:800;color:#14284b;line-height:1.3">${esc(o.title)}</td></tr>
+   <tr><td style="padding:12px 0 0;font-size:15px;color:#18202f;line-height:1.6">Dear ${esc(o.name)},<br>${esc(o.intro)}</td></tr>
+   ${big}
+   ${rows?`<tr><td style="padding:16px 0 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e6e9f0;border-radius:12px;border-collapse:separate">${rows}</table></td></tr>`:''}
+   ${o.extra?`<tr><td style="padding:14px 0 0;font-size:14px;color:#18202f;line-height:1.6">${esc(o.extra)}</td></tr>`:''}
+   ${btn}${notes}
+   <tr><td style="padding:24px 0 6px;font-size:14px;color:#18202f;line-height:1.6">Regards,<br><b>${esc(o.sign||'Accounts Office')}</b><br>${esc(R.fullName)}</td></tr>
+  </table></td></tr>
+ <tr><td style="background:#f6f7fb;padding:16px 26px;border-top:1px solid #e6e9f0;font-size:12px;color:#6b7280;line-height:1.6">${esc(R.address)}<br>College ${esc(R.mobCollege)} · Trust ${esc(R.mobTrust)} · ${esc(R.email)} · ${esc(R.web)}<br><span style="color:#9aa3b5">This is an automatic email from the ${esc(c.short)} ERP. Please do not share your password with anyone.</span></td></tr>
+</table></td></tr></table></body></html>`;
+}
+function mailText(o){return[`Dear ${o.name},`,'',o.intro,o.big?`\n${o.big.label}: ${o.big.value}${o.big.sub?' ('+o.big.sub+')':''}`:'',...(o.rows||[]).map(([k,v])=>`${k}: ${v}`),o.extra?'\n'+o.extra:'',o.button?`\n${o.button.label}: ${o.button.url}`:'',...(o.notes||[]).map(n=>'- '+n),'',`Regards,\n${o.sign||'Accounts Office'}\n${db.college.name}`].filter(x=>x!==undefined).join('\n').replace(/\n{3,}/g,'\n\n')}
+
+/* ---------- one builder per kind of email ---------- */
+function mailContent(rec,pw){
+  const c=db.college,s=rec.studentId?stu(rec.studentId):null;
+  if(rec.kind==='credentials'){const cr=course(s.course);
+    return{subject:rec.subject,title:rec.why==='new'?`Welcome to the ${c.short} student portal`:'Your new portal password',name:s.name,
+      intro:rec.why==='new'?`Your student account at ${c.name} is ready. Use the login details below to sign in to the student portal, where you can see your fees, pay by UPI, download receipts and read college notices.`:'Your student portal password was reset by the college office. Use the details below to sign in.',
+      rows:[['Name',s.name],['Enrolment no.',s.enrol],['Course',`${cr?cr.name:s.course} · Semester ${s.sem}`],['Batch',defaultBatch(s)],['Login ID',s.enrol.toLowerCase(),1],['Or sign in with',s.email],['Password',pw||'(not available, ask the office to resend)',1]],
+      button:{label:'Open student portal',url:portalUrl()},notesTitle:'How to sign in',
+      notes:['Open the portal and sign in with your Login ID (or email) and the password above.','You will be asked to choose your own password at the first sign-in.','Add the portal to your phone: in Chrome tap "Install app", on iPhone Safari tap Share → "Add to Home Screen".','Never share your password. The college will never ask for it.']}}
+  if(rec.kind==='staff'){const u=db.users.find(x=>x.id===rec.userId);
+    return{subject:rec.subject,title:rec.why==='new'?`Your ${c.short} ERP login`:'Your new ERP password',name:u.name,
+      intro:rec.why==='new'?`A ${u.role} login has been created for you in the ${c.short} College ERP.`:'Your ERP password was reset by the administrator.',
+      rows:[['Name',u.name],['Role',u.role],['Courses',(u.courses||[]).map(id=>(course(id)||{}).name||id).join(', ')||'All'],['Username',u.username,1],['Password',pw||'(ask the administrator)',1]],
+      button:{label:'Open the ERP',url:portalUrl()},notes:['You must choose your own password at the first sign-in.','Do not share your login with anyone.'],sign:'Administrator'}}
+  if(rec.kind==='receipt'){const p=db.payments.find(x=>x.id===rec.paymentId);const I=rcptInfo(p,true);const cancelled=p.status==='CANCELLED';
+    return{subject:rec.subject,title:cancelled?'Fee receipt cancelled':'Fee payment received',name:s.name,
+      intro:cancelled?`Receipt ${p.rc} has been cancelled by the college office. The amount is no longer counted as paid.`:`Thank you. We have received your tuition fee payment. Your receipt is attached to this email as a PDF.`,
+      big:cancelled?{label:'Cancelled receipt',value:inr(p.amount),sub:p.cancelReason,tone:'bad'}:{label:'Amount paid',value:inr(p.amount),sub:inWords(p.amount)},
+      rows:[['Receipt no.',p.rc,1],['Invoice date',longD(p.invoiceDate)],['Student ID',s.enrol],['Course',I.cname.replace(' - ',' – ')],['Batch',batchOf(p)],['Semester fee',inr(I.fee)],['Balance due for this semester',inr(I.balance),1]],
+      button:{label:'View in student portal',url:portalUrl()},notes:cancelled?['If you think this is a mistake, please contact the accounts office.']:['Keep this receipt for your records.','Any balance can be paid by UPI from the student portal or at the college office.'],
+      pdf:receiptPdf(p,true),filename:`NPCTE-receipt-${p.rc}`.replace(/[^\w.-]+/g,'_')+'.pdf'}}
+  if(rec.kind==='reminder'){const sm=feeSum(s);const due=sm.sems.filter(x=>x.started&&x.due>0);
+    return{subject:rec.subject,title:rec.title||'Fee reminder',name:s.name,intro:rec.body||'This is a reminder that your tuition fee is due.',
+      big:{label:'Due now',value:inr(sm.payable),sub:sm.overdue?'Overdue':''},
+      rows:[...due.map(x=>[`Semester ${x.sem}`,`${inr(x.due)}${x.dueDate?' · due '+fmtD(x.dueDate):''}${x.overdue?' (overdue)':''}`]),['Student ID',s.enrol],['Course',`${course(s.course).name} · Batch ${defaultBatch(s)}`]],
+      button:{label:'Pay now with UPI',url:portalUrl()},notes:['Pay from the student portal (Fees → Pay with UPI) or at the accounts office.','Ignore this email if you have already paid.']}}
+  if(rec.kind==='payreq'){const o=db.upiOrders.find(x=>x.id===rec.orderId);
+    return{subject:rec.subject,title:'Fee payment request',name:s.name,intro:`The college office has sent you a UPI payment request for your tuition fee. Tap the button below to pay with Google Pay, PhonePe, Paytm or any UPI app.`,
+      big:{label:'Amount to pay',value:inr(o.amount),sub:`Semester ${o.sem}`},
+      rows:[['Student ID',s.enrol],['Course',`${course(s.course).name} · Semester ${o.sem}`],['Valid until',fmtT(o.createdAt+UPI_TTL)]],
+      button:{label:'Pay '+inr(o.amount)+' now',url:payPageUrl(o)},notes:['The link works only until the time above. After that, pay from the student portal.','Your receipt is emailed to you as soon as the bank confirms the payment.']}}
+  throw new Error('Unknown email');
 }
 function queueMail(o){
-  const rec={id:uid('o'),ts:Date.now(),kind:o.kind,paymentId:o.paymentId||'',studentId:o.studentId,to:(o.to||[]).filter(e=>MAIL_OK.test(e||'')),subject:o.subject,status:'Queued',mode:db.settings.mail.mode,attempts:0,error:'',why:o.why||''};
-  /* the temporary password lives only in the in-memory copy of the email, never in the outbox list that is saved */
+  const rec={id:uid('o'),ts:Date.now(),kind:o.kind,paymentId:o.paymentId||'',studentId:o.studentId||'',userId:o.userId||'',orderId:o.orderId||'',to:(o.to||[]).filter(e=>MAIL_OK.test(e||'')),subject:o.subject,status:'Queued',mode:MAIL_MODE,attempts:0,error:'',why:o.why||'',title:o.title||'',body:o.body||''};
   if(o.pw)Object.defineProperty(rec,'pw',{value:o.pw,enumerable:false});
   db.outbox.unshift(rec);if(db.outbox.length>300)db.outbox.length=300;
   if(!rec.to.length){rec.status='Skipped';rec.error='No valid email address on file';return rec}
-  setTimeout(()=>deliver(rec.id,rec.pw),MAIL_DELAY);return rec;
+  mailQueue=mailQueue.then(()=>sleep(MAIL_DELAY)).then(()=>deliver(rec.id,rec.pw)).then(()=>sleep(MAIL_GAP)).catch(()=>{});return rec;
 }
+let mailQueue=Promise.resolve();
 async function deliver(id,pw){
-  const rec=db.outbox.find(x=>x.id===id);if(!rec||/^Sent/.test(rec.status))return;const m=db.settings.mail;
-  rec.status='Sending';rec.attempts++;
+  const rec=db.outbox.find(x=>x.id===id);if(!rec||/^Sent/.test(rec.status))return;
+  await mailReady;rec.mode=MAIL_MODE;rec.status='Sending';rec.attempts++;refreshMailUi();
   try{
-    if(m.mode==='live'&&rec.kind==='receipt'){
-      const b=mailBody(rec);const r=await fetch('/api/send-receipt',{method:'POST',headers:{'content-type':'application/json','x-api-key':m.key||''},body:JSON.stringify({to:rec.to,subject:rec.subject,html:'<pre style="font:14px sans-serif;white-space:pre-wrap">'+E(b.text)+'</pre>',text:b.text,filename:b.filename,pdfBase64:btoa(b.pdf),fromName:m.fromName,replyTo:m.replyTo})});
-      let j={};try{j=await r.json()}catch(e){}if(!r.ok||!j.ok)throw new Error(j.error||'Mail server answered '+r.status);rec.status='Sent';
-    }else{await sleep(250);rec.status='Sent (demo)'}
+    const m=mailContent(rec,pw);
+    if(mailLive()){
+      const body={to:rec.to,subject:m.subject,html:mailHtml(m),text:mailText(m)};if(m.pdf)body.attachment={filename:m.filename,content:btoa(m.pdf)};
+      const r=await fetch('/api/send-mail',{method:'POST',headers:{'content-type':'application/json','x-mail-key':REAL.mailKey},body:JSON.stringify(body)});
+      let j={};try{j=await r.json()}catch(e){}if(!r.ok||!j.ok)throw new Error(j.error||'Mail server answered '+r.status);rec.status='Sent';rec.msgId=j.id||'';
+    }else{await sleep(200);rec.status='Sent (demo)'}
     rec.sentAt=Date.now();rec.error='';
   }catch(e){rec.status='Failed';rec.error=e.message||'Could not send'}
-  if(rec.kind==='credentials'){const s=stu(rec.studentId);if(s&&s.cred&&s.cred.mailId===rec.id){s.cred.status=rec.status;s.cred.at=rec.sentAt||Date.now()}}
+  if(rec.kind==='credentials'){const s=stu(rec.studentId);if(s&&s.cred&&s.cred.mailId===rec.id){s.cred.status=rec.status;s.cred.at=rec.sentAt||Date.now();s.cred.error=rec.error}}
   if(rec.status==='Failed')notify('mailfail',`Email failed · ${rec.subject}`,rec.error,{roles:['Super Admin','Principal','Clerk'],staff:'students',tone:'bad',self:true,key:'mf:'+rec.id});
+  log(rec.status==='Failed'?'Email failed':'Email sent','Email',rec.kind,null,{to:rec.to.join(', '),subject:rec.subject,status:rec.status},rec.error||'');
   save();refreshMailUi();
+  if(ui.route==='students'||ui.route==='fees'){const d=$('.drawer [data-credmail]');if(d)d.outerHTML=credMailHtml(stu(d.dataset.credmail))}
 }
+/* little status line used on the student profile for the login email */
+function credMailHtml(s){if(!s||!s.cred)return'';const o=db.outbox.find(x=>x.id===s.cred.mailId)||s.cred;
+  return`<span data-credmail="${E(s.id)}">${mailPill(o.status)} <span class="muted">Login email to ${E(o.to||s.email)}${o.error?' · '+E(o.error):''}${o.sentAt?' · '+E(fmtT(o.sentAt)):''}</span></span>`}
 function mailPill(st){return pill(st,/^Sent/.test(st)?'good':st==='Failed'?'bad':st==='Skipped'?'warn':'')}
 function mailLineHtml(p){const o=db.outbox.find(x=>x.paymentId===p.id);if(!o)return`<span class="muted">Receipt email not sent yet</span>`;return`${mailPill(o.status)} <span class="muted">${o.error?E(o.error):'PDF to '+E(o.to.join(', '))}${o.sentAt?' · '+E(fmtT(o.sentAt)):''}</span>`}
 const mailLine=p=>`<div class="maillive" data-mailpay="${E(p.id)}" style="margin-top:10px;font-size:13px">${mailLineHtml(p)}</div>`;

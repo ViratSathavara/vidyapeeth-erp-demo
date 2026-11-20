@@ -205,6 +205,7 @@ FORM.upiPay=(f,d)=>{
 };
 ACT.upiSend=el=>{need('fees.collect');const o=orderOf(el.dataset.id);if(!orderLive(o))throw new Error('This QR is no longer valid');const s=stu(o.studentId);o.sentAt=Date.now();
   notify('payment',`Pay ${inr(o.amount)} · Semester ${o.sem}`,`The college office sent you a UPI payment request. Open Fees and tap Pay now.`,{students:[s.id],portal:'sfees',tone:'warn',self:true});
+  queueMail({kind:'payreq',orderId:o.id,studentId:s.id,to:[s.email],subject:`Pay ${rs(o.amount)} tuition fee - ${db.college.short}`});
   log('UPI request sent to portal','UPI order',o.id,null,{student:s.enrol,amount:inr(o.amount)});save();upiRefresh();toast(`Sent to ${s.name}'s portal`)};
 ACT.upiShare=async el=>{const o=orderOf(el.dataset.id);if(!orderLive(o))throw new Error('This QR is no longer valid');const s=stu(o.studentId);
   const text=`${db.college.short}: pay ${inr(o.amount)} tuition fee for semester ${o.sem} (${s.name}). Pay here: ${db.settings.upi.mode==='Live'?upiLink(o):payPageUrl(o)}`;
@@ -272,6 +273,7 @@ ACT.cancelAsk=el=>{need('fees.cancel','cancel receipts');const p=db.payments.fin
    <form data-form="cancelReceipt" data-id="${E(p.id)}" class="grid" style="gap:10px">${F('reason','Reason (required)',{type:'textarea',req:true,rows:2,attrs:'maxlength="200" minlength="4"'})}
    <div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Keep receipt</button><button class="btn danger">Cancel receipt</button></div></form>`,'Cancel receipt');$('#f_reason').focus()};
 FORM.cancelReceipt=(f,d)=>{const p=db.payments.find(x=>x.id===f.dataset.id);cancelPayment(p,d.reason);const s=stu(p.studentId);
+  queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Receipt ${p.rc} cancelled - ${db.college.short}`});
   notify('cancel',`Receipt ${p.rc} cancelled`,`${inr(p.amount)} · ${p.cancelReason}`,{students:[s.id],portal:'sfees',tone:'bad',self:true});
   notify('cancel',`Receipt cancelled · ${s.name}`,`${p.rc} · ${inr(p.amount)} · ${p.cancelReason}`,{sid:s.id,roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
   save();closeDialog();closeLayer();renderPage();toast('Receipt cancelled')};
@@ -316,7 +318,8 @@ ACT.remindSel=()=>remindDialog([...ui.dueSel]);
 ACT.remindAll=()=>remindDialog(duesFiltered().map(x=>x.s.id));
 FORM.sendRemind=(f,d)=>{need('notices.post');const ids=f.dataset.ids.split(',').filter(id=>stu(id));
   const n={id:uid('n'),title:capText(d.title,'Title'),body:capText(d.body,'Message',600),audience:{type:'students',ids},isFeeAlert:true,isPublic:false,publishAt:Date.now(),createdBy:cur().name,attachment:null};
-  db.notices.unshift(n);publishNotice(n,'reminder');log('Fee reminder sent','Notice',n.id,null,{to:ids.length+' students',title:n.title});ui.dueSel=new Set();save();closeLayer();renderPage();toast(`Reminder sent to ${ids.length} student${ids.length>1?'s':''}`)};
+  db.notices.unshift(n);publishNotice(n,'reminder');
+  ids.forEach(id=>{const s=stu(id);queueMail({kind:'reminder',studentId:id,to:[s.email],subject:`${n.title} - ${db.college.short}`,title:n.title,body:n.body})});log('Fee reminder sent','Notice',n.id,null,{to:ids.length+' students',title:n.title});ui.dueSel=new Set();save();closeLayer();renderPage();toast(`Reminder sent to ${ids.length} student${ids.length>1?'s':''}`)};
 
 /* ---------- 4. receipts ---------- */
 function rcFilter(){return ui.f['fees.receipts']=Object.assign({q:'',mode:'',status:'',from:'',to:'',sort:'entry',dir:-1,page:0},ui.f['fees.receipts']||{})}

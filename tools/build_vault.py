@@ -5,7 +5,7 @@ The real student data is written ENCRYPTED (AES-256-GCM, key = PBKDF2-SHA256 of 
 demo password, 210,000 rounds). The page asks for the password, decrypts in the browser
 and only then loads the data. The .xlsx files and the password are never committed.
 
-  NPCTE_DEMO_PASSWORD='...' NPCTE_ALIASES=aliases.json python3 tools/build_vault.py B.ED.xlsx M.ED.xlsx
+  NPCTE_DEMO_PASSWORD='...' NPCTE_MAIL_KEY='<same as MAIL_ACCESS_KEY on Vercel>' NPCTE_ALIASES=aliases.json python3 tools/build_vault.py B.ED.xlsx M.ED.xlsx
 
 Rules (agreed with Virat, 20-11-2026):
   * every student in the sheets is listed; names keep the sheet spelling (spaces trimmed);
@@ -113,7 +113,7 @@ def main():
         studs.append(st)
     idx = {sid: i for i, sid in enumerate(ids)}
     for p in out['payments']: p['s'] = idx[p['s']]
-    data = json.dumps({'students': studs, 'payments': out['payments'], 'source': 'B.ED_2026-27.xlsx + M.ED_2026-27.xlsx'}, ensure_ascii=False, separators=(',', ':')).encode()
+    data = json.dumps({'students': studs, 'payments': out['payments'], 'source': 'B.ED_2026-27.xlsx + M.ED_2026-27.xlsx', 'mailKey': os.environ.get('NPCTE_MAIL_KEY', '')}, ensure_ascii=False, separators=(',', ':')).encode()
     salt, iv = os.urandom(16), os.urandom(12)
     key = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=ROUNDS).derive(pw.encode())
     ct = AESGCM(key).encrypt(iv, data, None)
