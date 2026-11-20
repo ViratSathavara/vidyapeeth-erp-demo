@@ -53,6 +53,7 @@ function load(){const raw=lsGet(LS_KEY);if(raw){try{db=JSON.parse(raw);if(db&&db
 function migrate(){
   const s=db.settings;s.flags=Object.assign({fundingAllCategories:false,lateFee:false},s.flags||{});delete s.flags.expenseReducesDue;delete s.expenseCats;
   if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no separate expense ledger: an expense is a fee taken By Expense */
+  {const a=(db.users||[]).find(u=>u.id==='u_admin');if(a&&a.email==='admin@npcte.org')a.email='viratsathavara@gmail.com'} /* Super Admin = Virat */
   if(!db.enquiries)db.enquiries=[];if(!Array.isArray(db.events))db.events=[];
   if(!db.college.rcpt&&typeof RCPT_DEFAULT==='function')db.college.rcpt=RCPT_DEFAULT();
   db.courses.forEach(c=>{if(!c.years)c.years=Math.max(1,Math.ceil((c.semesters||4)/2));if(c.active===undefined)c.active=true});
@@ -282,7 +283,7 @@ function seed(){
     courses:[{id:'BED',name:'B.Ed',semesters:4,years:2,active:true},{id:'MED',name:'M.Ed',semesters:4,years:2,active:true}],
     roles:DEFAULT_ROLES(),
     users:[
-      {id:'u_admin',role:'Super Admin',name:'Virat Sathavara',username:'admin',email:'admin@npcte.org',phone:'',password:'admin123',mustChange:false,active:true,lastLoginAt:0},
+      {id:'u_admin',role:'Super Admin',name:'Virat Sathavara',username:'admin',email:'viratsathavara@gmail.com',phone:'',password:'admin123',mustChange:false,active:true,lastLoginAt:0},
       {id:'u_prin',role:'Principal',name:'Principal, B.Ed',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['BED']},
       {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
