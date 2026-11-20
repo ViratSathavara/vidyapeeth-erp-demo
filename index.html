@@ -979,6 +979,9 @@ const VAULT={v:1,kdf:'PBKDF2-SHA256',rounds:210000,salt:'JL9OhpjRlCJCAa4gL+0I9g=
    "Remember on this device" keeps the derived key in localStorage, otherwise only for this browser tab session.
    A new vault (new password or new data) has a new salt, so a remembered key stops working and the gate shows again. */
 const GATE_KEY='npcte_gate_key';
+/* every full screen (gate, sign-in, app) starts at the top: the browser must not restore an old scroll position,
+   because the app draws itself only after the gate, so a restored position would open the page part-way down */
+try{if('scrollRestoration' in history)history.scrollRestoration='manual'}catch(e){}
 const b64bytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 const bytesB64=b=>btoa(String.fromCharCode(...b));
 async function gateDerive(pw){
@@ -990,7 +993,7 @@ async function gateOpen(raw){
   return JSON.parse(new TextDecoder().decode(pt))}
 function gateSaved(){try{return sessionStorage.getItem(GATE_KEY)||localStorage.getItem(GATE_KEY)}catch(e){return null}}
 function gateForget(){try{sessionStorage.removeItem(GATE_KEY);localStorage.removeItem(GATE_KEY)}catch(e){}}
-function gateStart(boot){
+function gateStart(boot){toTop();
   if(typeof VAULT==='undefined'){boot();return}
   const root=document.getElementById('root');
   if(!(window.crypto&&crypto.subtle)){root.innerHTML='<div class="gate"><div class="gate-card"><h1>NPCTE ERP</h1><p>This demo needs a secure (https) connection. Open it from its https link.</p></div></div>';return}
@@ -1029,7 +1032,7 @@ function gateForm(boot){
    Spec: docs/NPCTE-ERP-Phase1-Spec.md. Money is stored as integer paise.
    Dates are kept as ISO yyyy-mm-dd (Asia/Kolkata) and shown as DD-MM-YYYY.
    ===================================================================== */
-const LS_KEY='npcte_erp_v1', SES_KEY='npcte_erp_session_v1', THEME_KEY='npcte_erp_theme', DB_VER=3;
+const LS_KEY='npcte_erp_v1', SES_KEY='npcte_erp_session_v1', THEME_KEY='npcte_erp_theme', DB_VER=4;
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 /* inr takes PAISE */
@@ -1254,15 +1257,43 @@ function createStudentLogin(s,pw,must){
    receipt number, date, amount, semester, batch and mode. Email and mobile are test values (…test@example.com, 90000 xxxxx).
    Semester fees keep the demo default; a "Sem 1&2" receipt is stored once per semester with the same receipt number. */
 let REAL=null;
+/* Real fee registers (2026-27). Names, amounts, receipts, dates and payment modes come from the sheets unchanged.
+   The sheets have no caste category, scholarship or bank-deposit columns, so for the demo these are filled in a
+   fixed, repeatable way (same student always gets the same value) so every screen has something to show:
+   - category: about 30% General, 35% OBC, 12% SC, 13% ST, 10% EWS (both courses get all five)
+   - SC/ST: about 6 in 10 marked "By Scholarship" (government post-matric scholarship), the rest "By Cash"
+   - cash + cheque collections are marked as deposited in the bank early the next month, except last month and
+     this month, which stay "not deposited" so the deposit screen has pending money to show
+   - each expense receipt gets its expense line(s) from the register's remark, so the receipt shows "used for" */
+const DEMO_CATS=[['General',30],['OBC',35],['SC',12],['ST',13],['EWS',10]];
+const nameHash=t=>{let h=2166136261;for(const c of String(t))h=Math.imul(h^c.charCodeAt(0),16777619);return h>>>0};
+function demoCategory(r){let x=nameHash(r.name+'|'+r.ref)%100;for(const[c,w]of DEMO_CATS){if(x<w)return c;x-=w}return'General'}
+const regExpText=t=>String(t||'').replace(/^\s*BY\s*EXP[\s.:-]*/i,'').replace(/\s+/g,' ').trim()||'College expense';
+/* remarks whose parts add up exactly are split into lines; others stay one line with the register's text */
+function expItems(x){
+  const t=regExpText(x.reason);
+  if(/15 AUGUST/i.test(t)&&x.amt===500000)return[['Costume',200000],['Badges (billa)',48000],['Method room cleaning',120000],['New water jug and ball pens',100000],['Revenue ticket',32000]].map(([r,a])=>({reason:'15 August 2026: '+r,amount:a,doc:null}));
+  return[{reason:t.length>150?t.slice(0,147)+'...':t,amount:x.amt,doc:null}]}
 function seedReal(R){
   const by=db.users.find(u=>u.id==='u_clerk');const [ty,tm]=today().split('-').map(Number);
   const curSem=(cid,a)=>{const n=(course(cid)||{}).semesters||4;return Math.min(n,Math.max(1,Math.floor(((ty-a)*12+(tm-7))/6)+1))};
   const list=R.students.map(r=>{
-    const s=makeStudent({name:r.name,phone:r.phone,email:r.email,course:r.course,admissionYear:r.adm,sem:curSem(r.course,r.adm),category:'General',funding:'CASH',ref:r.ref,createdBy:'Imported from fee register 2026-27'});
+    const cat=demoCategory(r),sch=(cat==='SC'||cat==='ST')&&nameHash(r.name)%10<6;
+    const s=makeStudent({name:r.name,phone:r.phone,email:r.email,course:r.course,admissionYear:r.adm,sem:curSem(r.course,r.adm),category:cat,funding:sch?'SCHOLARSHIP':'CASH',
+      scholarshipNote:sch?'Government post-matric scholarship (Digital Gujarat)':'',ref:r.ref,createdBy:'Imported from fee register 2026-27'});
     db.students.push(s);createStudentLogin(s,'student123',false);return s});
   R.payments.forEach(x=>{const s=list[x.s];const ts=Date.parse(x.date+'T11:00:00+05:30');
-    db.payments.push({id:uid('p'),studentId:s.id,sem:x.sem,mode:x.mode,amount:x.amt,invoiceDate:x.date,entryAt:ts,paidAt:ts,chequeNo:x.chq||'',bank:'',chequeDate:x.mode==='CHEQUE'?x.date:'',upiRef:'',providerTxnId:'',note:x.note||'',
-      status:'SUCCESS',cancelReason:'',rc:x.rc,depositId:'',by:by?by.name:'Accounts Clerk',byId:by?by.id:'',dateEdits:[],batch:x.batch,reason:x.reason||'',category:'',imported:true})});
+    const p={id:uid('p'),studentId:s.id,sem:x.sem,mode:x.mode,amount:x.amt,invoiceDate:x.date,entryAt:ts,paidAt:ts,chequeNo:x.chq||'',bank:'',chequeDate:x.mode==='CHEQUE'?x.date:'',upiRef:'',providerTxnId:'',note:x.note||'',
+      status:'SUCCESS',cancelReason:'',rc:x.rc,depositId:'',by:by?by.name:'Accounts Clerk',byId:by?by.id:'',dateEdits:[],batch:x.batch,reason:x.reason||'',category:'',imported:true};
+    if(x.mode==='EXPENSE'){p.expenseItems=expItems(x);p.reason=p.expenseItems.map(i=>i.reason).join('; ').slice(0,300)}
+    db.payments.push(p)});
+  /* bank deposits: one per month up to two months ago (cash + cheque), made on the 3rd of the next month */
+  const lastMonth=addDays(today().slice(0,7)+'-01',-1).slice(0,7);const months={};
+  db.payments.forEach(p=>{if((p.mode==='CASH'||p.mode==='CHEQUE')&&p.invoiceDate.slice(0,7)<lastMonth)(months[p.invoiceDate.slice(0,7)]=months[p.invoiceDate.slice(0,7)]||[]).push(p)});
+  Object.keys(months).sort().forEach((m,i)=>{const l=months[m];const [y,mo]=m.split('-').map(Number);const nx=mo===12?`${y+1}-01`:`${y}-${pad(mo+1)}`;
+    const on=nx+'-03';const dp={id:uid('d'),type:[...new Set(l.map(p=>p.mode))].join('+'),periodFrom:m+'-01',periodTo:addDays(nx+'-01',-1),total:sum(l,p=>p.amount),depositedOn:on,
+      bankRef:`SBI slip ${55800+i*17}`,by:by?by.name:'Accounts Clerk',at:Date.parse(on+'T15:00:00+05:30'),count:l.length};
+    db.deposits.push(dp);l.forEach(p=>p.depositId=dp.id)});
 }
 
 /* ---------- sample data (spec §12: 1 Super Admin, 1 Principal, 1 Clerk, ~20 students, all 4 modes, a few notices) ---------- */
@@ -1482,6 +1513,8 @@ function findSig(sig,root){
     if(sig.text!==undefined&&c.textContent.trim().slice(0,40)!==sig.text)return false;
     return true})||null;
 }
+/* jump to the top of the page (full-screen changes: gate, sign-in, app start) */
+function toTop(){try{window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0}catch(e){}}
 const softFocus=(t,o)=>{if(!t||!t.isConnected)return false;try{t.focus(o||{preventScroll:true})}catch(e){}return document.activeElement===t};
 /* run fn (which re-renders root) and keep keyboard focus on the same control if it still exists afterwards */
 function keepFocus(root,fn){
@@ -1746,6 +1779,7 @@ function renderLogin(msg){
    <div><span class="label">Demo accounts (tap to fill)</span><div class="demo-accts" style="margin-top:8px">${DEMO_ACCTS().map(a=>`<button class="acct" type="button" data-act="fillLogin" data-u="${E(a[0])}" data-p="${E(a[1])}"><b>${E(a[2])}</b><small>${E(a[0])} / ${E(a[1])}</small><small>${E(a[3])}</small></button>`).join('')}</div></div>
    <div class="actions"><button class="btn sm" data-act="theme" type="button">Dark mode</button><button class="btn sm danger" data-act="resetDemo" type="button">Reset demo data</button></div></section></div>`;
   if(typeof renderInstallUI==='function')renderInstallUI();
+  toTop();
 }
 ACT.fillLogin=el=>{$('#lu').value=el.dataset.u;$('#lp').value=el.dataset.p;$('#lp').focus()};
 /* demo rate limit: 5 wrong passwords in 10 minutes locks that username for 10 minutes (the server does this per IP + user) */
@@ -1761,7 +1795,8 @@ FORM.login=(f,d)=>{
   log('Signed in','User',u.username,null,null,u.role);ev('Auth','Signed in',u.username+' · '+device());ntSync();save();
   if(u.mustChange){renderForceChange();return}
   setTimeout(()=>{if(typeof askNotifyGently==='function'&&cur())askNotifyGently()},1200);
-  renderApp();
+  try{document.activeElement&&document.activeElement.blur()}catch(e){}
+  renderApp();toTop();setTimeout(toTop,350);
 };
 /* first login: the temporary password must be changed before anything else (spec §6.2) */
 function renderForceChange(msg){
@@ -1772,11 +1807,11 @@ function renderForceChange(msg){
     ${F('p1','New password',{type:'password',req:true,attrs:'autocomplete="new-password" minlength="8"'})}${F('p2','Type it again',{type:'password',req:true,attrs:'autocomplete="new-password"'})}
     <p class="note" style="margin:0">At least 8 characters with a letter and a number.</p>
     <button class="btn primary big">Save and continue</button><button class="btn" type="button" data-act="logout">Sign out</button></form></div></div>`;
-  $('#f_p1').focus();
+  toTop();$('#f_p1').focus({preventScroll:true});
 }
 const pwOk=p=>p.length>=8&&/[A-Za-z]/.test(p)&&/\d/.test(p);
 FORM.forcePw=(f,d)=>{const u=cur();if(!pwOk(d.p1))return renderForceChange('Use at least 8 characters with a letter and a number.');if(d.p1!==d.p2)return renderForceChange('The two passwords are not the same.');if(d.p1===u.password)return renderForceChange('Choose a password different from the temporary one.');
-  u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();renderApp();toast('Password saved. Welcome!');setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
+  u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();try{document.activeElement.blur()}catch(e){}renderApp();toTop();setTimeout(toTop,350);toast('Password saved. Welcome!');setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
 ACT.logout=()=>{const u=cur();if(u){log('Signed out','User',u.username);ev('Auth','Signed out',u.username)}save();sesDel();closeLayer();renderLogin();const h=$('.login-form h2');if(h){h.tabIndex=-1;softFocus(h)}};
 ACT.resetDemo=()=>{const u=cur();if(u&&u.role!=='Super Admin')throw new Error('Only the Super Admin can reset the data');confirmBox('Reset demo data','All students, payments and changes in this browser will be replaced by fresh sample data.','Reset',()=>{seed();save();sesDel();closeLayer();renderLogin();toast('Demo data reset')},true)};
 
@@ -1855,7 +1890,7 @@ ACT.skip=()=>{if(!focusH1()){const pg=$('#page');if(pg){pg.tabIndex=-1;softFocus
 /* course switch in the top bar: shown when the login has more than one course */
 function courseSwitch(){const my=myCourses();if(my.length<2)return'';const p=pickedCourse();
   return`<label class="cswitch" title="Show data for"><span class="sr">Show data for</span><select data-change="pickCourse" aria-label="Show data for course"><option value="">${my.length===db.courses.length?'All courses':'All my courses'}</option>${my.map(id=>`<option value="${E(id)}" ${p===id?'selected':''}>${E(course(id).name)}</option>`).join('')}</select></label>`}
-CHG.pickCourse=el=>{setPickedCourse(el.value);ui.f={};ui.col=null;renderApp();toast('Showing '+scopeLabel())};
+CHG.pickCourse=el=>{setPickedCourse(el.value);ui.f={};ui.col=null;renderApp();toTop();toast('Showing '+scopeLabel())};
 function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();keepFocus(pg,()=>{pg.innerHTML=n?n[3]():'';enhanceFilters(pg)});renderNav()}
 function go(route,tab){if(tab)ui.tab[route]=tab;const prev=ui.route;ui.route=route;ev('Page','Opened page',humanize(route)+(ui.tab[route]?' › '+humanize(ui.tab[route]):''));renderPage();window.scrollTo(0,0);playEnter('enter');const a=document.activeElement;if(route!==prev||!a||a===document.body)focusH1()}
 ACT.nav=el=>{closeLayer();railClose();go(el.dataset.id)};
@@ -3468,6 +3503,7 @@ const PAY_ID=new URLSearchParams(location.search).get('pay');
 function bootApp(){
   load();applyTheme();
   if(PAY_ID)renderPayPage(PAY_ID);else if(cur()){ntSync();save();renderApp()}else renderLogin();
+  toTop();requestAnimationFrame(toTop);
   setTimeout(()=>{ntLive=true},1500);
   themeLabels();new MutationObserver(themeLabels).observe($('#root'),{childList:true,subtree:true});try{matchMedia('(prefers-color-scheme:dark)').addEventListener('change',themeLabels)}catch(e){}
 }

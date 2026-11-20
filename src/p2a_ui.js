@@ -31,6 +31,8 @@ function findSig(sig,root){
     if(sig.text!==undefined&&c.textContent.trim().slice(0,40)!==sig.text)return false;
     return true})||null;
 }
+/* jump to the top of the page (full-screen changes: gate, sign-in, app start) */
+function toTop(){try{window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0}catch(e){}}
 const softFocus=(t,o)=>{if(!t||!t.isConnected)return false;try{t.focus(o||{preventScroll:true})}catch(e){}return document.activeElement===t};
 /* run fn (which re-renders root) and keep keyboard focus on the same control if it still exists afterwards */
 function keepFocus(root,fn){

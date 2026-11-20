@@ -48,6 +48,7 @@ const PAY_ID=new URLSearchParams(location.search).get('pay');
 function bootApp(){
   load();applyTheme();
   if(PAY_ID)renderPayPage(PAY_ID);else if(cur()){ntSync();save();renderApp()}else renderLogin();
+  toTop();requestAnimationFrame(toTop);
   setTimeout(()=>{ntLive=true},1500);
   themeLabels();new MutationObserver(themeLabels).observe($('#root'),{childList:true,subtree:true});try{matchMedia('(prefers-color-scheme:dark)').addEventListener('change',themeLabels)}catch(e){}
 }

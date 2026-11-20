@@ -4,6 +4,9 @@
    "Remember on this device" keeps the derived key in localStorage, otherwise only for this browser tab session.
    A new vault (new password or new data) has a new salt, so a remembered key stops working and the gate shows again. */
 const GATE_KEY='npcte_gate_key';
+/* every full screen (gate, sign-in, app) starts at the top: the browser must not restore an old scroll position,
+   because the app draws itself only after the gate, so a restored position would open the page part-way down */
+try{if('scrollRestoration' in history)history.scrollRestoration='manual'}catch(e){}
 const b64bytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 const bytesB64=b=>btoa(String.fromCharCode(...b));
 async function gateDerive(pw){
@@ -15,7 +18,7 @@ async function gateOpen(raw){
   return JSON.parse(new TextDecoder().decode(pt))}
 function gateSaved(){try{return sessionStorage.getItem(GATE_KEY)||localStorage.getItem(GATE_KEY)}catch(e){return null}}
 function gateForget(){try{sessionStorage.removeItem(GATE_KEY);localStorage.removeItem(GATE_KEY)}catch(e){}}
-function gateStart(boot){
+function gateStart(boot){toTop();
   if(typeof VAULT==='undefined'){boot();return}
   const root=document.getElementById('root');
   if(!(window.crypto&&crypto.subtle)){root.innerHTML='<div class="gate"><div class="gate-card"><h1>NPCTE ERP</h1><p>This demo needs a secure (https) connection. Open it from its https link.</p></div></div>';return}

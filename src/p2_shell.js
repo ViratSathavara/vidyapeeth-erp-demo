@@ -17,6 +17,7 @@ function renderLogin(msg){
    <div><span class="label">Demo accounts (tap to fill)</span><div class="demo-accts" style="margin-top:8px">${DEMO_ACCTS().map(a=>`<button class="acct" type="button" data-act="fillLogin" data-u="${E(a[0])}" data-p="${E(a[1])}"><b>${E(a[2])}</b><small>${E(a[0])} / ${E(a[1])}</small><small>${E(a[3])}</small></button>`).join('')}</div></div>
    <div class="actions"><button class="btn sm" data-act="theme" type="button">Dark mode</button><button class="btn sm danger" data-act="resetDemo" type="button">Reset demo data</button></div></section></div>`;
   if(typeof renderInstallUI==='function')renderInstallUI();
+  toTop();
 }
 ACT.fillLogin=el=>{$('#lu').value=el.dataset.u;$('#lp').value=el.dataset.p;$('#lp').focus()};
 /* demo rate limit: 5 wrong passwords in 10 minutes locks that username for 10 minutes (the server does this per IP + user) */
@@ -32,7 +33,8 @@ FORM.login=(f,d)=>{
   log('Signed in','User',u.username,null,null,u.role);ev('Auth','Signed in',u.username+' · '+device());ntSync();save();
   if(u.mustChange){renderForceChange();return}
   setTimeout(()=>{if(typeof askNotifyGently==='function'&&cur())askNotifyGently()},1200);
-  renderApp();
+  try{document.activeElement&&document.activeElement.blur()}catch(e){}
+  renderApp();toTop();setTimeout(toTop,350);
 };
 /* first login: the temporary password must be changed before anything else (spec §6.2) */
 function renderForceChange(msg){
@@ -43,11 +45,11 @@ function renderForceChange(msg){
     ${F('p1','New password',{type:'password',req:true,attrs:'autocomplete="new-password" minlength="8"'})}${F('p2','Type it again',{type:'password',req:true,attrs:'autocomplete="new-password"'})}
     <p class="note" style="margin:0">At least 8 characters with a letter and a number.</p>
     <button class="btn primary big">Save and continue</button><button class="btn" type="button" data-act="logout">Sign out</button></form></div></div>`;
-  $('#f_p1').focus();
+  toTop();$('#f_p1').focus({preventScroll:true});
 }
 const pwOk=p=>p.length>=8&&/[A-Za-z]/.test(p)&&/\d/.test(p);
 FORM.forcePw=(f,d)=>{const u=cur();if(!pwOk(d.p1))return renderForceChange('Use at least 8 characters with a letter and a number.');if(d.p1!==d.p2)return renderForceChange('The two passwords are not the same.');if(d.p1===u.password)return renderForceChange('Choose a password different from the temporary one.');
-  u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();renderApp();toast('Password saved. Welcome!');setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
+  u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();try{document.activeElement.blur()}catch(e){}renderApp();toTop();setTimeout(toTop,350);toast('Password saved. Welcome!');setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
 ACT.logout=()=>{const u=cur();if(u){log('Signed out','User',u.username);ev('Auth','Signed out',u.username)}save();sesDel();closeLayer();renderLogin();const h=$('.login-form h2');if(h){h.tabIndex=-1;softFocus(h)}};
 ACT.resetDemo=()=>{const u=cur();if(u&&u.role!=='Super Admin')throw new Error('Only the Super Admin can reset the data');confirmBox('Reset demo data','All students, payments and changes in this browser will be replaced by fresh sample data.','Reset',()=>{seed();save();sesDel();closeLayer();renderLogin();toast('Demo data reset')},true)};
 
@@ -126,7 +128,7 @@ ACT.skip=()=>{if(!focusH1()){const pg=$('#page');if(pg){pg.tabIndex=-1;softFocus
 /* course switch in the top bar: shown when the login has more than one course */
 function courseSwitch(){const my=myCourses();if(my.length<2)return'';const p=pickedCourse();
   return`<label class="cswitch" title="Show data for"><span class="sr">Show data for</span><select data-change="pickCourse" aria-label="Show data for course"><option value="">${my.length===db.courses.length?'All courses':'All my courses'}</option>${my.map(id=>`<option value="${E(id)}" ${p===id?'selected':''}>${E(course(id).name)}</option>`).join('')}</select></label>`}
-CHG.pickCourse=el=>{setPickedCourse(el.value);ui.f={};ui.col=null;renderApp();toast('Showing '+scopeLabel())};
+CHG.pickCourse=el=>{setPickedCourse(el.value);ui.f={};ui.col=null;renderApp();toTop();toast('Showing '+scopeLabel())};
 function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();keepFocus(pg,()=>{pg.innerHTML=n?n[3]():'';enhanceFilters(pg)});renderNav()}
 function go(route,tab){if(tab)ui.tab[route]=tab;const prev=ui.route;ui.route=route;ev('Page','Opened page',humanize(route)+(ui.tab[route]?' › '+humanize(ui.tab[route]):''));renderPage();window.scrollTo(0,0);playEnter('enter');const a=document.activeElement;if(route!==prev||!a||a===document.body)focusH1()}
 ACT.nav=el=>{closeLayer();railClose();go(el.dataset.id)};

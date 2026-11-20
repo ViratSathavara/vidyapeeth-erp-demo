@@ -4,7 +4,7 @@
    Spec: docs/NPCTE-ERP-Phase1-Spec.md. Money is stored as integer paise.
    Dates are kept as ISO yyyy-mm-dd (Asia/Kolkata) and shown as DD-MM-YYYY.
    ===================================================================== */
-const LS_KEY='npcte_erp_v1', SES_KEY='npcte_erp_session_v1', THEME_KEY='npcte_erp_theme', DB_VER=3;
+const LS_KEY='npcte_erp_v1', SES_KEY='npcte_erp_session_v1', THEME_KEY='npcte_erp_theme', DB_VER=4;
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 /* inr takes PAISE */
@@ -229,15 +229,43 @@ function createStudentLogin(s,pw,must){
    receipt number, date, amount, semester, batch and mode. Email and mobile are test values (…test@example.com, 90000 xxxxx).
    Semester fees keep the demo default; a "Sem 1&2" receipt is stored once per semester with the same receipt number. */
 let REAL=null;
+/* Real fee registers (2026-27). Names, amounts, receipts, dates and payment modes come from the sheets unchanged.
+   The sheets have no caste category, scholarship or bank-deposit columns, so for the demo these are filled in a
+   fixed, repeatable way (same student always gets the same value) so every screen has something to show:
+   - category: about 30% General, 35% OBC, 12% SC, 13% ST, 10% EWS (both courses get all five)
+   - SC/ST: about 6 in 10 marked "By Scholarship" (government post-matric scholarship), the rest "By Cash"
+   - cash + cheque collections are marked as deposited in the bank early the next month, except last month and
+     this month, which stay "not deposited" so the deposit screen has pending money to show
+   - each expense receipt gets its expense line(s) from the register's remark, so the receipt shows "used for" */
+const DEMO_CATS=[['General',30],['OBC',35],['SC',12],['ST',13],['EWS',10]];
+const nameHash=t=>{let h=2166136261;for(const c of String(t))h=Math.imul(h^c.charCodeAt(0),16777619);return h>>>0};
+function demoCategory(r){let x=nameHash(r.name+'|'+r.ref)%100;for(const[c,w]of DEMO_CATS){if(x<w)return c;x-=w}return'General'}
+const regExpText=t=>String(t||'').replace(/^\s*BY\s*EXP[\s.:-]*/i,'').replace(/\s+/g,' ').trim()||'College expense';
+/* remarks whose parts add up exactly are split into lines; others stay one line with the register's text */
+function expItems(x){
+  const t=regExpText(x.reason);
+  if(/15 AUGUST/i.test(t)&&x.amt===500000)return[['Costume',200000],['Badges (billa)',48000],['Method room cleaning',120000],['New water jug and ball pens',100000],['Revenue ticket',32000]].map(([r,a])=>({reason:'15 August 2026: '+r,amount:a,doc:null}));
+  return[{reason:t.length>150?t.slice(0,147)+'...':t,amount:x.amt,doc:null}]}
 function seedReal(R){
   const by=db.users.find(u=>u.id==='u_clerk');const [ty,tm]=today().split('-').map(Number);
   const curSem=(cid,a)=>{const n=(course(cid)||{}).semesters||4;return Math.min(n,Math.max(1,Math.floor(((ty-a)*12+(tm-7))/6)+1))};
   const list=R.students.map(r=>{
-    const s=makeStudent({name:r.name,phone:r.phone,email:r.email,course:r.course,admissionYear:r.adm,sem:curSem(r.course,r.adm),category:'General',funding:'CASH',ref:r.ref,createdBy:'Imported from fee register 2026-27'});
+    const cat=demoCategory(r),sch=(cat==='SC'||cat==='ST')&&nameHash(r.name)%10<6;
+    const s=makeStudent({name:r.name,phone:r.phone,email:r.email,course:r.course,admissionYear:r.adm,sem:curSem(r.course,r.adm),category:cat,funding:sch?'SCHOLARSHIP':'CASH',
+      scholarshipNote:sch?'Government post-matric scholarship (Digital Gujarat)':'',ref:r.ref,createdBy:'Imported from fee register 2026-27'});
     db.students.push(s);createStudentLogin(s,'student123',false);return s});
   R.payments.forEach(x=>{const s=list[x.s];const ts=Date.parse(x.date+'T11:00:00+05:30');
-    db.payments.push({id:uid('p'),studentId:s.id,sem:x.sem,mode:x.mode,amount:x.amt,invoiceDate:x.date,entryAt:ts,paidAt:ts,chequeNo:x.chq||'',bank:'',chequeDate:x.mode==='CHEQUE'?x.date:'',upiRef:'',providerTxnId:'',note:x.note||'',
-      status:'SUCCESS',cancelReason:'',rc:x.rc,depositId:'',by:by?by.name:'Accounts Clerk',byId:by?by.id:'',dateEdits:[],batch:x.batch,reason:x.reason||'',category:'',imported:true})});
+    const p={id:uid('p'),studentId:s.id,sem:x.sem,mode:x.mode,amount:x.amt,invoiceDate:x.date,entryAt:ts,paidAt:ts,chequeNo:x.chq||'',bank:'',chequeDate:x.mode==='CHEQUE'?x.date:'',upiRef:'',providerTxnId:'',note:x.note||'',
+      status:'SUCCESS',cancelReason:'',rc:x.rc,depositId:'',by:by?by.name:'Accounts Clerk',byId:by?by.id:'',dateEdits:[],batch:x.batch,reason:x.reason||'',category:'',imported:true};
+    if(x.mode==='EXPENSE'){p.expenseItems=expItems(x);p.reason=p.expenseItems.map(i=>i.reason).join('; ').slice(0,300)}
+    db.payments.push(p)});
+  /* bank deposits: one per month up to two months ago (cash + cheque), made on the 3rd of the next month */
+  const lastMonth=addDays(today().slice(0,7)+'-01',-1).slice(0,7);const months={};
+  db.payments.forEach(p=>{if((p.mode==='CASH'||p.mode==='CHEQUE')&&p.invoiceDate.slice(0,7)<lastMonth)(months[p.invoiceDate.slice(0,7)]=months[p.invoiceDate.slice(0,7)]||[]).push(p)});
+  Object.keys(months).sort().forEach((m,i)=>{const l=months[m];const [y,mo]=m.split('-').map(Number);const nx=mo===12?`${y+1}-01`:`${y}-${pad(mo+1)}`;
+    const on=nx+'-03';const dp={id:uid('d'),type:[...new Set(l.map(p=>p.mode))].join('+'),periodFrom:m+'-01',periodTo:addDays(nx+'-01',-1),total:sum(l,p=>p.amount),depositedOn:on,
+      bankRef:`SBI slip ${55800+i*17}`,by:by?by.name:'Accounts Clerk',at:Date.parse(on+'T15:00:00+05:30'),count:l.length};
+    db.deposits.push(dp);l.forEach(p=>p.depositId=dp.id)});
 }
 
 /* ---------- sample data (spec §12: 1 Super Admin, 1 Principal, 1 Clerk, ~20 students, all 4 modes, a few notices) ---------- */
