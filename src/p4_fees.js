@@ -345,11 +345,7 @@ function feeSetup(){
    <div class="actions" style="margin-top:12px"><button class="btn primary">Save fees and due dates</button></div></form>
   <form class="scard" data-form="receiptSetup"><h2>Receipt numbering</h2><div class="form">${F('receiptPrefix','Prefix',{val:c.receiptPrefix,req:true,attrs:'maxlength="16"'})}${F('nextReceipt','Next number',{type:'number',val:c.nextReceipt,req:true,attrs:'min="1"'})}</div>
    <p class="note">Next receipt: <b class="mono">${E(c.receiptPrefix+pad(c.nextReceipt,4))}</b>. The number can only go up, never back to a used one. (OPEN: send us the receipt format used today.)</p>
-   <div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>
-  <form class="scard" data-form="upiSetup"><h2>UPI / Google Pay</h2><div class="form">${F('provider','Payment gateway',{val:st.upi.provider,opts:Object.entries(PaymentProviders).filter(([k])=>k!=='GooglePay').map(([k,v])=>[k,v.name])})}${F('mode','Mode',{val:st.upi.mode,opts:['Sandbox','Live']})}${F('vpa','College UPI ID (merchant VPA)',{val:st.upi.vpa,req:true,span:1,attrs:'maxlength="60"'})}</div>
-   <label class="chk" style="margin-top:10px"><input type="checkbox" name="googlePay" ${st.upi.googlePay?'checked':''}> Use the direct Google Pay adapter (switch on only if Google approves the college's account)</label>
-   <p class="note">Gateway keys and the webhook secret are stored on the server only and are never sent to the browser. (OPEN: which bank / gateway does the college allow?)</p>
-   <div class="actions" style="margin-top:12px"><button class="btn primary">Save UPI settings</button></div></form></div>`;
+   <div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form></div>`;
 }
 FORM.feeDefaults=(f,d)=>{need('fees.setup');const st=db.settings;const before={fees:JSON.stringify(st.feeDefault),due:JSON.stringify(st.dueDates),days:st.reminderDays};
   const nf={...st.feeDefault},nd={...st.dueDates};scopeCourses().forEach(co=>{const SEMS=semsOf(co.id);nf[co.id]=SEMS.map(n=>{const a=toPaise(d[co.id+'_'+n]);if(!(a>=0)||a>100000000)throw new Error(`${co.name} semester ${n}: enter a valid amount`);return a});nd[co.id]=SEMS.map(n=>{const v=String(d[`d_${co.id}_${n}`]||'').trim();if(v&&!(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v)))throw new Error(`${co.name} semester ${n} due date: use MM-DD`);return v})});
@@ -359,5 +355,3 @@ FORM.receiptSetup=(f,d)=>{need('fees.setup');const c=db.college,st=db.settings;c
   const n=+d.nextReceipt;const used=Math.max(0,...db.payments.filter(p=>p.rc.startsWith(px)).map(p=>+p.rc.slice(px.length)||0));if(!(n>=1)||n<=used)throw new Error(`Next number must be more than ${used} (already used)`);
   const before={prefix:c.receiptPrefix,next:c.nextReceipt};c.receiptPrefix=px;c.nextReceipt=n;
   log('Receipt settings changed','Settings','receipts',before,{prefix:px,next:n});save();renderPage();toast('Saved')};
-FORM.upiSetup=(f,d)=>{need('fees.setup');const u=db.settings.upi;const vpa=String(d.vpa||'').trim();if(!/^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(vpa))throw new Error('Enter a valid UPI ID like college@okaxis');const before={...u};
-  Object.assign(u,{provider:PaymentProviders[d.provider]?d.provider:'Razorpay',mode:d.mode==='Live'?'Live':'Sandbox',vpa,googlePay:!!d.googlePay});log('UPI settings changed','Settings','upi',before,{...u});save();renderPage();toast('UPI settings saved')};

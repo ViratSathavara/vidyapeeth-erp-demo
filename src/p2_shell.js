@@ -127,9 +127,31 @@ ACT.skip=()=>{if(!focusH1()){const pg=$('#page');if(pg){pg.tabIndex=-1;softFocus
 function courseSwitch(){const my=myCourses();if(my.length<2)return'';const p=pickedCourse();
   return`<label class="cswitch" title="Show data for"><span class="sr">Show data for</span><select data-change="pickCourse" aria-label="Show data for course"><option value="">${my.length===db.courses.length?'All courses':'All my courses'}</option>${my.map(id=>`<option value="${E(id)}" ${p===id?'selected':''}>${E(course(id).name)}</option>`).join('')}</select></label>`}
 CHG.pickCourse=el=>{setPickedCourse(el.value);ui.f={};ui.col=null;renderApp();toast('Showing '+scopeLabel())};
-function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();keepFocus(pg,()=>{pg.innerHTML=n?n[3]():''});renderNav()}
+function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();keepFocus(pg,()=>{pg.innerHTML=n?n[3]():'';enhanceFilters(pg)});renderNav()}
 function go(route,tab){if(tab)ui.tab[route]=tab;const prev=ui.route;ui.route=route;ev('Page','Opened page',humanize(route)+(ui.tab[route]?' › '+humanize(ui.tab[route]):''));renderPage();window.scrollTo(0,0);playEnter('enter');const a=document.activeElement;if(route!==prev||!a||a===document.body)focusH1()}
 ACT.nav=el=>{closeLayer();railClose();go(el.dataset.id)};
 function refresh(){save();renderPage()}
 /* drill-down links: data-to=route, data-sub=tab, data-f=JSON filters */
 ACT.goto=el=>{closeLayer();const r=el.dataset.to;if(el.dataset.f){try{ui.f[r+(el.dataset.sub?'.'+el.dataset.sub:'')]=JSON.parse(el.dataset.f)}catch(e){}}go(r,el.dataset.sub)};
+
+/* ---------- filter bars on phones ----------
+   A filter bar with 3 or more filters gets a "Filters" button on phones and tablets (≤820px):
+   search stays visible, the other filters fold away, the button shows how many are in use.
+   On larger screens nothing changes. Open / closed is kept per page and tab while the app is open. */
+function enhanceFilters(root){
+  (root||document).querySelectorAll('.filters').forEach((el,i)=>{
+    if(el.classList.contains('fx'))return;
+    const kids=[...el.children],search=kids.find(k=>k.matches('input[type=search]'));const rest=kids.filter(k=>k!==search);
+    if(rest.length<3)return;
+    const key=`${ui.route}/${(ui.tab&&ui.tab[ui.route])||''}/${i}`;ui.fxOpen=ui.fxOpen||{};
+    let n=0;rest.forEach(k=>{
+      k.querySelectorAll?.('[aria-pressed="true"]').forEach(()=>n++);
+      [k,...k.querySelectorAll('select,input')].forEach(x=>{if(x.matches?.('select')&&x.options.length&&x.value!==x.options[0].value)n++;else if(x.matches?.('input:not([type=search]):not([type=checkbox]):not([type=radio])')&&x.value)n++})});
+    const body=document.createElement('div');body.className='fx-body';rest.forEach(k=>body.appendChild(k));
+    const tog=document.createElement('button');tog.type='button';tog.className='btn fx-tog';tog.setAttribute('aria-expanded',String(!!ui.fxOpen[key]));
+    tog.innerHTML=`<span class="fx-ic" aria-hidden="true"></span>Filters${n?` <b class="fx-n">${n}</b>`:''}`;
+    tog.addEventListener('click',()=>{const o=!el.classList.contains('open');el.classList.toggle('open',o);tog.setAttribute('aria-expanded',String(o));ui.fxOpen[key]=o});
+    el.classList.add('fx');if(ui.fxOpen[key])el.classList.add('open');
+    if(search)search.after(tog);else el.prepend(tog);tog.after(body);
+  });
+}

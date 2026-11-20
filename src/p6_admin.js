@@ -189,9 +189,12 @@ function logActorOk(id){const u=cur();if(u.role==='Super Admin')return true;if(i
 function viewSettings(){
   const tabs=[];if(can('settings.manage'))tabs.push(['college','College profile']);if(can('fees.setup'))tabs.push(['fees','Fees & receipts']);if(can('roles.manage'))tabs.push(['roles','Roles & permissions']);
   if(cur().role==='Super Admin')tabs.push(['courses','Courses'],['users','Staff logins']);if(can('settings.manage'))tabs.push(['mail','Email & alerts'],['flags','Open items']);if(cur().role==='Super Admin')tabs.push(['data','Data']);
+  for(let i=tabs.length-1;i>=0;i--)if(SETTINGS_HIDDEN.includes(tabs[i][0]))tabs.splice(i,1);
   let t=ui.tab.settings||tabs[0][0];if(!tabs.some(x=>x[0]===t))t=tabs[0][0];ui.tab.settings=t;
   return head('Settings',`${db.college.short} · ${db.college.trust}`,'')+tabsBar('settings',tabs,t)+({college:setCollege,fees:()=>feeSetup(),roles:setRoles,courses:setCourses,users:setUsers,mail:setMail,flags:setFlags,data:setData}[t])();
 }
+/* Settings tabs hidden for now (20-11-2026): email & alerts, open items and demo data. Empty the list to show them again. */
+const SETTINGS_HIDDEN=['mail','flags','data'];
 function setCollege(){need('settings.manage');const c=db.college;const R=Object.assign(RCPT_DEFAULT(),c.rcpt||{});
   return`<form class="scard" data-form="college" style="max-width:820px"><h2>College profile</h2><p class="note" style="margin:0 0 12px">Shown on receipts, reports and the login screen.</p><div class="form">
    ${F('name','College name',{val:c.name,req:true,span:1,attrs:'maxlength="120"'})}${F('short','Short name',{val:c.short,req:true,attrs:'maxlength="12"'})}${F('trust','Trust',{val:c.trust,req:true,attrs:'maxlength="80"'})}
