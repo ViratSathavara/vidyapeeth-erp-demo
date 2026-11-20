@@ -54,6 +54,7 @@ function migrate(){
   const s=db.settings;s.flags=Object.assign({fundingAllCategories:false,lateFee:false},s.flags||{});delete s.flags.expenseReducesDue;delete s.expenseCats;
   if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no separate expense ledger: an expense is a fee taken By Expense */
   if(!db.enquiries)db.enquiries=[];if(!Array.isArray(db.events))db.events=[];
+  if(!db.college.rcpt&&typeof RCPT_DEFAULT==='function')db.college.rcpt=RCPT_DEFAULT();
   db.courses.forEach(c=>{if(!c.years)c.years=Math.max(1,Math.ceil((c.semesters||4)/2));if(c.active===undefined)c.active=true});
   db.users.forEach(u=>{if(STAFF_ROLES.includes(u.role)&&!Array.isArray(u.courses))u.courses=db.courses.map(c=>c.id)});
 }
@@ -298,6 +299,7 @@ function seed(){
     {id:uid('n'),title:'Semester 1 fee – last date',body:'All B.Ed and M.Ed Semester 1 students: please pay the semester fee at the accounts office or online (UPI) by the last date. Keep the receipt for your record.',audience:{type:'all'},isFeeAlert:true,isPublic:false,publishAt:Date.now()-3*864e5,createdBy:'Principal, NPCTE',attachment:null},
     {id:uid('n'),title:'Internship (practice teaching) orientation',body:'B.Ed Semester 3 students must attend the orientation in the seminar hall on Monday at 10:30 am.',audience:{type:'sem',course:'BED',sem:3},isFeeAlert:false,isPublic:false,publishAt:Date.now()-6*864e5,createdBy:'Principal, NPCTE',attachment:null},
     {id:uid('n'),title:'Library timings',body:'The college library is open from 9:00 am to 5:00 pm on all working days.',audience:{type:'all'},isFeeAlert:false,isPublic:true,publishAt:Date.now()-10*864e5,createdBy:'Accounts Clerk',attachment:null}];
+  if(typeof RCPT_DEFAULT==='function')db.college.rcpt=RCPT_DEFAULT();
   db.audit=[];log(REAL?'Fee registers imported':'Sample data loaded','System','',null,null,REAL?`${db.students.length} students, ${db.payments.length} payment records from ${REAL.source}`:'Demo data created');
   if(typeof ntSeed==='function')ntSeed();
 }

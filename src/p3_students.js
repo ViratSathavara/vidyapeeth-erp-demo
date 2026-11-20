@@ -16,8 +16,27 @@ function studentsFiltered(){
 }
 const sortTh=(scope,k,label,num)=>{const f=ui.f[scope]||{};const on=f.sort===k;return`<th class="${num?'num':''}" aria-sort="${on?(f.dir>0?'ascending':'descending'):'none'}"><button class="sortb" data-act="sortBy" data-scope="${E(scope)}" data-k="${E(k)}">${E(label)}<span aria-hidden="true">${on?(f.dir>0?' ▲':' ▼'):''}</span></button></th>`};
 ACT.sortBy=el=>{const f=ui.f[el.dataset.scope];if(f.sort===el.dataset.k)f.dir=-f.dir;else{f.sort=el.dataset.k;f.dir=['due','paid','amount','date','entry'].includes(el.dataset.k)?-1:1}f.page=0;renderPage()};
-const pager=(scope,total)=>{const f=ui.f[scope];const pages=Math.max(1,Math.ceil(total/PAGE));if(pages<2)return'';return`<div class="pager"><button class="btn sm" data-act="pg" data-scope="${E(scope)}" data-d="-1" ${f.page<=0?'disabled':''}>Previous</button><span class="muted">Page ${f.page+1} of ${pages} · ${total} rows</span><button class="btn sm" data-act="pg" data-scope="${E(scope)}" data-d="1" ${f.page>=pages-1?'disabled':''}>Next</button></div>`};
-ACT.pg=el=>{ui.f[el.dataset.scope].page+= +el.dataset.d;renderPage();$('#page h1')&&window.scrollTo(0,0)};
+/* pagination for every list: "Showing 1-25 of 963 · ← Prev 1 2 … 39 Next → · Page [1] of 39 · Items per page [25]" */
+const PER_OPTS=[10,12,25,50,100];
+const perOf=f=>PER_OPTS.includes(+f.per)?+f.per:PAGE;
+function pageRows(f,l){const per=perOf(f),pages=Math.max(1,Math.ceil(l.length/per));f.page=Math.min(Math.max(0,f.page||0),pages-1);return l.slice(f.page*per,(f.page+1)*per)}
+function pageNums(cur,pages){if(pages<=7)return[...Array(pages).keys()];const s=new Set([0,pages-1,cur-1,cur,cur+1].filter(n=>n>=0&&n<pages));if(cur<=2){s.add(1);s.add(2)}if(cur>=pages-3){s.add(pages-2);s.add(pages-3)}
+  const l=[...s].sort((a,b)=>a-b),out=[];l.forEach((n,i)=>{if(i&&n-l[i-1]>1)out.push(n-l[i-1]===2?n-1:-1);out.push(n)});return out}
+const pager=(scope,total)=>{const f=ui.f[scope];if(!f||!total||total<=PER_OPTS[0])return'';const per=perOf(f),pages=Math.max(1,Math.ceil(total/per)),cur=Math.min(f.page||0,pages-1);
+  const a=cur*per+1,b=Math.min(total,(cur+1)*per),S=E(scope);
+  return`<div class="pager" role="navigation" aria-label="Pages">
+   <span class="pg-info">Showing <b>${a}–${b}</b> of <b>${total.toLocaleString('en-IN')}</b></span>
+   <div class="pg-nav">${pages>1?`<button type="button" class="pg-step" data-act="pgTo" data-scope="${S}" data-p="${cur-1}" ${cur<=0?'disabled':''} aria-label="Previous page">←<span class="pg-t"> Prev</span></button>
+    ${pageNums(cur,pages).map(n=>n<0?'<span class="pg-gap" aria-hidden="true">…</span>':`<button type="button" class="pg-n${n===cur?' on':''}" data-act="pgTo" data-scope="${S}" data-p="${n}" ${n===cur?'aria-current="page"':''} aria-label="Page ${n+1}">${n+1}</button>`).join('')}
+    <button type="button" class="pg-step" data-act="pgTo" data-scope="${S}" data-p="${cur+1}" ${cur>=pages-1?'disabled':''} aria-label="Next page"><span class="pg-t">Next </span>→</button>`:''}</div>
+   <div class="pg-opts">${pages>1?`<label class="pg-lbl">Page <select data-change="pgSel" data-scope="${S}" aria-label="Go to page">${[...Array(pages).keys()].map(n=>`<option value="${n}" ${n===cur?'selected':''}>${n+1}</option>`).join('')}</select> of ${pages}</label>`:''}
+    <label class="pg-lbl">Items per page: <select data-change="pgPer" data-scope="${S}" aria-label="Items per page">${PER_OPTS.map(n=>`<option ${n===per?'selected':''}>${n}</option>`).join('')}</select></label></div>
+  </div>`};
+const pgTop=()=>{const p=$('.pager');const h=p&&p.closest('.panel,.scard');if(h&&h.getBoundingClientRect().top<0)h.scrollIntoView({block:'start'})};
+ACT.pg=el=>{ui.f[el.dataset.scope].page+= +el.dataset.d;renderPage();pgTop()};
+ACT.pgTo=el=>{ui.f[el.dataset.scope].page=+el.dataset.p;renderPage();pgTop()};
+CHG.pgSel=el=>{ui.f[el.dataset.scope].page=+el.value;renderPage();pgTop()};
+CHG.pgPer=el=>{const f=ui.f[el.dataset.scope];const first=(f.page||0)*perOf(f);f.per=+el.value;f.page=Math.floor(first/f.per);renderPage()};
 CHG.sf=el=>{const f=ui.f[el.dataset.scope];f[el.dataset.k]=el.value;f.page=0;renderPage()};
 LIVE.sq=el=>{const f=ui.f[el.dataset.scope];f.q=el.value;f.page=0;clearTimeout(LIVE._t);LIVE._t=setTimeout(()=>{renderPage();const i=$(`[data-live=sq][data-scope="${el.dataset.scope}"]`);if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}},200)};
 const sel=(scope,k,label,opts)=>{const f=ui.f[scope];return`<select aria-label="${E(label)}" data-change="sf" data-scope="${E(scope)}" data-k="${E(k)}">${opts.map(([v,l])=>`<option value="${E(v)}" ${String(f[k])===String(v)?'selected':''}>${E(l)}</option>`).join('')}</select>`};
@@ -27,8 +46,8 @@ const CAT_OPTS=[['','All categories'],...CATS.map(c=>[c,c])];
 const FUND_OPTS=[['','Cash + Scholarship'],['CASH','By Cash'],['SCHOLARSHIP','By Scholarship']];
 
 function viewStudents(){
-  const f=stuFilter();const l=studentsFiltered();const page=l.slice(f.page*PAGE,(f.page+1)*PAGE);
-  const acts=`${can('students.edit')?`<button class="btn" data-act="importStudents">Import CSV</button>`:''}<button class="btn" data-act="exportStudents">Export Excel</button>${can('students.edit')?'<button class="btn primary" data-act="newStudent">Add student</button>':''}`;
+  const f=stuFilter();const l=studentsFiltered();const page=pageRows(f,l);
+  const acts=`${can('students.edit')?`<button class="btn" data-act="importStudents">Import CSV</button>`:''}<button class="btn exp-btn" data-act="expOpen" data-key="students">Export</button>${can('students.edit')?'<button class="btn primary" data-act="newStudent">Add student</button>':''}`;
   const act=vStudents().filter(s=>s.status==='ACTIVE');
   return head('Students',`${act.length} active · ${act.filter(s=>s.course==='BED').length} B.Ed · ${act.filter(s=>s.course==='MED').length} M.Ed · ${act.filter(s=>s.funding==='SCHOLARSHIP').length} on scholarship`,acts)+
   `<div class="panel"><div class="filters"><input type="search" placeholder="Search name, enrolment no, phone or email" aria-label="Search students" data-live="sq" data-scope="students" value="${E(f.q)}">

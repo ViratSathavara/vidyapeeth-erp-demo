@@ -1,5 +1,5 @@
 /* NPCTE service worker: offline fallback + notification clicks (+ Web Push in the real app) */
-const C='npcte-v7';
+const C='npcte-v8';
 /* install never fails: one file that cannot be cached (a redirect such as /offline.html -> /offline with cleanUrls,
    a login wall on a protected preview, a 404) used to reject addAll, the worker never activated and NO notification could be shown */
 const PRE=['/','/offline.html','/icons/icon-192.png','/icons/icon-512.png','/icons/badge-96.png','/manifest.webmanifest'];

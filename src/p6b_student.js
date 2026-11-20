@@ -31,8 +31,8 @@ ACT.payNow=el=>{const s=me();const m=semSummary(s,+el.dataset.sem);if(!(m.due>0)
 function viewStudentNotices(){
   const s=me(),u=cur();const l=studentNotices(s);const r=new Set(u.readNotices||[]);const un=l.filter(n=>!r.has(n.id)).length;
   return head('Notice Board',un?`${un} unread`:'All read',un?'<button class="btn" data-act="readAllNotices">Mark all read</button>':'')+
-  `<div class="nlist">${l.map(n=>`<article class="ncard ${r.has(n.id)?'':'unread'}"><div class="nc-h"><h3>${r.has(n.id)?'':'<span class="ndot" aria-label="Unread"></span>'}${E(n.title)}</h3>${n.isFeeAlert?pill('Fee alert','warn'):''}</div><p>${E(n.body)}</p>${n.attachment?`<button class="lnk" data-act="openAtt" data-id="${E(n.id)}">📎 ${E(n.attachment.name)}</button>`:''}<small class="muted">${E(fmtT(n.publishAt))} · ${E(n.createdBy)}</small>
-   ${r.has(n.id)?'':`<div><button class="btn sm" data-act="readNotice" data-id="${E(n.id)}">Mark as read</button></div>`}</article>`).join('')||'<p class="empty">No notices yet.</p>'}</div>`;
+  `<div class="nlist">${pageRows(ui.f.snotices=ui.f.snotices||{},l).map(n=>`<article class="ncard ${r.has(n.id)?'':'unread'}"><div class="nc-h"><h3>${r.has(n.id)?'':'<span class="ndot" aria-label="Unread"></span>'}${E(n.title)}</h3>${n.isFeeAlert?pill('Fee alert','warn'):''}</div><p>${E(n.body)}</p>${n.attachment?`<button class="lnk" data-act="openAtt" data-id="${E(n.id)}">📎 ${E(n.attachment.name)}</button>`:''}<small class="muted">${E(fmtT(n.publishAt))} · ${E(n.createdBy)}</small>
+   ${r.has(n.id)?'':`<div><button class="btn sm" data-act="readNotice" data-id="${E(n.id)}">Mark as read</button></div>`}</article>`).join('')||'<p class="empty">No notices yet.</p>'}</div>${pager('snotices',l.length)}`;
 }
 ACT.readNotice=el=>{const u=cur();const s=me();const n=db.notices.find(x=>x.id===el.dataset.id);if(!n||!studentNotices(s).includes(n))throw new Error('403 · Not allowed');u.readNotices=[...new Set([...(u.readNotices||[]),n.id])];
   db.notifs.forEach(x=>{if(x.uid===u.id&&x.key==='notice:'+n.id+'|'+u.id)x.read=true});save();updateBell();if(ui.route!=='snotices')go('snotices');else renderPage()};

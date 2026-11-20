@@ -30,13 +30,13 @@ function semCell(x){if(!x.amount)return'<span class="muted">—</span>';
   if(!x.started)return`<span class="sc up" title="Not started yet">${inr(x.due)}<small>upcoming</small></span>`;
   return`<span class="sc ${x.overdue?'bad':'due'}">${inr(x.due)}<small>${x.overdue?'overdue':x.paid?'part paid':'due'}</small></span>`}
 function feeCollect(){
-  need('fees.view');const f=colFilter();const sc='fees.collect';const l=colRows();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);const SEMS=SEMS_ALL();
+  need('fees.view');const f=colFilter();const sc='fees.collect';const l=colRows();const pg=pageRows(f,l);const SEMS=SEMS_ALL();
   const T=today();const ok=vPayments().filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);
   const bats=[...new Set(vStudents().map(defaultBatch))].sort().reverse();
   const tot={fee:sum(l,x=>x.sm.total),paid:sum(l,x=>x.sm.paid),due:sum(l,x=>x.sm.payable)};
   return`<div class="kpis k4 kpis-sm"><div class="kpi "><span class="label">Students</span><div class="v">${l.length}</div></div><div class="kpi "><span class="label">Total tuition fee</span><div class="v">${inr(tot.fee)}</div></div><div class="kpi good"><span class="label">Paid</span><div class="v">${inr(tot.paid)}</div></div><div class="kpi bad"><span class="label">Due now</span><div class="v">${inr(tot.due)}</div></div></div>
    <div class="today-strip"><b>Today</b>${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<span>${modePill(m)} ${inr(sum(ok.filter(p=>p.mode===m),p=>p.amount))}</span>`).join('')}</div>
-   <div class="panel"><h2>Students and their fees</h2>
+   <div class="panel"><h2>Students and their fees<button class="btn exp-btn" data-act="expOpen" data-key="fees.collect">Export</button></h2>
    <div class="filters"><input type="search" placeholder="Name, enrolment no. or mobile" aria-label="Search students" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
     ${scopeCourses().length>1?sel(sc,'course','Course',COURSE_OPTS()):''}${sel(sc,'batch','Batch',[['','All batches'],...bats.map(b=>[b,b])])}${sel(sc,'sem','Semester',[['','All semesters'],...SEMS.map(n=>[n,'Semester '+n])])}
     ${sel(sc,'st','Status',[['','All students'],['due','Fee due now'],['overdue','Overdue'],['paid','Fully paid (so far)']])}</div>
@@ -234,15 +234,31 @@ ACT.ppPay=el=>{const p=handleUpiWebhook(gwEvent(el.dataset.id,'captured'));save(
 ACT.ppDecline=el=>{handleUpiWebhook(gwEvent(el.dataset.id,'failed'));save();renderPayPage(el.dataset.id)};
 
 /* ---------- receipt view ---------- */
+/* on-screen and printed receipt: the same design as the PDF fee invoice */
 function receiptHtml(p){
-  const s=stu(p.studentId);const sv=isStudentUser(cur());const c=db.college;const bal=semSummary(s,p.sem).due;
-  return`<div class="receipt ${p.status==='CANCELLED'?'cancelled':''}"><div class="hd"><div><b>${E(c.name)}</b><div class="muted" style="font-size:12px">${E(c.trust)} · ${E(c.address)}</div></div><div class="right"><b class="mono">${E(p.rc)}</b><div class="muted" style="font-size:12px">Invoice date ${fmtD(p.invoiceDate)}</div></div></div>
-   ${p.status==='CANCELLED'?`<p class="err" style="margin:0 0 10px">Cancelled on ${fmtT(p.cancelledAt)} by ${E(p.cancelledBy)} · ${E(p.cancelReason)}</p>`:`<div class="tick"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14"/><path d="M10 16.5l4 4 8-9"/></svg>Payment received</div>`}
-   <div class="rline"><span>Student</span><b>${E(s.name)}</b></div><div class="rline"><span>Enrolment no.</span><span class="mono">${E(s.enrol)}</span></div><div class="rline"><span>Course</span><span>${E(course(s.course).name)} · Semester ${p.sem}</span></div><div class="rline"><span>Batch</span><b>${E(batchOf(p))}</b></div><div class="rline"><span>Fee</span><span>Tuition fee</span></div>
-   ${sv?'':`<div class="rline"><span>Mode</span><span>${modeName(p.mode)}${p.mode==='CHEQUE'?` · No. ${E(p.chequeNo)}, ${E(p.bank)}, dated ${fmtD(p.chequeDate)}`:''}${p.mode==='UPI'?` · ${E(p.upiRef)}`:''}</span></div>${p.mode==='EXPENSE'?(p.expenseItems&&p.expenseItems.length?`<div class="expitems"><b>Expense details</b>${p.expenseItems.map((x,i)=>`<div class="rline"><span>${E(x.reason)}${x.doc?` <button class="lnk" data-act="expDocOpen" data-id="${E(p.id)}" data-i="${i}">📎 bill</button>`:''}</span><span>${inr(x.amount)}</span></div>`).join('')}</div>`:p.reason?`<div class="rline"><span>Used for</span><span>${E(p.reason)}</span></div>`:''):''}
-   ${p.mode==='UPI'?`<div class="rline"><span>Paid on</span><span>${fmtT(p.paidAt)}</span></div>`:''}<div class="rline"><span>Entered</span><span>${fmtT(p.entryAt)} · ${E(p.by)}</span></div>${p.note?`<div class="rline"><span>Note</span><span>${E(p.note)}</span></div>`:''}`}
-   <div class="rline tot"><span>Amount</span><span>${inr(p.amount)}</span></div><div class="rline"><span>Semester ${p.sem} balance now</span><span>${inr(bal)}</span></div>
-   ${(p.dateEdits||[]).length?`<p class="note">Invoice date changed: ${p.dateEdits.map(x=>`${fmtD(x.from)} → ${fmtD(x.to)} (${E(x.by)})`).join('; ')}</p>`:''}</div>`;
+  const sv=isStudentUser(cur());const I=rcptInfo(p,sv),{s,R,cancelled}=I;
+  const img=k=>typeof RCPT_IMG!=='undefined'&&RCPT_IMG[k]?`data:image/jpeg;base64,${RCPT_IMG[k].jpg}`:'';
+  const exp=!sv&&p.mode==='EXPENSE'&&(p.expenseItems||[]).length?`<div class="inv-exp"><b>Expense details</b>${p.expenseItems.map((x,i)=>`<div class="rline"><span>${E(x.reason)}${x.doc?` <button class="lnk" data-act="expDocOpen" data-id="${E(p.id)}" data-i="${i}">📎 bill</button>`:''}</span><span>${inr(x.amount)}</span></div>`).join('')}</div>`:'';
+  const row=(k,v,cls='')=>`<div class="inv-r ${cls}"><span>${k}</span><b>${amt2(v)}</b></div>`;
+  return`<article class="inv ${cancelled?'cancelled':''}" aria-label="Fee invoice ${E(p.rc)}">
+   <div class="inv-band" aria-hidden="true">${img('logo')?`<span class="inv-logo"><img src="${img('logo')}" alt=""></span>`:''}<span class="inv-word">NPCTE</span></div>
+   <div class="inv-main">
+    <div class="inv-top"><i>${E(R.naac)}</i><div class="inv-con"><span>☎ College : ${E(R.mobCollege)} (Mo.)</span><span>Trust : ${E(R.mobTrust)} (Mo.)</span><span>E-mail : ${E(R.email)}</span><span>Web : ${E(R.web)}</span></div></div>
+    <div class="inv-name">${E(R.fullName)}</div>${img('guj')?`<img class="inv-guj" src="${img('guj')}" alt="">`:''}
+    <div class="inv-trust">${E(R.trustLine)}</div><div class="inv-addr">${E(R.address)}</div>
+    <h3 class="inv-title"><span>Fee</span> Invoice${cancelled?'<em>Cancelled</em>':''}</h3>
+    <div class="inv-meta"><div><small>Invoice no.</small><b class="mono">${E(p.rc)}</b></div><div><small>Invoice date</small><b>${longD(p.invoiceDate)}</b></div><div><small>Batch</small><b>${E(batchOf(p))}</b></div><div><small>Course</small><b>${E(I.cname.replace(' - ',' – '))}</b></div></div>
+    <div class="inv-box"><div><small>Billed to</small><b>${E(s.name)}</b><span>Student ID: ${E(s.enrol)}</span><span>Category: ${E(s.category)}</span></div>
+     <div><small>Payment details</small><b>${sv?'Fee: Tuition fee':'Mode: '+E(I.mode)}</b><span>Received by: ${E(p.by||'College office')}</span><span>Payment date: ${longD(I.payDate)}</span></div></div>
+    <div class="inv-tbl"><div class="inv-th"><span>Description</span><span>Amount (₹)</span></div><div class="inv-td alt"><span>Tuition fee – Semester ${p.sem}</span><span>${amt2(I.fee)}</span></div><div class="inv-td"><span>Less: Scholarship / concession</span><span>0.00</span></div></div>
+    <div class="inv-sum"><div class="inv-words"><small>Amount paid in words:</small><b>${E(inWords(I.paidNow))}</b></div>
+     <div class="inv-tot">${row('Total fee',I.fee)}${I.earlier>0?row('Paid earlier',I.earlier):''}${row('Amount paid now',I.paidNow)}${row('Balance due',I.balance,'bal')}</div></div>
+    ${exp}
+    <div class="inv-notes"><b>Notes</b><ul>${I.notes.map(n=>`<li>${E(n)}</li>`).join('')}</ul></div>
+    <div class="inv-sign"><i>${E(R.signFor)}</i><span>Authorised Signatory</span></div>
+    <p class="inv-foot">This is a computer-generated invoice and does not require a physical signature.</p>
+   </div>
+  </article>`;
 }
 function showReceipt(p,fresh){
   drawer(`<button class="btn x" data-act="close">Close</button><h2>${fresh?'Receipt issued':'Receipt'}</h2><div style="margin-top:14px">${receiptHtml(p)}</div>
@@ -275,8 +291,8 @@ function duesFiltered(){const f=duesFilter();const q=f.q.toLowerCase();
   let l=vStudents().filter(s=>s.status==='ACTIVE').map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>sm.payable>0&&(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.over||sm.overdue)&&(!q||[s.name,s.enrol,s.phone].some(v=>v.toLowerCase().includes(q))));
   const k={due:x=>x.sm.payable,name:x=>x.s.name,course:x=>x.s.course+x.s.sem}[f.sort]||(x=>x.sm.payable);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
 function feeDues(){
-  const f=duesFilter();const sc='fees.dues';const l=duesFiltered();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);ui.dueSel=ui.dueSel||new Set();
-  return`<div class="panel"><h2>Pending dues ${pill(inr(sum(l,x=>x.sm.payable))+' · '+l.length+' students','warn')}</h2>
+  const f=duesFilter();const sc='fees.dues';const l=duesFiltered();const pg=pageRows(f,l);ui.dueSel=ui.dueSel||new Set();
+  return`<div class="panel"><h2>Pending dues ${pill(inr(sum(l,x=>x.sm.payable))+' · '+l.length+' students','warn')}<button class="btn exp-btn" data-act="expOpen" data-key="fees.dues">Export</button></h2>
    <div class="filters"><input type="search" placeholder="Search" aria-label="Search dues" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'sem','Semester',SEM_OPTS_())}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'over','Overdue',[['','Due + overdue'],['1','Only overdue']])}</div>
    ${can('notices.post')?`<div class="actions" style="margin-bottom:10px"><button class="btn" data-act="remindSel" ${ui.dueSel.size?'':'disabled'}>Send reminder to selected (${ui.dueSel.size})</button><button class="btn primary" data-act="remindAll" ${l.length?'':'disabled'}>Send reminder to all ${l.length} shown</button></div>`:''}
    <div class="tablewrap"><table><thead><tr>${can('notices.post')?`<th><input type="checkbox" aria-label="Select all shown" data-change="dueAll" ${pg.length&&pg.every(x=>ui.dueSel.has(x.s.id))?'checked':''}></th>`:''}${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course · Sem')}<th>Category</th><th>Funding</th><th>Semesters due</th>${sortTh(sc,'due','Due now',1)}<th></th></tr></thead><tbody>
@@ -286,7 +302,7 @@ function feeDues(){
    <p class="note">Automatic alerts go to each student ${db.settings.reminderDays} days before a due date and again when it is overdue (change in Fee setup).</p></div>`;
 }
 CHG.dueSel=el=>{el.checked?ui.dueSel.add(el.dataset.id):ui.dueSel.delete(el.dataset.id);renderPage()};
-CHG.dueAll=el=>{const f=duesFilter();duesFiltered().slice(f.page*PAGE,(f.page+1)*PAGE).forEach(x=>el.checked?ui.dueSel.add(x.s.id):ui.dueSel.delete(x.s.id));renderPage()};
+CHG.dueAll=el=>{const f=duesFilter();pageRows(f,duesFiltered()).forEach(x=>el.checked?ui.dueSel.add(x.s.id):ui.dueSel.delete(x.s.id));renderPage()};
 function remindDialog(ids){
   need('notices.post','send reminders');if(!ids.length)throw new Error('Select at least one student');const one=ids.length===1&&stu(ids[0]);const sm=one&&feeSum(one);
   const firstDue=one&&sm.sems.find(x=>x.started&&x.due>0);
@@ -308,8 +324,8 @@ function receiptsFiltered(){const f=rcFilter();const q=f.q.toLowerCase();
   let l=vPayments().filter(p=>(!f.mode||p.mode===f.mode)&&(!f.status||p.status===f.status)&&(!f.from||p.invoiceDate>=f.from)&&(!f.to||p.invoiceDate<=f.to)&&(!q||[p.rc,stu(p.studentId).name,stu(p.studentId).enrol,p.chequeNo,p.upiRef,batchOf(p),p.reason].some(v=>String(v||'').toLowerCase().includes(q))));
   const k={entry:p=>p.entryAt,date:p=>p.invoiceDate,amount:p=>p.amount,rc:p=>p.rc,name:p=>stu(p.studentId).name}[f.sort]||(p=>p.entryAt);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
 function feeReceipts(){
-  const f=rcFilter();const sc='fees.receipts';const l=receiptsFiltered();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);
-  return`<div class="panel"><h2>Receipts ${pill(inr(sum(l.filter(p=>p.status==='SUCCESS'),p=>p.amount))+' successful','good')}</h2>
+  const f=rcFilter();const sc='fees.receipts';const l=receiptsFiltered();const pg=pageRows(f,l);
+  return`<div class="panel"><h2>Receipts ${pill(inr(sum(l.filter(p=>p.status==='SUCCESS'),p=>p.amount))+' successful','good')}<button class="btn exp-btn" data-act="expOpen" data-key="fees.receipts">Export</button></h2>
    <div class="filters"><input type="search" placeholder="Receipt no, name, batch, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI'],['EXPENSE','Expense']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}
     <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label></div>
    <div class="tablewrap"><table><thead><tr>${sortTh(sc,'rc','Receipt')}${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entered')}${sortTh(sc,'name','Student')}<th>Batch</th><th>Sem</th><th>Mode</th>${sortTh(sc,'amount','Amount',1)}<th>Status</th><th></th></tr></thead><tbody>

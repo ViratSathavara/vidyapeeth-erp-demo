@@ -19,11 +19,11 @@ function viewNotices(){
   const l=db.notices.filter(n=>inAud(n.audience)&&(!f.kind||(f.kind==='fee'?n.isFeeAlert:f.kind==='public'?n.isPublic:f.kind==='scheduled'?n.publishAt>Date.now():true))&&(!q||(n.title+' '+n.body).toLowerCase().includes(q))).sort((a,b)=>b.publishAt-a.publishAt);
   return head('Notice Board','Notices reach students in their portal with a live notification, sound and a phone popup.','<button class="btn primary" data-act="newNotice">New notice</button>')+
   `<div class="panel"><div class="filters"><input type="search" placeholder="Search notices" aria-label="Search notices" data-live="sq" data-scope="notices" value="${E(f.q)}">${sel('notices','kind','Type',[['','All notices'],['fee','Fee alerts'],['scheduled','Scheduled'],['public','Public (website)']])}</div>
-  <div class="nlist">${l.map(n=>{const reach=audienceStudents(n.audience).length;const sched=n.publishAt>Date.now();return`<article class="ncard">
+  <div class="nlist">${pageRows(f,l).map(n=>{const reach=audienceStudents(n.audience).length;const sched=n.publishAt>Date.now();return`<article class="ncard">
    <div class="nc-h"><h3>${E(n.title)}</h3><div class="actions">${n.isFeeAlert?pill('Fee alert','warn'):''}${n.isPublic?pill('Public','acc'):''}${sched?pill('Scheduled '+fmtT(n.publishAt),'warn'):pill('Published','good')}</div></div>
    <p>${E(n.body)}</p>${n.attachment?`<button class="lnk" data-act="openAtt" data-id="${E(n.id)}">📎 ${E(n.attachment.name)} (${fmtSize(n.attachment.size)})</button>`:''}
    <small class="muted">${E(audienceLabel(n.audience))} · ${reach} student${reach===1?'':'s'} · ${sched?'goes out':'sent'} ${fmtT(n.publishAt)} · by ${E(n.createdBy)}</small>
-   <div class="actions" style="margin-top:8px"><button class="btn sm danger" data-act="delNotice" data-id="${E(n.id)}">Delete</button></div></article>`}).join('')||'<p class="empty">No notices yet.</p>'}</div></div>`;
+   <div class="actions" style="margin-top:8px"><button class="btn sm danger" data-act="delNotice" data-id="${E(n.id)}">Delete</button></div></article>`}).join('')||'<p class="empty">No notices yet.</p>'}</div>${pager('notices',l.length)}</div>`;
 }
 function noticeForm(){
   const sts=vStudents().filter(s=>s.status==='ACTIVE').sort((a,b)=>a.name.localeCompare(b.name));
@@ -78,7 +78,7 @@ function txFiltered(){
 }
 const txTotals=l=>{const ok=l.filter(r=>r.status==='SUCCESS');const o={};['CASH','CHEQUE','UPI','EXPENSE'].forEach(m=>o[m]=sum(ok.filter(r=>r.mode===m),r=>r.amount));o.income=o.CASH+o.CHEQUE+o.UPI;return o};
 function auditTx(){
-  const f=txFilter();const sc='audit.tx';const l=txFiltered();const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);const t=txTotals(l);const bys=[...new Set(txAll().map(r=>r.by))];
+  const f=txFilter();const sc='audit.tx';const l=txFiltered();const pg=pageRows(f,l);const t=txTotals(l);const bys=[...new Set(txAll().map(r=>r.by))];
   return`<div class="totals">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)}</span><b>${inr(t[m])}</b></div>`).join('')}<div class="tt sum"><span>Cash + Cheque + UPI</span><b>${inr(t.income)}</b></div></div>
   <div class="panel"><div class="filters"><input type="search" placeholder="Search receipt, name, cheque, UTR, reason" aria-label="Search transactions" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
    <div class="chips" role="group" aria-label="Mode">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<button type="button" class="chip ${MODE_TONE[m]}" aria-pressed="${f.modes.includes(m)}" data-act="txMode" data-m="${m}">${modeName(m)}</button>`).join('')}</div>
@@ -86,7 +86,7 @@ function auditTx(){
    ${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'sem','Semester',SEM_OPTS_())}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled'],['FAILED','Failed']])}${sel(sc,'by','Entered by',[['','Anyone'],...bys.map(b=>[b,b])])}
    <input class="numin" placeholder="Min ₹" aria-label="Minimum amount" value="${E(f.min)}" data-change="sf" data-scope="${sc}" data-k="min" inputmode="decimal"><input class="numin" placeholder="Max ₹" aria-label="Maximum amount" value="${E(f.max)}" data-change="sf" data-scope="${sc}" data-k="max" inputmode="decimal">
    <button class="btn sm" data-act="txClear">Clear</button></div>
-  <div class="actions" style="margin-bottom:10px"><span class="muted">${l.length} rows</span><span style="flex:1"></span><button class="btn" data-act="txCsv">Export Excel</button><button class="btn" data-act="txPrint">Export PDF</button></div>
+  <div class="actions" style="margin-bottom:10px"><span class="muted">${l.length} rows</span><span style="flex:1"></span><button class="btn exp-btn" data-act="expOpen" data-key="audit.tx">Export</button></div>
   <div class="tablewrap"><table class="dense"><thead><tr>${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entry time')}${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course')}<th>Batch</th>${sortTh(sc,'sem','Sem')}${sortTh(sc,'cat','Category')}${sortTh(sc,'fund','Funding')}${sortTh(sc,'mode','Mode')}${sortTh(sc,'amount','Amount',1)}${sortTh(sc,'ref','Receipt / ref')}${sortTh(sc,'status','Status')}${sortTh(sc,'by','Entered by')}</tr></thead><tbody>
   ${pg.map(r=>`<tr><td>${fmtD(r.date)}</td><td><small>${fmtT(r.entry)}</small></td><td>${r.s?`<button class="lnk" data-act="openStudent" data-id="${E(r.s.id)}">${E(r.s.name)}</button>`:`<span class="muted">${E(r.reason||'—')}</span>`}</td><td>${r.s?E(course(r.s.course).name):'—'}</td><td class="mono">${E(r.batch||'—')}</td><td>${r.sem||'—'}</td><td>${r.s?E(r.s.category):'—'}</td><td>${r.s?E(fundLabel(r.s.funding)):'—'}</td><td>${modePill(r.mode)}</td><td class="num amt">${inr(r.amount)}</td><td class="mono">${r.kind==='p'?`<button class="lnk mono" data-act="viewReceipt" data-id="${E(r.id)}">${E(r.ref)}</button>`:E(r.ref)}</td><td>${payPill(r.status)}</td><td>${E(r.by)}</td></tr>`).join('')||'<tr><td colspan="13" class="empty">No transactions for these filters.</td></tr>'}
   </tbody></table></div>${pager(sc,l.length)}</div>`;
@@ -115,22 +115,24 @@ function depPeriod(){const f=ui.f.dep=Object.assign({p:'week',from:'',to:''},ui.
   if(f.p==='month')return{from:T.slice(0,8)+'01',to:addDays(isoOf(new Date(+T.slice(0,4),+T.slice(5,7),1)),-1),f};
   if(f.p==='lastmonth'){const d=new Date(+T.slice(0,4),+T.slice(5,7)-2,1);return{from:isoOf(d),to:addDays(isoOf(new Date(d.getFullYear(),d.getMonth()+1,1)),-1),f}}
   return{from:f.from||addDays(T,-30),to:f.to||T,f}}
+/* cash and cheque of the chosen period that are not yet marked as deposited (oldest first) */
+function depPending(){const{from,to}=depPeriod();return vPayments().filter(p=>p.invoiceDate>=from&&p.invoiceDate<=to&&p.status==='SUCCESS'&&(p.mode==='CASH'||p.mode==='CHEQUE')&&!p.depositId).sort((a,b)=>a.invoiceDate<b.invoiceDate?-1:1)}
 function auditDeposit(){
   const{from,to,f}=depPeriod();const inP=p=>p.invoiceDate>=from&&p.invoiceDate<=to&&p.status==='SUCCESS';
-  const pays=vPayments().filter(inP);const und=pays.filter(p=>(p.mode==='CASH'||p.mode==='CHEQUE')&&!p.depositId);const ex=pays.filter(p=>p.mode==='EXPENSE');
+  const pays=vPayments().filter(inP);const und=depPending();const ex=pays.filter(p=>p.mode==='EXPENSE');
   const col=m=>{const l=m==='EXPENSE'?ex:pays.filter(p=>p.mode===m);return{t:sum(l,x=>x.amount),n:l.length,und:m==='CASH'||m==='CHEQUE'?sum(l.filter(p=>!p.depositId),p=>p.amount):null}};
   const sc=can('audit.deposit');
   return`<div class="panel"><h2>Cash & cheque deposit report</h2>
    <div class="filters"><div class="chips" role="group" aria-label="Period">${[['week','This week'],['lastweek','Last week'],['month','This month'],['lastmonth','Last month'],['custom','Custom']].map(([k,l])=>`<button type="button" class="chip" aria-pressed="${f.p===k}" data-act="depP" data-p="${k}">${l}</button>`).join('')}</div>
     ${f.p==='custom'?`<label class="dl">From <input type="date" value="${E(from)}" data-change="sf" data-scope="dep" data-k="from"></label><label class="dl">To <input type="date" value="${E(to)}" data-change="sf" data-scope="dep" data-k="to"></label>`:`<span class="muted">${fmtD(from)} to ${fmtD(to)}</span>`}</div>
    <div class="totals four">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>{const c=col(m);return`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)} · ${c.n}</span><b>${inr(c.t)}</b>${c.und!==null?`<small>${c.und?inr(c.und)+' not deposited':'all deposited'}</small>`:`<small>${m==='UPI'?'goes to bank by gateway':'fee used for college expense'}</small>`}</div>`}).join('')}</div>
-   <h3>Not yet deposited · ${und.length} entries · ${inr(sum(und,p=>p.amount))}</h3>
+   <h3>Not yet deposited · ${und.length} entries · ${inr(sum(und,p=>p.amount))}<button class="btn exp-btn" data-act="expOpen" data-key="audit.dep">Export</button></h3>
    <div class="tablewrap"><table><thead><tr>${sc?`<th><input type="checkbox" aria-label="Select all" data-change="depAll" checked></th>`:''}<th>Invoice date</th><th>Receipt</th><th>Student</th><th>Mode</th><th>Cheque</th><th class="num">Amount</th></tr></thead><tbody>
    ${und.sort((a,b)=>a.invoiceDate<b.invoiceDate?-1:1).map(p=>`<tr>${sc?`<td><input type="checkbox" name="dep" value="${E(p.id)}" checked aria-label="Include ${E(p.rc)}" data-change="depCount"></td>`:''}<td>${fmtD(p.invoiceDate)}</td><td class="mono">${E(p.rc)}</td><td>${E(stu(p.studentId).name)}</td><td>${modePill(p.mode)}</td><td>${p.mode==='CHEQUE'?E(p.chequeNo+' · '+p.bank):'—'}</td><td class="num amt">${inr(p.amount)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nothing waiting to be deposited in this period.</td></tr>'}</tbody></table></div>
    ${sc&&und.length?`<form data-form="deposit" class="form" style="margin-top:14px"><div class="field span"><b id="depSum">Selected: ${und.length} · ${inr(sum(und,p=>p.amount))}</b></div>${F('depositedOn','Deposited on',{type:'date',val:today(),req:true,attrs:`max="${today()}"`})}${F('bankRef','Bank slip / reference',{req:true,attrs:'maxlength="60"'})}<div class="actions span"><button class="btn primary big">Mark as deposited</button><button type="button" class="btn" data-act="depPrint">Print report</button></div></form>`:`<div class="actions" style="margin-top:12px"><button class="btn" data-act="depPrint">Print report</button></div>`}
   </div>
-  <div class="panel" style="margin-top:16px"><h2>Deposits made</h2><div class="tablewrap"><table><thead><tr><th>Deposited on</th><th>Period</th><th>Entries</th><th class="num">Total</th><th>Bank ref</th><th>By</th><th></th></tr></thead><tbody>
-   ${db.deposits.slice().sort((a,b)=>b.at-a.at).map(d=>`<tr><td>${fmtD(d.depositedOn)}</td><td>${fmtD(d.periodFrom)} – ${fmtD(d.periodTo)}</td><td>${d.count}</td><td class="num amt">${inr(d.total)}</td><td>${E(d.bankRef)}</td><td>${E(d.by)}</td><td>${['Super Admin','Principal'].includes(cur().role)?`<button class="btn sm" data-act="depUndo" data-id="${E(d.id)}">Undo</button>`:''}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">No deposits yet.</td></tr>'}</tbody></table></div></div>`;
+  <div class="panel" style="margin-top:16px"><h2>Deposits made<button class="btn exp-btn" data-act="expOpen" data-key="audit.depmade">Export</button></h2><div class="tablewrap"><table><thead><tr><th>Deposited on</th><th>Period</th><th>Entries</th><th class="num">Total</th><th>Bank ref</th><th>By</th><th></th></tr></thead><tbody>
+   ${pageRows(ui.f.depmade=ui.f.depmade||{},db.deposits.slice().sort((a,b)=>b.at-a.at)).map(d=>`<tr><td>${fmtD(d.depositedOn)}</td><td>${fmtD(d.periodFrom)} – ${fmtD(d.periodTo)}</td><td>${d.count}</td><td class="num amt">${inr(d.total)}</td><td>${E(d.bankRef)}</td><td>${E(d.by)}</td><td>${['Super Admin','Principal'].includes(cur().role)?`<button class="btn sm" data-act="depUndo" data-id="${E(d.id)}">Undo</button>`:''}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">No deposits yet.</td></tr>'}</tbody></table></div>${pager('depmade',db.deposits.length)}</div>`;
 }
 ACT.depP=el=>{depPeriod().f.p=el.dataset.p;renderPage()};
 const depChecked=()=>$$('input[name=dep]:checked').map(i=>db.payments.find(p=>p.id===i.value)).filter(Boolean);
@@ -148,11 +150,12 @@ ACT.depPrint=()=>{const{from,to}=depPeriod();const l=vPayments().filter(p=>p.sta
    `<p class="pt">Cash ${t('CASH')} · Cheque ${t('CHEQUE')} · UPI ${t('UPI')} · Expense ${t('EXPENSE')} · Not deposited ${inr(sum(l.filter(p=>!p.depositId),p=>p.amount))}</p><p class="pt">Deposited by: ____________________ &nbsp; Checked by: ____________________</p>`)};
 
 /* activity log (§7B): read-only, Principal and Super Admin */
+function actFiltered(){const f=ui.f.act=Object.assign({q:'',role:'',from:'',to:'',page:0},ui.f.act||{});const q=f.q.toLowerCase();
+  return auditVisible().filter(a=>(!f.role||a.role===f.role)&&(!f.from||istDate(a.at)>=f.from)&&(!f.to||istDate(a.at)<=f.to)&&(!q||[a.action,a.actor,a.entity,a.entityId,a.detail,JSON.stringify(a.after||''),JSON.stringify(a.before||'')].some(v=>String(v).toLowerCase().includes(q))))}
 function auditActivity(){
-  need('activity.view');const f=ui.f.act=Object.assign({q:'',role:'',from:'',to:'',page:0},ui.f.act||{});const q=f.q.toLowerCase();
-  const l=auditVisible().filter(a=>(!f.role||a.role===f.role)&&(!f.from||istDate(a.at)>=f.from)&&(!f.to||istDate(a.at)<=f.to)&&(!q||[a.action,a.actor,a.entity,a.entityId,a.detail,JSON.stringify(a.after||''),JSON.stringify(a.before||'')].some(v=>String(v).toLowerCase().includes(q))));
-  const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);
-  return`<div class="panel"><h2>Activity log ${pill(l.length+' actions')}<button class="btn" data-act="actCsv">Export Excel</button></h2>
+  need('activity.view');const l=actFiltered();const f=ui.f.act;
+  const pg=pageRows(f,l);
+  return`<div class="panel"><h2>Activity log ${pill(l.length+' actions')}<button class="btn exp-btn" data-act="expOpen" data-key="activity">Export</button></h2>
    <div class="filters"><input type="search" placeholder="Search action, person, receipt, value" aria-label="Search activity" data-live="sq" data-scope="act" value="${E(f.q)}">${sel('act','role','Role',[['','All roles'],...ROLE_NAMES.map(r=>[r,r]),['System','System']])}
     <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="act" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="act" data-k="to"></label></div>
    <div class="tablewrap"><table class="dense"><thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Record</th><th>Before → after</th><th>IP · device</th></tr></thead><tbody>
@@ -167,9 +170,9 @@ function eventsVisible(){evMerge();const u=cur();const l=db.events||[];if(u.role
 function evFiltered(){const f=ui.f.evl=Object.assign({q:'',cat:'',who:'',role:'',from:'',to:'',page:0},ui.f.evl||{});const q=f.q.toLowerCase();
   return eventsVisible().filter(e=>(!f.cat||e.cat===f.cat)&&(!f.who||e.actorId===f.who)&&(!f.role||e.role===f.role)&&(!f.from||istDate(e.at)>=f.from)&&(!f.to||istDate(e.at)<=f.to)&&(!q||[e.label,e.detail,e.actor,e.route].some(v=>String(v||'').toLowerCase().includes(q))))}
 function auditEvents(){
-  need('activity.view');const l=evFiltered();const f=ui.f.evl;const pg=l.slice(f.page*PAGE,(f.page+1)*PAGE);const who=[...new Map(eventsVisible().filter(e=>e.actorId).map(e=>[e.actorId,e.actor])).entries()];
+  need('activity.view');const l=evFiltered();const f=ui.f.evl;const pg=pageRows(f,l);const who=[...new Map(eventsVisible().filter(e=>e.actorId).map(e=>[e.actorId,e.actor])).entries()];
   const tone={Auth:'acc',Page:'',Click:'',Form:'good',Change:'',Error:'bad'};
-  return`<div class="panel"><h2>Event log ${pill(l.length+' events')}<button class="btn" data-act="evCsv">Export Excel</button></h2>
+  return`<div class="panel"><h2>Event log ${pill(l.length+' events')}<button class="btn exp-btn" data-act="expOpen" data-key="events">Export</button></h2>
    <p class="note" style="margin:0 0 10px">Every sign-in, page, tab, button, form, filter and error, for every login. Data changes with before → after are in the Activity log.</p>
    <div class="filters"><input type="search" placeholder="Search button, page, person, detail" aria-label="Search events" data-live="sq" data-scope="evl" value="${E(f.q)}">${sel('evl','cat','Type',[['','All types'],...EV_CATS.map(c=>[c,c])])}${sel('evl','role','Role',[['','All roles'],...ROLE_NAMES.map(r=>[r,r]),['Guest','Guest (signed out)']])}${sel('evl','who','Person',[['','Everyone'],...who.map(([id,n])=>[id,n])])}
     <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="evl" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="evl" data-k="to"></label></div>
@@ -189,13 +192,17 @@ function viewSettings(){
   let t=ui.tab.settings||tabs[0][0];if(!tabs.some(x=>x[0]===t))t=tabs[0][0];ui.tab.settings=t;
   return head('Settings',`${db.college.short} · ${db.college.trust}`,'')+tabsBar('settings',tabs,t)+({college:setCollege,fees:()=>feeSetup(),roles:setRoles,courses:setCourses,users:setUsers,mail:setMail,flags:setFlags,data:setData}[t])();
 }
-function setCollege(){need('settings.manage');const c=db.college;
+function setCollege(){need('settings.manage');const c=db.college;const R=Object.assign(RCPT_DEFAULT(),c.rcpt||{});
   return`<form class="scard" data-form="college" style="max-width:820px"><h2>College profile</h2><p class="note" style="margin:0 0 12px">Shown on receipts, reports and the login screen.</p><div class="form">
    ${F('name','College name',{val:c.name,req:true,span:1,attrs:'maxlength="120"'})}${F('short','Short name',{val:c.short,req:true,attrs:'maxlength="12"'})}${F('trust','Trust',{val:c.trust,req:true,attrs:'maxlength="80"'})}
    ${F('address','Address',{type:'textarea',val:c.address,span:1,rows:2})}${F('phone','Phone',{val:c.phone,attrs:'maxlength="40"'})}${F('email','Email',{type:'email',val:c.email})}${F('website','Website',{val:c.website})}${F('year','Academic year',{val:c.year,attrs:'maxlength="9"'})}</div>
-   <p class="note">Contact on receipts: please confirm before go-live. Logo: waiting for the college's logo file.</p><div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>`}
+   <h3 style="margin:18px 0 4px">Receipt (fee invoice) header</h3><p class="note" style="margin:0 0 10px">Printed at the top of every fee invoice, exactly as the college's invoice design.</p>
+   <div class="form">${RCPT_FIELDS.map(([k,l,w])=>F('r_'+k,l,{val:R[k],span:w?1:0,attrs:'maxlength="140"'})).join('')}</div>
+   <div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>`}
+const RCPT_FIELDS=[['fullName','College name on the invoice',1],['trustLine','Trust line',1],['address','Address bar',1],['naac','Accreditation line',1],['mobCollege','College mobile'],['mobTrust','Trust mobile'],['email','Email on the invoice'],['web','Website on the invoice'],['signFor','Signature line',1]];
 FORM.college=(f,d)=>{need('settings.manage');const c=db.college;const before={...c};['name','short','trust','address','phone','email','website','year'].forEach(k=>{c[k]=capText(d[k],k,k==='address'?300:120)});if(!c.name||!c.short)throw new Error('Name and short name are required');
-  const a={},b={};Object.keys(c).forEach(k=>{if(before[k]!==c[k]){a[k]=c[k];b[k]=before[k]}});log('College profile changed','Settings','college',b,a);save();renderApp();toast('Saved')};
+  const rb=JSON.stringify(c.rcpt||{});c.rcpt=Object.assign(RCPT_DEFAULT(),c.rcpt||{});RCPT_FIELDS.forEach(([k,l])=>{if(d['r_'+k]!==undefined){const v=capText(d['r_'+k],l,140);if(!v)throw new Error(l+' is required');c.rcpt[k]=v}});before.rcpt=rb;if(JSON.stringify(c.rcpt)===rb)delete before.rcpt;else c._rc=1;
+  const a={},b={};Object.keys(c).forEach(k=>{if(k==='rcpt'||k==='_rc')return;if(before[k]!==c[k]){a[k]=c[k];b[k]=before[k]}});if(c._rc){a.receiptHeader='changed';delete c._rc}log('College profile changed','Settings','college',b,a);save();renderApp();toast('Saved')};
 function setRoles(){need('roles.manage');const sa=cur().role==='Super Admin';const editable=STAFF_ROLES.filter(r=>cur().role==='Super Admin'||r!=='Principal');
   return`<div class="scard"><h2>Roles & permissions</h2><p class="note" style="margin:0 0 12px">Ticks are checked by the server on every request, not only by hiding buttons. Super Admin always has everything; the Student role sees only its own portal.${cur().role==='Principal'?' The Principal row can be changed by the Super Admin only.':''}</p>
   <div class="tablewrap"><table class="matrix"><thead><tr><th>Permission</th>${sa?'<th>Super Admin</th>':''}${STAFF_ROLES.map(r=>`<th>${E(r)}</th>`).join('')}<th>Student</th></tr></thead><tbody>
@@ -249,7 +256,7 @@ function setMail(){const m=db.settings.mail;
   return`<div class="sgrid"><form class="scard" data-form="mailSet"><h2>Email sender</h2><div class="form">${F('fromName','From name',{val:m.fromName,attrs:'maxlength="60"'})}${F('replyTo','Reply-to',{type:'email',val:m.replyTo})}${F('mode','Mode',{val:m.mode,opts:[['demo','Demo (nothing is sent)'],['live','Live (Resend)']]})}</div>
    <label class="chk" style="margin-top:10px"><input type="checkbox" name="sendReceipts" ${m.sendReceipts?'checked':''}> Email the receipt PDF after every payment</label><label class="chk"><input type="checkbox" name="sendCredentials" ${m.sendCredentials?'checked':''} disabled> Email login details to new students (always on)</label>
    <p class="note">The Resend API key stays on the server. Demo mode shows each email in the outbox below.</p><div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>
-   <div class="scard"><h2>Outbox ${pill(db.outbox.length+' emails')}</h2><div class="list">${db.outbox.slice(0,12).map(o=>`<div class="li"><div><b>${E(o.subject)}</b><small>${E(o.to.join(', '))} · ${E(fmtT(o.ts))}</small></div>${mailPill(o.status)}</div>`).join('')||'<p class="note">Nothing sent yet.</p>'}</div>
+   <div class="scard"><h2>Outbox ${pill(db.outbox.length+' emails')}</h2><div class="list">${pageRows(ui.f.outbox=Object.assign({per:10},ui.f.outbox||{}),db.outbox).map(o=>`<div class="li"><div><b>${E(o.subject)}</b><small>${E(o.to.join(', '))} · ${E(fmtT(o.ts))}</small></div>${mailPill(o.status)}</div>`).join('')||'<p class="note">Nothing sent yet.</p>'}</div>${pager('outbox',db.outbox.length)}
    <h2 style="margin-top:14px">Notification sound</h2><label class="chk"><input type="checkbox" data-change="mute" ${muted()?'':'checked'}> Play a sound for live notifications on this device</label></div></div>`}
 FORM.mailSet=(f,d)=>{need('settings.manage');const m=db.settings.mail;const before={...m};m.fromName=capText(d.fromName,'From name',60);const rt=String(d.replyTo||'').trim();if(rt&&!MAIL_OK.test(rt))throw new Error('Check the reply-to email');m.replyTo=rt;m.mode=d.mode==='live'?'live':'demo';m.sendReceipts=!!d.sendReceipts;log('Email settings changed','Settings','mail',before,{...m});save();renderPage();toast('Saved')};
 CHG.mute=el=>{lsSet('npcte_mute',el.checked?'0':'1');toast(el.checked?'Sound on':'Sound off')};
