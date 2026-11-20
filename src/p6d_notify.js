@@ -33,7 +33,7 @@ ACT.ntOpen=el=>{
 
 /* ---------- live sync: another tab saved -> this tab updates, toasts, rings, pops up ---------- */
 window.addEventListener('storage',e=>{
-  if(e.key!==LS_KEY||!e.newValue)return;let n;try{n=JSON.parse(e.newValue)}catch(x){return}if(!n||n.ver!==DB_VER)return;
+  if(!db||e.key!==LS_KEY||!e.newValue)return;let n;try{n=JSON.parse(e.newValue)}catch(x){return}if(!n||n.ver!==DB_VER)return;
   const u0=cur();const known=ntKnown||new Set(ntMine(u0).map(x=>x.id));
   db=n;if(typeof PAY_ID!=='undefined'&&PAY_ID){renderPayPage(PAY_ID);return}const u=cur();if(!u){if(!$('form[data-form=login]'))renderLogin();return}
   const fresh=ntMine(u).filter(x=>!x.read&&!known.has(x.id));
@@ -41,11 +41,15 @@ window.addEventListener('storage',e=>{
   updateBell();deliverLive(fresh);
 });
 /* coming back to the tab (= socket reconnect): sync anything missed since last seen */
-document.addEventListener('visibilitychange',()=>{if(document.hidden||!cur()||(typeof PAY_ID!=='undefined'&&PAY_ID))return;const raw=lsGet(LS_KEY);if(raw){try{const n=JSON.parse(raw);if(n&&n.ver===DB_VER)db=n}catch(e){}}const n0=db.notifs.length;ntSync();if(db.notifs.length!==n0)save();updateBell();if($('#page')&&!$('#layer').innerHTML&&!$('#dlg').innerHTML)renderPage()});
+document.addEventListener('visibilitychange',()=>{if(document.hidden||!db||!cur()||(typeof PAY_ID!=='undefined'&&PAY_ID))return;const raw=lsGet(LS_KEY);if(raw){try{const n=JSON.parse(raw);if(n&&n.ver===DB_VER)db=n}catch(e){}}const n0=db.notifs.length;ntSync();if(db.notifs.length!==n0)save();updateBell();if($('#page')&&!$('#layer').innerHTML&&!$('#dlg').innerHTML)renderPage()});
 
 /* ---------- boot ---------- */
-load();applyTheme();
 const PAY_ID=new URLSearchParams(location.search).get('pay');
-if(PAY_ID)renderPayPage(PAY_ID);else if(cur()){ntSync();save();renderApp()}else renderLogin();
-setTimeout(()=>{ntLive=true},1500);
-themeLabels();new MutationObserver(themeLabels).observe($('#root'),{childList:true,subtree:true});try{matchMedia('(prefers-color-scheme:dark)').addEventListener('change',themeLabels)}catch(e){}
+function bootApp(){
+  load();applyTheme();
+  if(PAY_ID)renderPayPage(PAY_ID);else if(cur()){ntSync();save();renderApp()}else renderLogin();
+  setTimeout(()=>{ntLive=true},1500);
+  themeLabels();new MutationObserver(themeLabels).observe($('#root'),{childList:true,subtree:true});try{matchMedia('(prefers-color-scheme:dark)').addEventListener('change',themeLabels)}catch(e){}
+}
+/* the password gate (p0b_gate.js) decrypts the college data first, then starts the app */
+gateStart(bootApp);

@@ -4,7 +4,7 @@
    Spec: docs/NPCTE-ERP-Phase1-Spec.md. Money is stored as integer paise.
    Dates are kept as ISO yyyy-mm-dd (Asia/Kolkata) and shown as DD-MM-YYYY.
    ===================================================================== */
-const LS_KEY='npcte_erp_v1', SES_KEY='npcte_erp_session_v1', THEME_KEY='npcte_erp_theme', DB_VER=2;
+const LS_KEY='npcte_erp_v1', SES_KEY='npcte_erp_session_v1', THEME_KEY='npcte_erp_theme', DB_VER=3;
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 /* inr takes PAISE */
@@ -212,7 +212,7 @@ function tempPassword(){const A='ABCDEFGHJKLMNPQRSTUVWXYZ',a='abcdefghjkmnpqrstu
 function defaultDue(courseId,year,n){const d=db.settings.dueDates[courseId]||[];const md=d[n-1]||'';if(!/^\d{2}-\d{2}$/.test(md))return'';const [m,dd]=md.split('-').map(Number);const y=+year+Math.floor((n-1)/2)+(m<7?1:0);return`${y}-${pad(m)}-${pad(dd)}`}
 function makeStudent(d){
   const s={id:uid('s'),enrol:d.enrol||nextEnrol(d.course,d.admissionYear),name:d.name,gender:d.gender||'',dob:d.dob||'',phone:d.phone||'',email:d.email||'',address:d.address||'',photo:d.photo||'',
-    course:d.course,admissionYear:+d.admissionYear,sem:+d.sem||1,category:d.category||'General',funding:d.funding||'CASH',scholarshipNote:d.scholarshipNote||'',status:d.status||'ACTIVE',
+    course:d.course,admissionYear:+d.admissionYear,sem:+d.sem||1,ref:d.ref||'',category:d.category||'General',funding:d.funding||'CASH',scholarshipNote:d.scholarshipNote||'',status:d.status||'ACTIVE',
     createdBy:d.createdBy||'System',createdAt:d.createdAt||Date.now(),
     fees:semsOf(d.course).map(n=>({sem:n,amount:d.fees?d.fees[n-1]:(db.settings.feeDefault[d.course]||[])[n-1]||0,due:d.dues?d.dues[n-1]:defaultDue(d.course,d.admissionYear,n)}))};
   if(!fundingApplies(s.category))s.funding='CASH';
@@ -221,6 +221,22 @@ function makeStudent(d){
 function createStudentLogin(s,pw,must){
   const u={id:uid('u'),role:'Student',name:s.name,username:s.enrol.toLowerCase(),email:s.email,phone:s.phone,password:pw,mustChange:must,active:true,studentId:s.id,lastLoginAt:0};
   db.users.push(u);s.userId=u.id;return u;
+}
+
+/* ---------- real data from the college fee registers (tools/build_vault.py) ----------
+   Every student of B.ED_2026-27.xlsx and M.ED_2026-27.xlsx with every receipt exactly as written there:
+   receipt number, date, amount, semester, batch and mode. Email and mobile are test values (…test@example.com, 90000 xxxxx).
+   Semester fees keep the demo default; a "Sem 1&2" receipt is stored once per semester with the same receipt number. */
+let REAL=null;
+function seedReal(R){
+  const by=db.users.find(u=>u.id==='u_clerk');const [ty,tm]=today().split('-').map(Number);
+  const curSem=(cid,a)=>{const n=(course(cid)||{}).semesters||4;return Math.min(n,Math.max(1,Math.floor(((ty-a)*12+(tm-7))/6)+1))};
+  const list=R.students.map(r=>{
+    const s=makeStudent({name:r.name,phone:r.phone,email:r.email,course:r.course,admissionYear:r.adm,sem:curSem(r.course,r.adm),category:'General',funding:'CASH',ref:r.ref,createdBy:'Imported from fee register 2026-27'});
+    db.students.push(s);createStudentLogin(s,'student123',false);return s});
+  R.payments.forEach(x=>{const s=list[x.s];const ts=Date.parse(x.date+'T11:00:00+05:30');
+    db.payments.push({id:uid('p'),studentId:s.id,sem:x.sem,mode:x.mode,amount:x.amt,invoiceDate:x.date,entryAt:ts,paidAt:ts,chequeNo:x.chq||'',bank:'',chequeDate:x.mode==='CHEQUE'?x.date:'',upiRef:'',providerTxnId:'',note:x.note||'',
+      status:'SUCCESS',cancelReason:'',rc:x.rc,depositId:'',by:by?by.name:'Accounts Clerk',byId:by?by.id:'',dateEdits:[],batch:x.batch,reason:x.reason||'',category:'',imported:true})});
 }
 
 /* ---------- sample data (spec §12: 1 Super Admin, 1 Principal, 1 Clerk, ~20 students, all 4 modes, a few notices) ---------- */
@@ -243,6 +259,8 @@ function seed(){
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
     students:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
     counters:{enrol:{},exp:1}};
+  /* real college data (fee registers 2026-27), available only after the password gate has decrypted it */
+  if(typeof REAL!=='undefined'&&REAL){seedReal(REAL)}else{
   /* sample names only (demo) */
   const names=[['Riya Joshi','F'],['Hardik Patel','M'],['Kinjal Prajapati','F'],['Mehul Chaudhary','M'],['Nirali Desai','F'],['Jignesh Rabari','M'],['Pooja Solanki','F'],['Ankit Thakor','M'],['Bhumi Modi','F'],['Kaushal Vaghela','M'],
     ['Dhara Shah','F'],['Nikunj Parmar','M'],['Foram Raval','F'],['Ravi Makwana','M'],['Krupa Trivedi','F'],['Vishal Dabhi','M'],['Sneha Panchal','F'],['Darshan Zala','M'],['Hetal Barot','F'],['Sagar Vankar','M']];
@@ -274,11 +292,12 @@ function seed(){
   /* an older deposit so the report shows both deposited and pending money */
   const old=db.payments.filter(p=>p.status==='SUCCESS'&&(p.mode==='CASH'||p.mode==='CHEQUE')&&diffDays(today(),p.invoiceDate)>40);
   if(old.length){const dp={id:uid('d'),type:'CASH+CHEQUE',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,p=>p.amount),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}
+  }
   /* notices */
   db.notices=[
     {id:uid('n'),title:'Semester 1 fee – last date',body:'All B.Ed and M.Ed Semester 1 students: please pay the semester fee at the accounts office or online (UPI) by the last date. Keep the receipt for your record.',audience:{type:'all'},isFeeAlert:true,isPublic:false,publishAt:Date.now()-3*864e5,createdBy:'Principal, NPCTE',attachment:null},
     {id:uid('n'),title:'Internship (practice teaching) orientation',body:'B.Ed Semester 3 students must attend the orientation in the seminar hall on Monday at 10:30 am.',audience:{type:'sem',course:'BED',sem:3},isFeeAlert:false,isPublic:false,publishAt:Date.now()-6*864e5,createdBy:'Principal, NPCTE',attachment:null},
     {id:uid('n'),title:'Library timings',body:'The college library is open from 9:00 am to 5:00 pm on all working days.',audience:{type:'all'},isFeeAlert:false,isPublic:true,publishAt:Date.now()-10*864e5,createdBy:'Accounts Clerk',attachment:null}];
-  db.audit=[];log('Sample data loaded','System','',null,null,'Demo data created');
+  db.audit=[];log(REAL?'Fee registers imported':'Sample data loaded','System','',null,null,REAL?`${db.students.length} students, ${db.payments.length} payment records from ${REAL.source}`:'Demo data created');
   if(typeof ntSeed==='function')ntSeed();
 }

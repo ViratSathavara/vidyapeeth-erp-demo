@@ -42,14 +42,14 @@ function viewStudents(){
 ACT.clearF=el=>{const sc=el.dataset.scope;const keep=ui.f[sc];ui.f[sc]={sort:keep.sort,dir:keep.dir,page:0};if(sc==='students')ui.f[sc].status='ACTIVE';renderPage()};
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches&&e.target.matches('tr.click[data-act]')){e.preventDefault();e.target.click()}});
 const avatar=s=>s.photo?`<img class="av" src="${E(s.photo)}" alt="">`:`<div class="av" aria-hidden="true">${E(initials(s.name))}</div>`;
-ACT.exportStudents=()=>{need('students.view');showCsv('NPCTE students',['Enrolment no','Name','Gender','DOB','Phone','Email','Address','Course','Batch','Semester','Category','Funding','Status','Sem 1 fee','Sem 2 fee','Sem 3 fee','Sem 4 fee','Paid','Due now'],
-  studentsFiltered().map(({s,sm})=>[s.enrol,s.name,s.gender,fmtD(s.dob),s.phone,s.email,s.address,course(s.course).name,defaultBatch(s),s.sem,s.category,fundLabel(s.funding),statusLabel[s.status],...SEMS_ALL().map(n=>semFee(s,n)?semFee(s,n).amount/100:''),sm.paid/100,sm.payable/100]))};
+ACT.exportStudents=()=>{need('students.view');showCsv('NPCTE students',['Enrolment no','Name','Gender','DOB','Phone','Email','Address','Course','Batch','Semester','Category','Funding','Status','Admission reference','Sem 1 fee','Sem 2 fee','Sem 3 fee','Sem 4 fee','Paid','Due now'],
+  studentsFiltered().map(({s,sm})=>[s.enrol,s.name,s.gender,fmtD(s.dob),s.phone,s.email,s.address,course(s.course).name,defaultBatch(s),s.sem,s.category,fundLabel(s.funding),statusLabel[s.status],s.ref||'',...SEMS_ALL().map(n=>semFee(s,n)?semFee(s,n).amount/100:''),sm.paid/100,sm.payable/100]))};
 
 /* ---------- add / edit form ---------- */
 function studentForm(s){
   const isNew=!s;const T=today();const y=+T.slice(0,4);const st=db.settings;
   const c0=pickedCourse()||myCourses()[0]||'BED';const y0=+T.slice(5,7)>=6?y:y-1;
-  const d=s||{name:'',gender:'',dob:'',phone:'',email:'',address:'',course:c0,admissionYear:y0,sem:1,category:'General',funding:'CASH',scholarshipNote:'',status:'ACTIVE',fees:semsOf(c0).map(n=>({sem:n,amount:(st.feeDefault[c0]||[])[n-1]||0,due:defaultDue(c0,y0,n)}))};
+  const d=s||{name:'',gender:'',dob:'',phone:'',email:'',address:'',course:c0,admissionYear:y0,sem:1,category:'General',funding:'CASH',scholarshipNote:'',ref:'',status:'ACTIVE',fees:semsOf(c0).map(n=>({sem:n,amount:(st.feeDefault[c0]||[])[n-1]||0,due:defaultDue(c0,y0,n)}))};
   const canEnrol=!isNew&&(cur().role==='Super Admin'||cur().role==='Principal');
   ui.photo=d.photo||'';
   return`<button class="btn x" data-act="close">Close</button><h2>${isNew?'Add student':'Edit '+E(d.name)}</h2>
@@ -68,6 +68,7 @@ function studentForm(s){
     ${F('course','Course',{val:d.course,opts:db.courses.filter(c=>mayCourse(c.id)&&(c.active!==false||c.id===d.course)).map(c=>[c.id,c.name]),req:true,attrs:'data-change="formCourse"'})}
     <div class="field" id="batchWrap">${batchSelect(d.course,d.admissionYear)}</div>
     <div class="field" id="semWrap">${semSelect(d.course,d.sem)}</div>
+    ${F('ref','Admission reference',{val:d.ref||'',attrs:'maxlength="60" placeholder="e.g. NARESHBHAI or COLLEGE"'})}
     ${isNew?'':F('status','Status',{val:d.status,opts:[['ACTIVE','Active'],['LEFT','Left'],['PASSED','Passed']]})}
     ${canEnrol?F('enrol','Enrolment no.',{val:d.enrol,req:true,attrs:'maxlength="20"'}):''}
    </div></fieldset>
@@ -116,7 +117,7 @@ function readStudentForm(f,d,old){
   if(d.dob&&!validIso(d.dob))throw new Error('Check the date of birth');
   if(!semsOf(d.course).includes(+d.sem||1))throw new Error('Choose a valid semester');
   const fees=semsOf(d.course).map(n=>{const a=toPaise(d['fee'+n]);if(!(a>=0)||a>100000000)throw new Error(`Semester ${n} tuition fee must be a number between 0 and 10,00,000`);const due=d['due'+n]||'';if(due&&!validIso(due))throw new Error(`Check the semester ${n} due date`);return{sem:n,amount:a,due}});
-  return{name,gender:d.gender||'',dob:d.dob||'',phone,email,address:capText(d.address,'Address',300),photo:ui.photo||'',course:d.course,admissionYear:y,sem:+d.sem||1,category:d.category,funding:fundOn?d.funding:'CASH',scholarshipNote:fundOn&&d.funding==='SCHOLARSHIP'?capText(d.scholarshipNote,'Scholarship note',120):'',fees};
+  return{name,gender:d.gender||'',dob:d.dob||'',phone,email,address:capText(d.address,'Address',300),photo:ui.photo||'',course:d.course,admissionYear:y,sem:+d.sem||1,category:d.category,funding:fundOn?d.funding:'CASH',scholarshipNote:fundOn&&d.funding==='SCHOLARSHIP'?capText(d.scholarshipNote,'Scholarship note',120):'',ref:capText(d.ref,'Admission reference',60),fees};
 }
 FORM.addStudent=(f,d)=>{
   need('students.edit','add students');const v=readStudentForm(f,d,null);
@@ -132,7 +133,7 @@ FORM.addStudent=(f,d)=>{
 ACT.openStudentD=el=>{closeDialog();openStudent(el.dataset.id)};
 FORM.editStudent=(f,d)=>{
   need('students.edit','edit students');guardStudent(f.dataset.id);const s=stu(f.dataset.id);if(!s)throw new Error('Student not found');const v=readStudentForm(f,d,s);
-  const before={name:s.name,phone:s.phone,email:s.email,course:s.course,sem:s.sem,category:s.category,funding:s.funding,status:s.status,fees:s.fees.map(x=>inr(x.amount)).join(' / '),enrol:s.enrol};
+  const before={name:s.name,ref:s.ref||'',phone:s.phone,email:s.email,course:s.course,sem:s.sem,category:s.category,funding:s.funding,status:s.status,fees:s.fees.map(x=>inr(x.amount)).join(' / '),enrol:s.enrol};
   if(d.enrol!==undefined){const en=capText(d.enrol,'Enrolment no.',20).toUpperCase();if(!/^[A-Z0-9-\/]{3,20}$/.test(en))throw new Error('Enrolment no. can use letters, numbers and -');if(db.students.some(x=>x!==s&&x.enrol===en))throw new Error('This enrolment no. is already used');
     if(en!==s.enrol){const u=db.users.find(x=>x.id===s.userId);if(u)u.username=en.toLowerCase();s.enrol=en}}
   if(v.fees.some(x=>{const sm=semSummary(s,x.sem);return x.amount<sm.paid}))throw new Error('A semester fee cannot be lower than what is already paid for it');
@@ -173,7 +174,7 @@ function openStudent(id){
   drawer(`<button class="btn x" data-act="close">Close</button>
    <div class="who" style="margin:4px 0 6px">${s.photo?`<img class="av lg" src="${E(s.photo)}" alt="">`:`<div class="av lg">${E(initials(s.name))}</div>`}<div><h2 style="margin:0">${E(s.name)}</h2><small class="muted">${E(s.enrol)} · ${E(classLabel(s))} · ${E(statusLabel[s.status])}</small></div></div>
    <div class="actions" style="margin:12px 0">${can('fees.collect')&&sm.payable>0?`<button class="btn primary" data-act="collectFor" data-id="${E(s.id)}">Collect fee</button>`:''}${can('notices.post')&&sm.payable>0?`<button class="btn" data-act="remindOne" data-id="${E(s.id)}">Send fee message</button>`:''}${can('students.edit')?`<button class="btn" data-act="editStudent" data-id="${E(s.id)}">Edit</button>`:''}</div>
-   <div class="facts">${L('Mobile',s.phone)}${L('Email',s.email)}${L('Gender',{F:'Female',M:'Male',O:'Other'}[s.gender])}${L('Date of birth',fmtD(s.dob))}${L('Category',s.category)}${L('Funding',fundLabel(s.funding)+(s.scholarshipNote?' · '+s.scholarshipNote:''))}${L('Admission year',s.admissionYear)}${L('Address',s.address)}</div>
+   <div class="facts">${L('Mobile',s.phone)}${L('Email',s.email)}${L('Gender',{F:'Female',M:'Male',O:'Other'}[s.gender])}${L('Date of birth',fmtD(s.dob))}${L('Category',s.category)}${L('Funding',fundLabel(s.funding)+(s.scholarshipNote?' · '+s.scholarshipNote:''))}${L('Admission year',s.admissionYear)}${L('Admission reference',s.ref)}${L('Address',s.address)}</div>
    <h3>Semester fees ${pill('Due now '+inr(sm.payable),sm.payable?(sm.overdue?'bad':'warn'):'good')}</h3>${semCards(s,{collect:true})}
    <h3>Payments and receipts</h3><div class="tablewrap"><table><thead><tr><th>Receipt</th><th>Invoice date</th><th>Sem</th><th>Mode</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>
    ${pays.map(p=>`<tr><td class="mono">${E(p.rc)}</td><td>${fmtD(p.invoiceDate)}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}</td><td>${payPill(p.status)}</td><td><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">Receipt</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No payments yet.</td></tr>'}</tbody></table></div>
@@ -188,12 +189,12 @@ ACT.openStudent=el=>openStudent(el.dataset.id);
 const diffText=(b,a)=>{if(!a)return'';return Object.keys(a).map(k=>`${k}: ${b&&b[k]!==undefined?b[k]+' → ':''}${a[k]}`).join(', ').slice(0,220)};
 
 /* ---------- CSV import (spec §15.6: a template for students only) ---------- */
-const IMPORT_COLS=['name','gender','dob','phone','email','address','course','admissionYear','sem','category','funding','fee1','fee2','fee3','fee4'];
+const IMPORT_COLS=['name','gender','dob','phone','email','address','course','admissionYear','sem','category','funding','fee1','fee2','fee3','fee4','ref'];
 ACT.importStudents=()=>{need('students.edit');drawer(`<button class="btn x" data-act="close">Close</button><h2>Import students from CSV</h2>
   <p class="muted">Save your Excel sheet as CSV with these columns (first row = headings). Dates as YYYY-MM-DD, course code (e.g. BED or MED), funding CASH or SCHOLARSHIP, fees in rupees (blank = default). Each imported student gets a login and an email.</p>
   <div class="actions" style="margin:10px 0"><button class="btn" data-act="importTpl">Download template</button><label class="btn"><input type="file" accept=".csv,text/csv" class="sr" data-change="importFile"> Choose CSV file</label></div>
   <div id="importOut"></div>`,true)};
-ACT.importTpl=()=>download('npcte-student-import-template.csv','﻿'+csvOf(IMPORT_COLS,[['Riya Patel','F','2003-04-15','9876543210','riya.patel@example.com','Mahesana','BED',today().slice(0,4),'1','SC','SCHOLARSHIP','30000','30000','30000','30000']]),'text/csv;charset=utf-8');
+ACT.importTpl=()=>download('npcte-student-import-template.csv','﻿'+csvOf(IMPORT_COLS,[['Riya Patel','F','2003-04-15','9876543210','riya.patel@example.com','Mahesana','BED',today().slice(0,4),'1','SC','SCHOLARSHIP','30000','30000','30000','30000','COLLEGE']]),'text/csv;charset=utf-8');
 function parseCsv(t){const rows=[];let r=[],v='',q=false;for(let i=0;i<t.length;i++){const c=t[i];if(q){if(c==='"'&&t[i+1]==='"'){v+='"';i++}else if(c==='"')q=false;else v+=c}else if(c==='"')q=true;else if(c===','){r.push(v);v=''}else if(c==='\n'||c==='\r'){if(c==='\r'&&t[i+1]==='\n')i++;r.push(v);rows.push(r);r=[];v=''}else v+=c}if(v||r.length){r.push(v);rows.push(r)}return rows.filter(x=>x.some(y=>y.trim()))}
 CHG.importFile=el=>{const file=el.files&&el.files[0];if(!file)return;file.text().then(t=>{
   const rows=parseCsv(t.replace(/^﻿/,''));const hd=rows.shift().map(h=>h.trim());const miss=['name','phone','email','course','admissionYear','category'].filter(c=>!hd.includes(c));
