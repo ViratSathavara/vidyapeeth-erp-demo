@@ -21,7 +21,7 @@ function lineChart(keys,vals){
 const short=p=>{const r=p/100;return r>=1e7?(r/1e7).toFixed(1)+'Cr':r>=1e5?(r/1e5).toFixed(r>=1e6?0:1)+'L':r>=1e3?Math.round(r/1e3)+'k':String(Math.round(r))};
 function barsH(items){/* items: [label, value, cls, link{to,sub,f}] */
   const max=Math.max(1,...items.map(i=>i[1]));
-  return`<div class="hbars">${items.map(([l,v,c,k])=>`<button class="hb" data-act="goto" data-to="${E(k.to)}" ${k.sub?`data-sub="${E(k.sub)}"`:''} data-f="${J(k.f)}"><span class="hl">${E(l)}</span><span class="ht"><i class="${E(c||'')}" style="width:${Math.max(v?2:0,v/max*100)}%"></i></span><b class="hv">${typeof v==='number'&&k.money?inr(v):E(String(v))}</b></button>`).join('')}</div>`;
+  return`<div class="hbars">${items.map(([l,v,c,k])=>`<button class="hb" data-act="goto" data-to="${E(k.to)}" ${k.sub?`data-sub="${E(k.sub)}"`:''} data-f="${J(k.f)}"><span class="hb-l"><span class="dot ${E(c||'')}" aria-hidden="true"></span>${E(l)}</span><span class="ht"><i class="${E(c||'')}" style="width:${Math.max(v?2:0,v/max*100)}%"></i></span><b class="hv">${typeof v==='number'&&k.money?inr(v):E(String(v))}</b></button>`).join('')}</div>`;
 }
 function groupedBars(){
   const W=640,H=230,L=56,R=12,T=14,B=44;const cs=scopeCourses();const SEMS=SEMS_ALL();
@@ -57,7 +57,7 @@ function viewDashboard(){
   const yFrom=keys[0]+'-01';const inY=allP.filter(p=>p.invoiceDate>=yFrom);
   const modeParts=[['Cash',sum(inY.filter(p=>p.mode==='CASH'),p=>p.amount),'d-cash',{to:'audit',sub:'tx',f:{from:yFrom,modes:['CASH']}}],['Cheque',sum(inY.filter(p=>p.mode==='CHEQUE'),p=>p.amount),'d-cheque',{to:'audit',sub:'tx',f:{from:yFrom,modes:['CHEQUE']}}],
     ['UPI',sum(inY.filter(p=>p.mode==='UPI'),p=>p.amount),'d-upi',{to:'audit',sub:'tx',f:{from:yFrom,modes:['UPI']}}],['Expense',sum(inY.filter(p=>p.mode==='EXPENSE'),p=>p.amount),'d-exp',{to:'audit',sub:'tx',f:{from:yFrom,modes:['EXPENSE']}}]];
-  const catBars=CATS.map(c=>[c,L.filter(s=>s.category===c).length,'c-cat',{to:'students',f:{cat:c,status:'ACTIVE'}}]);
+  const catBars=CATS.map(c=>[c,L.filter(s=>s.category===c).length,'cat-'+c,{to:'students',f:{cat:c,status:'ACTIVE'}}]);
   const fundBars=[['By Cash',L.filter(s=>s.funding==='CASH').length,'c-cash',{to:'students',f:{fund:'CASH',status:'ACTIVE'}}],['By Scholarship',sch,'c-sch',{to:'students',f:{fund:'SCHOLARSHIP',status:'ACTIVE'}}]];
   const hr=+new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hour:'2-digit',hour12:false}).format(Date.now());const greet=hr<12?'Good morning':hr<17?'Good afternoon':'Good evening';
   const acts=(can('students.edit')?'<button class="btn" data-act="newStudent">Add student</button>':'')+(can('fees.collect')?'<button class="btn primary" data-act="nav" data-id="fees">Collect fee</button>':'');
