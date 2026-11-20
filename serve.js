@@ -1,6 +1,6 @@
 /* Local dev server for the NPCTE ERP demo. No dependencies. Run: node serve.js  (or npm start)
    - Serves index.html with the same security headers as vercel.json (so CSP problems show up locally)
-   - Mounts api/send-mail.js at /api/send-mail. Without RESEND_API_KEY, MAIL_FROM and MAIL_ACCESS_KEY in the
+   - Mounts api/send-mail.js at /api/send-mail. Without SMTP_USER, SMTP_PASS and MAIL_ACCESS_KEY in the
      environment it answers "not configured" and the app stays in demo mail mode (nothing is sent).
    Options: PORT=5173 (default), HOST=127.0.0.1 (default; use 0.0.0.0 to open it from your phone on the same Wi-Fi) */
 const http=require('http'),fs=require('fs'),path=require('path');

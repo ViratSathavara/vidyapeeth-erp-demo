@@ -2640,10 +2640,10 @@ function receiptPdf(p,studentCopy){if(studentCopy===undefined)studentCopy=isStud
 async function savePdf(p){download(p.rc.replace(/[^\w-]+/g,'_')+'.pdf',pdfBytes(receiptPdf(p)),'application/pdf');}
 ACT.dlPdf=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)throw new Error('Receipt not found');guardStudent(p.studentId);savePdf(p)};
 
-/* ---------- email: real sending through /api/send-mail (Resend) when the server is set up, otherwise demo ----------
+/* ---------- email: real sending through /api/send-mail (SMTP, e.g. Gmail) when the server is set up, otherwise demo ----------
    Every email is listed in db.outbox (status Queued / Sending / Sent / Sent (demo) / Failed / Skipped).
    A password is never saved: it lives only in the in-memory copy of the email until it is sent.
-   Mode: GET /api/send-mail tells whether the server has RESEND_API_KEY + MAIL_FROM + MAIL_ACCESS_KEY. */
+   Mode: GET /api/send-mail tells whether the server has SMTP_USER + SMTP_PASS + MAIL_ACCESS_KEY. */
 const MAIL_DELAY=500,MAIL_GAP=700;
 let MAIL_MODE='checking';
 const mailReady=(async()=>{try{const r=await fetch('/api/send-mail',{cache:'no-store'});const j=await r.json();MAIL_MODE=j&&j.configured?'live':'demo'}catch(e){MAIL_MODE='demo'}return MAIL_MODE})();
@@ -3013,9 +3013,9 @@ ACT.userPw=el=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');con
   if(mailLive()){toast(`New password is being emailed to ${u.email}`);return}
   dialog(`<h3>New temporary password</h3><div class="panel" style="padding:12px"><div class="rline"><span>${E(u.username)}</span><b class="mono">${E(pw)}</b></div></div><div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn primary" data-act="closeDialog">Done</button></div>`,'Password reset',true)};
 function setMail(){const m=db.settings.mail;
-  return`<div class="sgrid"><form class="scard" data-form="mailSet"><h2>Email sender</h2><div class="form">${F('fromName','From name',{val:m.fromName,attrs:'maxlength="60"'})}${F('replyTo','Reply-to',{type:'email',val:m.replyTo})}${F('mode','Mode',{val:m.mode,opts:[['demo','Demo (nothing is sent)'],['live','Live (Resend)']]})}</div>
+  return`<div class="sgrid"><form class="scard" data-form="mailSet"><h2>Email sender</h2><div class="form">${F('fromName','From name',{val:m.fromName,attrs:'maxlength="60"'})}${F('replyTo','Reply-to',{type:'email',val:m.replyTo})}${F('mode','Mode',{val:m.mode,opts:[['demo','Demo (nothing is sent)'],['live','Live (SMTP)']]})}</div>
    <label class="chk" style="margin-top:10px"><input type="checkbox" name="sendReceipts" ${m.sendReceipts?'checked':''}> Email the receipt PDF after every payment</label><label class="chk"><input type="checkbox" name="sendCredentials" ${m.sendCredentials?'checked':''} disabled> Email login details to new students (always on)</label>
-   <p class="note">The Resend API key stays on the server. Demo mode shows each email in the outbox below.</p><div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>
+   <p class="note">The SMTP password stays on the server. Demo mode shows each email in the outbox below.</p><div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form>
    <div class="scard"><h2>Outbox ${pill(db.outbox.length+' emails')}</h2><div class="list">${pageRows(ui.f.outbox=Object.assign({per:10},ui.f.outbox||{}),db.outbox).map(o=>`<div class="li"><div><b>${E(o.subject)}</b><small>${E(o.to.join(', '))} · ${E(fmtT(o.ts))}</small></div>${mailPill(o.status)}</div>`).join('')||'<p class="note">Nothing sent yet.</p>'}</div>${pager('outbox',db.outbox.length)}
    <h2 style="margin-top:14px">Notification sound</h2><label class="chk"><input type="checkbox" data-change="mute" ${muted()?'':'checked'}> Play a sound for live notifications on this device</label></div></div>`}
 FORM.mailSet=(f,d)=>{need('settings.manage');const m=db.settings.mail;const before={...m};m.fromName=capText(d.fromName,'From name',60);const rt=String(d.replyTo||'').trim();if(rt&&!MAIL_OK.test(rt))throw new Error('Check the reply-to email');m.replyTo=rt;m.mode=d.mode==='live'?'live':'demo';m.sendReceipts=!!d.sendReceipts;log('Email settings changed','Settings','mail',before,{...m});save();renderPage();toast('Saved')};

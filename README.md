@@ -33,4 +33,4 @@ receipt format · bank / UPI gateway · old data import · required reports · s
 
 ## Files
 `src/` sources (`npm run build` → `index.html` + CSP in `vercel.json`) · `tests/logic.test.js` (`npm test`, spec §14 rules) ·
-`manifest.webmanifest`, `sw.js`, `offline.html`, `icons/` (PWA) · `api/send-receipt.js` (Resend mail function) · `_legacy-demo/` (old Vidyapeeth demo).
+`manifest.webmanifest`, `sw.js`, `offline.html`, `icons/` (PWA) · `api/send-mail.js` (SMTP mail function, see docs/EMAIL-SETUP.md) · `_legacy-demo/` (old Vidyapeeth demo).

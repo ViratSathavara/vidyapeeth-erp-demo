@@ -24,7 +24,7 @@ The existing demo is browser-only (localStorage). Live notifications (Socket.IO)
 | Background push | Web Push (VAPID) via service worker — needed because Socket.IO only works while the app is open |
 | Database | PostgreSQL + Prisma ORM |
 | Auth | JWT (httpOnly cookie) + bcrypt, role-based guards on every API route |
-| Email | Resend (credentials mail, receipt mail) — reuse logic from `api/send-receipt.js` |
+| Email | SMTP (Gmail App Password; credentials mail, receipt mail) — reuse logic from `api/send-mail.js` |
 | PDF | Server-side receipt PDF with an embedded Unicode font (Noto Sans Gujarati) so Gujarati names print correctly |
 | UPI | Payment provider adapter (see §5.4) |
 | Hosting | Frontend on Vercel; backend + Socket.IO on a host that supports long-lived WebSockets (Render / Railway / VPS) — **not** Vercel serverless; Postgres on Neon/Supabase/Railway |

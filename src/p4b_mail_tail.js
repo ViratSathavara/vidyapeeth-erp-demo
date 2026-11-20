@@ -100,10 +100,10 @@ function receiptPdf(p,studentCopy){if(studentCopy===undefined)studentCopy=isStud
 async function savePdf(p){download(p.rc.replace(/[^\w-]+/g,'_')+'.pdf',pdfBytes(receiptPdf(p)),'application/pdf');}
 ACT.dlPdf=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)throw new Error('Receipt not found');guardStudent(p.studentId);savePdf(p)};
 
-/* ---------- email: real sending through /api/send-mail (Resend) when the server is set up, otherwise demo ----------
+/* ---------- email: real sending through /api/send-mail (SMTP, e.g. Gmail) when the server is set up, otherwise demo ----------
    Every email is listed in db.outbox (status Queued / Sending / Sent / Sent (demo) / Failed / Skipped).
    A password is never saved: it lives only in the in-memory copy of the email until it is sent.
-   Mode: GET /api/send-mail tells whether the server has RESEND_API_KEY + MAIL_FROM + MAIL_ACCESS_KEY. */
+   Mode: GET /api/send-mail tells whether the server has SMTP_USER + SMTP_PASS + MAIL_ACCESS_KEY. */
 const MAIL_DELAY=500,MAIL_GAP=700;
 let MAIL_MODE='checking';
 const mailReady=(async()=>{try{const r=await fetch('/api/send-mail',{cache:'no-store'});const j=await r.json();MAIL_MODE=j&&j.configured?'live':'demo'}catch(e){MAIL_MODE='demo'}return MAIL_MODE})();
