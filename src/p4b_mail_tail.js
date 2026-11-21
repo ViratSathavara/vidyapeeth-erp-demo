@@ -98,7 +98,7 @@ function receiptPdf(p,studentCopy){if(studentCopy===undefined)studentCopy=isStud
   },{title:`Fee invoice ${p.rc}`,author:c.name,date:stamp});
 }
 async function savePdf(p){download(p.rc.replace(/[^\w-]+/g,'_')+'.pdf',pdfBytes(receiptPdf(p)),'application/pdf');}
-ACT.dlPdf=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)throw new Error('Receipt not found');guardStudent(p.studentId);savePdf(p)};
+ACT.dlPdf=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)throw new Error('Receipt not found');guardStudent(p.studentId);if(p.needsRc)throw new Error('The invoice is not issued yet: the office must add the invoice no.');savePdf(p)};
 
 /* ---------- email: real sending through /api/send-mail (SMTP, e.g. Gmail) when the server is set up, otherwise demo ----------
    Every email is listed in db.outbox (status Queued / Sending / Sent / Sent (demo) / Failed / Skipped).
@@ -211,4 +211,4 @@ function mailPill(st){return pill(st,/^Sent/.test(st)?'good':st==='Failed'?'bad'
 function mailLineHtml(p){const o=db.outbox.find(x=>x.paymentId===p.id);if(!o)return`<span class="muted">Receipt email not sent yet</span>`;return`${mailPill(o.status)} <span class="muted">${o.error?E(o.error):'PDF to '+E(o.to.join(', '))}${o.sentAt?' · '+E(fmtT(o.sentAt)):''}</span>`}
 const mailLine=p=>`<div class="maillive" data-mailpay="${E(p.id)}" style="margin-top:10px;font-size:13px">${mailLineHtml(p)}</div>`;
 function refreshMailUi(){$$('.maillive').forEach(el=>{const p=db.payments.find(x=>x.id===el.dataset.mailpay);if(p)el.innerHTML=mailLineHtml(p)})}
-ACT.emailReceipt=el=>{need('fees.view');const p=db.payments.find(x=>x.id===el.dataset.id);const s=stu(p.studentId);const r=queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Fee receipt ${p.rc} - ${db.college.short}`});save();refreshMailUi();toast(r.status==='Skipped'?'No email address on file':'Receipt is being emailed to '+s.email,r.status==='Skipped')};
+ACT.emailReceipt=el=>{need('fees.view');const p=db.payments.find(x=>x.id===el.dataset.id);if(p&&p.needsRc)throw new Error('Add the invoice no. first');const s=stu(p.studentId);const r=queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Fee receipt ${p.rc} - ${db.college.short}`});save();refreshMailUi();toast(r.status==='Skipped'?'No email address on file':'Receipt is being emailed to '+s.email,r.status==='Skipped')};

@@ -14,12 +14,12 @@ const modeName=m=>({CASH:'Cash',CHEQUE:'Cheque',UPI:'UPI',EXPENSE:'Expense'}[m]|
 const MODE_TONE={CASH:'m-cash',CHEQUE:'m-cheque',UPI:'m-upi',EXPENSE:'m-exp'};
 const modePill=m=>`<span class="pill ${MODE_TONE[m]||''}">${E(modeName(m))}</span>`;
 const payPill=st=>st==='SUCCESS'?pill('Success','good'):st==='CANCELLED'?pill('Cancelled','bad'):st==='FAILED'?pill('Failed','bad'):pill('Pending','warn');
-function feeTabs(){const t=[['collect','Collect fee']];t.push(['dues','Pending dues'],['receipts','Receipts']);if(can('fees.setup'))t.push(['setup','Fee setup']);return t}
+function feeTabs(){const t=[['collect','Collect fee']];if(can('fees.confirm')){const n=rcPending().length;t.push(['confirm','UPI to confirm'+(n?` (${n})`:'')])}t.push(['dues','Pending dues'],['receipts','Receipts']);if(can('fees.setup'))t.push(['setup','Fee setup']);return t}
 function viewFees(){
   const tabs=feeTabs();let t=ui.tab.fees||'collect';if(!tabs.some(x=>x[0]===t))t='collect';ui.tab.fees=t;
   const T=today();const tp=vPayments().filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);
   return head('Fee Collection',`Today: ${inr(sum(tp,p=>p.amount))} in ${tp.length} receipt${tp.length===1?'':'s'} · ${fmtD(T)}`,'')+tabsBar('fees',tabs,t)+
-   ({collect:feeCollect,dues:feeDues,receipts:feeReceipts,setup:feeSetup}[t])();
+   ({collect:feeCollect,confirm:feeConfirm,dues:feeDues,receipts:feeReceipts,setup:feeSetup}[t])();
 }
 
 /* ---------- 1. collect fee: every student, semester by semester ----------
@@ -72,7 +72,7 @@ const reCol=()=>{const b=$('#colBox');if(b)b.innerHTML=collectBox()};
 function batchField(s){const b=defaultBatch(s);const opts=batchOptions(s.course);if(b&&!opts.includes(b))opts.push(b);
   return`<div class="field"><label class="label" for="f_batch">Batch *</label><select id="f_batch" name="batch" required><option value="">Choose batch</option>${opts.map(o=>`<option ${o===b?'selected':''}>${E(o)}</option>`).join('')}</select></div>`}
 function collectForm(s,m,mode){
-  const T=today();const amt=F('amount','Tuition fee amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}" data-live="colAmt"`})+batchField(s);
+  const T=today();const amt=F('amount','Tuition fee amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}" data-live="colAmt"`})+batchField(s)+(mode==='UPI'?'':rcField(s.course));
   if(mode==='CASH')return`<form data-form="collect" data-mode="CASH" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}${F('note','Note (optional)',{span:1,attrs:'maxlength="120"'})}
    <p class="note span">Invoice date = the date you enter here (default today). The receipt uses this date. You can change it later in Receipts.</p>
    ${can('expenses.manage')?`<div class="span" id="splitWrap">${splitBox()}</div>`:''}
@@ -138,7 +138,7 @@ function amountOf(d,m){const a=toPaise(d.amount);if(!(a>0))throw new Error('Ente
 FORM.collect=(f,d)=>{
   const mode=f.dataset.mode;if(!PAY_MODES.includes(mode))throw new Error('Choose Cash, Cheque or UPI');need('fees.collect','collect fees');
   const c=ui.col;const s=stu(c.sid);if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');guardStudent(s.id);const m=semSummary(s,c.sem);
-  const o={sem:c.sem,mode,amount:amountOf(d,m),batch:cleanBatch(d.batch),invoiceDate:d.invoiceDate,note:capText(d.note,'Note',120)};
+  const o={sem:c.sem,mode,amount:amountOf(d,m),batch:cleanBatch(d.batch),invoiceDate:d.invoiceDate,note:capText(d.note,'Note',120),rc:d.rc};
   /* change 4: the optional expense / cash-in-hand parts of a cash fee */
   const sp=mode==='CASH'&&ui.split&&ui.split.sid===s.id?ui.split:null;
   if(sp&&(sp.exp||sp.cih)){need('expenses.manage','keep part of a cash fee as expense or cash in hand');
@@ -149,13 +149,18 @@ FORM.collect=(f,d)=>{
     if(db.payments.some(p=>p.status==='SUCCESS'&&p.mode==='CHEQUE'&&p.chequeNo===o.chequeNo&&p.bank.toLowerCase()===o.bank.toLowerCase()))throw new Error('This cheque no. of this bank is already entered')}
   if(o.invoiceDate>addDays(today(),0))throw new Error('Invoice date cannot be in the future');
   const p=recordPayment(s,o);
-  if(!save()){db.payments.splice(db.payments.indexOf(p),1);if(db.audit[0]&&db.audit[0].entityId===p.rc)db.audit.shift();db.college.nextReceipt--;save();throw new Error('Not enough browser storage for these documents. Use smaller photos or fewer documents.')}
+  if(!save()){db.payments.splice(db.payments.indexOf(p),1);if(db.audit[0]&&db.audit[0].entityId===p.rc)db.audit.shift();save();throw new Error('Not enough browser storage for these documents. Use smaller photos or fewer documents.')}
   afterPayment(p);save();
   ui.exp=null;ui.split=null;closeLayer();renderPage();showReceipt(p,true);
 };
 /* everything that happens after a successful payment (spec §5.2): receipt no + PDF, email, notification to the student, live update for staff */
 function afterPayment(p){
   const s=stu(p.studentId);
+  /* change 14: a UPI payment has no invoice no. yet. The student sees it as paid; staff with "Confirm UPI payments" are asked to check it and add the number */
+  if(p.needsRc){
+    notify('payment',`Payment received · ${inr(p.amount)}`,`Tuition fee · Semester ${p.sem}. Your invoice will be issued as soon as the college office confirms the payment.`,{students:[s.id],portal:'sfees',tone:'good',self:true});
+    notify('confirm',`UPI payment to confirm · ${s.name}`,`${inr(p.amount)} · semester ${p.sem} · UTR ${p.upiRef||'—'}. Check it and add the invoice no.`,{roles:rolesWith('fees.confirm'),staff:'fees',tab:'confirm',tone:'warn',sid:s.id});
+    return}
   if(db.settings.mail.sendReceipts)queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Fee receipt ${p.rc} - ${db.college.short}`});
   notify('payment',`Fee received · ${inr(p.amount)}`,`Tuition fee · Semester ${p.sem} · receipt ${p.rc}`,{students:[s.id],portal:'sfees',tone:'good',self:true});
   notify('payment',`${modeName(p.mode)} payment · ${s.name}`,`${inr(p.amount)} for semester ${p.sem} · ${p.rc}`,{roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'good',sid:s.id});
@@ -199,8 +204,8 @@ function expireOrders(){let n=0;db.upiOrders.forEach(o=>{if(o.status==='CREATED'
 function upiBox(o){
   const s=stu(o.studentId);const st=isStudentUser(cur());expireOrders();const p=o.paymentId&&db.payments.find(x=>x.id===o.paymentId);
   if(o.status==='PAID'&&p)return`<div class="paydone"><div class="tick"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14"/><path d="M10 16.5l4 4 8-9"/></svg>Payment received</div>
-    <p style="margin:6px 0 12px"><b>${inr(o.amount)}</b> · ${E(s.name)} · Semester ${o.sem} · receipt <b class="mono">${E(p.rc)}</b></p>
-    <div class="actions" style="justify-content:flex-end"><button class="btn" data-act="closeDialog">Close</button><button class="btn primary" data-act="viewReceipt" data-id="${E(p.id)}">Open receipt</button></div></div>`;
+    <p style="margin:6px 0 12px"><b>${inr(o.amount)}</b> · ${E(s.name)} · Semester ${o.sem} · ${p.needsRc?(st?'your invoice will be issued after the college office confirms the payment':'<b>add the invoice no.</b> to issue the receipt'):`receipt <b class="mono">${E(p.rc)}</b>`}</p>
+    <div class="actions" style="justify-content:flex-end"><button class="btn" data-act="closeDialog">Close</button>${p.needsRc?(!st&&can('fees.confirm')?`<button class="btn primary" data-act="rcConfirm" data-id="${E(p.id)}">Add invoice no.</button>`:''):`<button class="btn primary" data-act="viewReceipt" data-id="${E(p.id)}">Open receipt</button>`}</div></div>`;
   if(o.status!=='CREATED')return`<p class="err" style="margin:0 0 10px">${o.status==='FAILED'?'The payment failed. No money was taken.':o.status==='CANCELLED'?'This payment request was cancelled.':'This QR has expired (15 minutes).'}</p><div class="actions" style="justify-content:flex-end"><button class="btn" data-act="closeDialog">Close</button></div>`;
   const left=Math.max(0,Math.ceil((UPI_TTL-(Date.now()-o.createdAt))/60000));const live=db.settings.upi.mode==='Live';
   return`<div class="upi-wrap"><div class="qr">${qrSvg(qrTarget(o))}</div>
@@ -251,7 +256,7 @@ function renderPayPage(id){
   const root=$('#root');const o=orderOf(id);expireOrders();const s=o&&stu(o.studentId);
   const shell=b=>`<main class="paypage"><div class="pp-card"><div class="pp-h"><div class="seal" aria-hidden="true">₹</div><div><b>UPI payment</b><small>Demo UPI app · sandbox</small></div></div>${b}</div></main>`;
   if(!o){root.innerHTML=shell(`<p>This payment request is not on this device.</p><p class="note">The demo keeps its data in one browser. Open the QR on the same device as the office screen, or ask the office to use “Webhook: payment captured”. In the live system any phone can pay.</p><a class="btn primary" href="/">Open NPCTE</a>`);return}
-  if(o.status==='PAID'){const p=db.payments.find(x=>x.id===o.paymentId);root.innerHTML=shell(`<div class="paydone"><div class="tick"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14"/><path d="M10 16.5l4 4 8-9"/></svg>Paid ${inr(o.amount)}</div><p>To ${E(db.college.short)} · ${E(s.name)} · Semester ${o.sem}</p>${p?`<p class="mono">UTR ${E(p.upiRef)} · Receipt ${E(p.rc)}</p>`:''}<a class="btn primary big" href="/">Done</a></div>`);return}
+  if(o.status==='PAID'){const p=db.payments.find(x=>x.id===o.paymentId);root.innerHTML=shell(`<div class="paydone"><div class="tick"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14"/><path d="M10 16.5l4 4 8-9"/></svg>Paid ${inr(o.amount)}</div><p>To ${E(db.college.short)} · ${E(s.name)} · Semester ${o.sem}</p>${p?`<p class="mono">UTR ${E(p.upiRef)} · ${p.needsRc?'Invoice: issued after the college office confirms':'Receipt '+E(p.rc)}</p>`:''}<a class="btn primary big" href="/">Done</a></div>`);return}
   if(o.status!=='CREATED'){root.innerHTML=shell(`<p class="err">${o.status==='EXPIRED'?'This QR has expired.':o.status==='CANCELLED'?'This request was cancelled.':'This payment failed.'}</p><a class="btn" href="/">Back</a>`);return}
   root.innerHTML=shell(`<div class="pp-amt">${inr(o.amount)}</div><div class="rline"><span>Pay to</span><b>${E(db.college.name)}</b></div><div class="rline"><span>UPI ID</span><span class="mono">${E(o.vpa)}</span></div>
    <div class="rline"><span>For</span><span>${E(s.name)} · Sem ${o.sem} tuition fee</span></div><div class="rline"><span>Order</span><span class="mono" style="font-size:12px">${E(o.id)}</span></div>
@@ -291,20 +296,25 @@ function receiptHtml(p){
   </article>`;
 }
 function showReceipt(p,fresh){
+  if(p.needsRc){const s=stu(p.studentId);const st=isStudentUser(cur());
+    drawer(`<button class="btn x" data-act="close">Close</button><h2>Payment received</h2><div class="panel rc-wait" style="margin-top:14px"><p style="margin:0 0 8px"><b>${inr(p.amount)}</b> · ${E(s.name)} · Semester ${p.sem} · Batch ${E(batchOf(p))}</p>
+     <div class="rline"><span>Paid by</span><b>UPI · UTR ${E(p.upiRef||'—')}</b></div><div class="rline"><span>Paid on</span><b>${fmtT(p.paidAt||p.entryAt)}</b></div><div class="rline"><span>Invoice date</span><b>${fmtD(p.invoiceDate)}</b></div>
+     <p class="note" style="margin:10px 0 0">${st?'Your payment is counted. The invoice will be issued as soon as the college office confirms it.':'The money is received (verified by the bank). Check it and add the invoice no. from the receipt book; then the receipt is issued and emailed.'}</p></div>
+     ${!st&&can('fees.confirm')&&p.status==='SUCCESS'?`<div class="actions" style="margin-top:14px"><button class="btn primary" data-act="rcConfirm" data-id="${E(p.id)}">Add invoice no.</button></div>`:''}`,false,'Payment received');return}
   drawer(`<button class="btn x" data-act="close">Close</button><h2>${fresh?'Receipt issued':'Receipt'}</h2><div style="margin-top:14px">${receiptHtml(p)}</div>
    <div class="actions" style="margin-top:14px"><button class="btn primary" data-act="dlPdf" data-id="${E(p.id)}">Download PDF</button><button class="btn" data-act="printReceipt" data-id="${E(p.id)}">Print</button>${isStudentUser(cur())?'':`<button class="btn" data-act="emailReceipt" data-id="${E(p.id)}">Email again</button>`}
    ${!isStudentUser(cur())&&p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel receipt</button>`:''}</div>${mailLine(p)}`,false,'Receipt '+p.rc);
 }
 ACT.viewReceipt=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)throw new Error('Receipt not found');guardStudent(p.studentId);if(!isStudentUser(cur()))need('fees.view');showReceipt(p)};
-ACT.printReceipt=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);guardStudent(p.studentId);const w=$('#printArea')||document.body.appendChild(Object.assign(document.createElement('div'),{id:'printArea'}));w.innerHTML=receiptHtml(p);document.body.classList.add('printing');setTimeout(()=>{window.print();document.body.classList.remove('printing')},50)};
+ACT.printReceipt=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);guardStudent(p.studentId);if(p.needsRc)throw new Error('The invoice is not issued yet: the office must add the invoice no.');const w=$('#printArea')||document.body.appendChild(Object.assign(document.createElement('div'),{id:'printArea'}));w.innerHTML=receiptHtml(p);document.body.classList.add('printing');setTimeout(()=>{window.print();document.body.classList.remove('printing')},50)};
 ACT.cancelAsk=el=>{need('fees.cancel','cancel receipts');const p=db.payments.find(x=>x.id===el.dataset.id);
-  dialog(`<h3>Cancel receipt ${E(p.rc)}?</h3><p class="muted" style="margin:0 0 10px">${inr(p.amount)} from ${E(stu(p.studentId).name)}. The receipt stays in the records marked CANCELLED and the semester due goes back up. This cannot be undone.</p>
+  dialog(`<h3>Cancel ${p.rc?'receipt '+E(p.rc):'this UPI payment'}?</h3><p class="muted" style="margin:0 0 10px">${inr(p.amount)} from ${E(stu(p.studentId).name)}. The receipt stays in the records marked CANCELLED and the semester due goes back up. This cannot be undone.</p>
    <form data-form="cancelReceipt" data-id="${E(p.id)}" class="grid" style="gap:10px">${F('reason','Reason (required)',{type:'textarea',req:true,rows:2,attrs:'maxlength="200" minlength="4"'})}
    <div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Keep receipt</button><button class="btn danger">Cancel receipt</button></div></form>`,'Cancel receipt');$('#f_reason').focus()};
 FORM.cancelReceipt=(f,d)=>{const p=db.payments.find(x=>x.id===f.dataset.id);cancelPayment(p,d.reason);const s=stu(p.studentId);
-  queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Receipt ${p.rc} cancelled - ${db.college.short}`});
-  notify('cancel',`Receipt ${p.rc} cancelled`,`${inr(p.amount)} · ${p.cancelReason}`,{students:[s.id],portal:'sfees',tone:'bad',self:true});
-  notify('cancel',`Receipt cancelled · ${s.name}`,`${p.rc} · ${inr(p.amount)} · ${p.cancelReason}`,{sid:s.id,roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
+  if(p.rc)queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Receipt ${p.rc} cancelled - ${db.college.short}`}); /* a UPI payment without an invoice no. has no receipt to send */
+  notify('cancel',p.rc?`Receipt ${p.rc} cancelled`:'UPI payment cancelled',`${inr(p.amount)} · ${p.cancelReason}`,{students:[s.id],portal:'sfees',tone:'bad',self:true});
+  notify('cancel',`Receipt cancelled · ${s.name}`,`${rcShow(p)} · ${inr(p.amount)} · ${p.cancelReason}`,{sid:s.id,roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
   save();closeDialog();closeLayer();renderPage();toast('Receipt cancelled')};
 
 /* an inline date editor for Cash / Cheque rows; UPI, cancelled rows and cash whose cash in hand is already used show plain text */
@@ -361,7 +371,7 @@ function feeReceipts(){
    <div class="filters"><input type="search" placeholder="Receipt no, name, batch, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI']])}${f.mode==='CASH'?sel(sc,'split','Cash split',SPLIT_OPTS):''}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}${sel(sc,'batch','Batch',payBatchOpts())}${sel(sc,'ref','Admission reference',REF_OPTS())}
     <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label></div>
    <div class="tablewrap"><table><thead><tr>${sortTh(sc,'rc','Receipt')}${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entered')}${sortTh(sc,'name','Student')}${sortTh(sc,'batch','Batch')}<th>Sem</th><th>Mode</th>${sortTh(sc,'amount','Amount',1)}<th>Status</th><th></th></tr></thead><tbody>
-   ${pg.map(p=>{const s=stu(p.studentId);return`<tr><td class="mono">${E(p.rc)}</td><td>${dateCell('p',p,p.invoiceDate)}</td><td><small>${fmtT(p.entryAt)}</small></td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}">${E(s.name)}</button></td><td class="mono">${E(batchOf(p))}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}${splitLine(p)}</td><td>${payPill(p.status)}${p.depositId?' '+pill('Deposited'):''}</td>
+   ${pg.map(p=>{const s=stu(p.studentId);return`<tr><td class="mono">${p.needsRc?`${pill('Invoice no. pending','warn')}${can('fees.confirm')&&p.status==='SUCCESS'?` <button class="btn sm" data-act="rcConfirm" data-id="${E(p.id)}">Add</button>`:''}`:E(p.rc)}</td><td>${dateCell('p',p,p.invoiceDate)}</td><td><small>${fmtT(p.entryAt)}</small></td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}">${E(s.name)}</button></td><td class="mono">${E(batchOf(p))}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}${splitLine(p)}</td><td>${payPill(p.status)}${p.depositId?' '+pill('Deposited'):''}</td>
     <td><div class="actions nowrap"><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button>${p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn sm danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="10" class="empty">No receipts for these filters.</td></tr>'}</tbody></table></div>${pager(sc,l.length)}
    <p class="note">Change the invoice date of a Cash or Cheque receipt right in the table: the receipt PDF is regenerated and the change is logged (old → new). UPI dates are fixed. A payment is never deleted; cancel it with a reason.</p></div>`;
 }
@@ -375,15 +385,40 @@ function feeSetup(){
    <h3>Due date per semester <small class="muted">(MM-DD · OPEN: confirm with the college)</small></h3><div class="tablewrap"><table class="matrix"><thead><tr><th>Course</th>${SEMS.map(n=>`<th>Sem ${n}</th>`).join('')}</tr></thead><tbody>${cs.map(co=>`<tr><td><b>${E(co.name)}</b></td>${SEMS.map(n=>n>co.semesters?na:`<td><input name="d_${co.id}_${n}" value="${E((st.dueDates[co.id]||[])[n-1]||'')}" placeholder="MM-DD" pattern="\\d{2}-\\d{2}" aria-label="${E(co.name)} semester ${n} due date" class="numin"></td>`).join('')}</tr>`).join('')}</tbody></table></div>
    <div class="form" style="margin-top:10px">${F('reminderDays','Fee alert: days before due date',{type:'number',val:st.reminderDays,attrs:'min="1" max="60"'})}</div>
    <div class="actions" style="margin-top:12px"><button class="btn primary">Save fees and due dates</button></div></form>
-  <form class="scard" data-form="receiptSetup"><h2>Receipt numbering</h2><div class="form">${F('receiptPrefix','Prefix',{val:c.receiptPrefix,req:true,attrs:'maxlength="16"'})}${F('nextReceipt','Next number',{type:'number',val:c.nextReceipt,req:true,attrs:'min="1"'})}</div>
-   <p class="note">Next receipt: <b class="mono">${E(c.receiptPrefix+pad(c.nextReceipt,4))}</b>. The number can only go up, never back to a used one. (OPEN: send us the receipt format used today.)</p>
-   <div class="actions" style="margin-top:12px"><button class="btn primary">Save</button></div></form></div>`;
+  <div class="scard"><h2>Invoice (receipt) numbers</h2><p class="note" style="margin:0 0 10px">The office types the invoice no. from the receipt book on every receipt: 4 or 5 digits, never used before in the same course (B.Ed and M.Ed have their own receipt books). A UPI payment gets its number when a staff member confirms it (Fee Collection → UPI to confirm).</p>
+   ${cs.map(co=>{const L=lastRc(co.id);return`<div class="rline"><span>${E(co.name)}</span><span>${L?`last <b class="mono">${E(L.last.rc)}</b> · highest <b class="mono">${E(L.hi.rc)}</b>`:'none yet'}</span></div>`}).join('')}</div></div>`;
 }
 FORM.feeDefaults=(f,d)=>{need('fees.setup');const st=db.settings;const before={fees:JSON.stringify(st.feeDefault),due:JSON.stringify(st.dueDates),days:st.reminderDays};
   const nf={...st.feeDefault},nd={...st.dueDates};scopeCourses().forEach(co=>{const SEMS=semsOf(co.id);nf[co.id]=SEMS.map(n=>{const a=toPaise(d[co.id+'_'+n]);if(!(a>=0)||a>100000000)throw new Error(`${co.name} semester ${n}: enter a valid amount`);return a});nd[co.id]=SEMS.map(n=>{const v=String(d[`d_${co.id}_${n}`]||'').trim();if(v&&!(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v)))throw new Error(`${co.name} semester ${n} due date: use MM-DD`);return v})});
   const rd=+d.reminderDays;if(!(rd>=1&&rd<=60))throw new Error('Reminder days must be 1 to 60');
   st.feeDefault=nf;st.dueDates=nd;st.reminderDays=rd;log('Fee setup changed','Settings','fees',before,{fees:JSON.stringify(nf),due:JSON.stringify(nd),days:rd});ntSync();save();renderPage();toast('Fee setup saved')};
-FORM.receiptSetup=(f,d)=>{need('fees.setup');const c=db.college,st=db.settings;const px=capText(d.receiptPrefix,'Prefix',16);if(!/^[A-Za-z0-9\/\-_]+$/.test(px))throw new Error('Prefix can use letters, numbers, / - _');
-  const n=+d.nextReceipt;const used=Math.max(0,...db.payments.filter(p=>p.rc.startsWith(px)).map(p=>+p.rc.slice(px.length)||0));if(!(n>=1)||n<=used)throw new Error(`Next number must be more than ${used} (already used)`);
-  const before={prefix:c.receiptPrefix,next:c.nextReceipt};c.receiptPrefix=px;c.nextReceipt=n;
-  log('Receipt settings changed','Settings','receipts',before,{prefix:px,next:n});save();renderPage();toast('Saved')};
+/* ---------- change 14: the invoice no. field (cash, cheque, UPI confirmation) ----------
+   Shows the last number typed in this course's receipt book and warns while typing if the number is already used. */
+function rcNoteHtml(cid){const L=lastRc(cid);if(!L)return'No invoice no. used yet in this course.';const at=istDate(L.last.rcAt||L.last.entryAt);
+  return`Last invoice no.: <b class="mono">${E(L.last.rc)}</b> <span class="muted">(${fmtD(at)} · ${E(L.last.rcBy||L.last.by||'')})</span>${L.hi!==L.last&&rcKey(L.hi.rc)!==rcKey(L.last.rc)?` · highest used: <b class="mono">${E(L.hi.rc)}</b>`:''}`}
+function rcField(cid,exceptId){return`<div class="field rc-field"><label class="label" for="f_rc">Invoice (receipt) no. *</label><input id="f_rc" name="rc" inputmode="numeric" pattern="[0-9]{4,5}" minlength="4" maxlength="5" required autocomplete="off" placeholder="4 or 5 digits" data-live="rcLive" data-c="${E(cid)}" ${exceptId?`data-x="${E(exceptId)}"`:''} aria-describedby="rcNote rcState">
+  <small class="rc-note" id="rcNote">${rcNoteHtml(cid)}</small><small class="rc-state" id="rcState" role="status"></small></div>`}
+LIVE.rcLive=el=>{const s=$('#rcState');if(!s)return;const v=el.value.replace(/\D/g,'');if(v!==el.value)el.value=v;
+  if(v.length<4){s.textContent='';s.className='rc-state';return}
+  try{rcCheck(v,el.dataset.c,el.dataset.x);s.textContent='✓ '+v+' is free';s.className='rc-state ok'}catch(e){s.textContent=e.message;s.className='rc-state bad'}};
+/* ---------- change 14: UPI payments waiting for the office to confirm them and add the invoice no. ---------- */
+const rcPending=()=>vPayments().filter(p=>p.needsRc&&p.status==='SUCCESS').sort((a,b)=>(a.paidAt||a.entryAt)-(b.paidAt||b.entryAt));
+function feeConfirm(){need('fees.confirm','confirm UPI payments');const l=rcPending();
+  return`<div class="panel"><h2>UPI payments to confirm ${pill(l.length+' waiting',l.length?'warn':'good')}</h2>
+   <p class="note" style="margin:0 0 12px">These UPI payments are received and verified by the bank, and already count as paid for the student. Check each one (UTR in the bank statement / gateway), then add the invoice no. from the receipt book. The receipt is then issued and emailed to the student.</p>
+   <div class="tablewrap"><table><thead><tr><th>Paid on</th><th>Student</th><th>Course</th><th>Batch</th><th>Sem</th><th class="num">Amount</th><th>UTR</th><th>Paid from</th><th>Invoice date</th><th></th></tr></thead><tbody>
+   ${l.map(p=>{const s=stu(p.studentId);const o=p.orderId&&db.upiOrders.find(x=>x.id===p.orderId);return`<tr><td>${fmtT(p.paidAt||p.entryAt)}</td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}"><b>${E(s.name)}</b></button><small class="muted mono" style="display:block">${E(s.enrol)}</small></td><td>${E(course(s.course).name)}</td><td class="mono">${E(batchOf(p))}</td><td>${p.sem}</td><td class="num amt">${inr(p.amount)}</td><td class="mono">${E(p.upiRef||'—')}</td><td>${o&&o.source==='office'?'Office QR':'Student portal'}</td><td>${fmtD(p.invoiceDate)}</td>
+     <td><button class="btn sm primary" data-act="rcConfirm" data-id="${E(p.id)}">Confirm · add invoice no.</button></td></tr>`}).join('')||'<tr><td colspan="10" class="empty">Nothing to confirm. Every UPI payment has its invoice no.</td></tr>'}</tbody></table></div></div>`}
+ACT.rcConfirm=el=>{need('fees.confirm','confirm UPI payments');const p=db.payments.find(x=>x.id===el.dataset.id);if(!p||!p.needsRc)throw new Error('This payment already has its invoice no.');guardStudent(p.studentId);const s=stu(p.studentId);
+  closeDialog();dialog(`<h3>Confirm UPI payment</h3><div class="panel" style="padding:12px;margin:0 0 12px"><div class="rline"><span>Student</span><b>${E(s.name)} · ${E(s.enrol)}</b></div><div class="rline"><span>Amount</span><b>${inr(p.amount)} · Semester ${p.sem} · Batch ${E(batchOf(p))}</b></div>
+   <div class="rline"><span>UTR</span><b class="mono">${E(p.upiRef||'—')}</b></div><div class="rline"><span>Paid on</span><b>${fmtT(p.paidAt||p.entryAt)}</b></div><div class="rline"><span>Invoice date</span><b>${fmtD(p.invoiceDate)}</b></div></div>
+   <form data-form="rcConfirm" data-id="${E(p.id)}" class="grid" style="gap:10px">${rcField(s.course,p.id)}
+    <div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Not now</button><button class="btn primary">Confirm and issue receipt</button></div></form>`,'Confirm UPI payment');const i=$('#f_rc');if(i)i.focus()};
+FORM.rcConfirm=(f,d)=>{need('fees.confirm','confirm UPI payments');const p=db.payments.find(x=>x.id===f.dataset.id);if(!p||!p.needsRc)throw new Error('This payment already has its invoice no.');guardStudent(p.studentId);if(p.status!=='SUCCESS')throw new Error('Only a successful payment can be confirmed');
+  const s=stu(p.studentId);const rc=rcCheck(d.rc,payCourse(p),p.id);const u=cur();
+  p.rc=rc;p.needsRc=false;p.rcAt=Date.now();p.rcBy=u.name;p.confirmedBy=u.name;p.confirmedAt=p.rcAt;
+  log('UPI payment confirmed','Payment',rc,{invoiceNo:''},{invoiceNo:rc,student:s.enrol,amount:inr(p.amount),utr:p.upiRef||''});
+  if(db.settings.mail.sendReceipts)queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Fee receipt ${p.rc} - ${db.college.short}`});
+  notify('payment',`Your fee receipt ${rc} is ready`,`${inr(p.amount)} · Semester ${p.sem}. Open Fees to download it.`,{students:[s.id],portal:'sfees',tone:'good',self:true});
+  notify('payment',`UPI payment confirmed · ${s.name}`,`${inr(p.amount)} · invoice ${rc} · by ${u.name}`,{roles:rolesWith('fees.confirm'),staff:'fees',tab:'receipts',tone:'good',sid:s.id});
+  save();closeDialog();renderPage();showReceipt(p,true);toast(`Invoice ${rc} added · receipt emailed to ${s.email}`)};

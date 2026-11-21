@@ -17,8 +17,8 @@ function viewStudentHome(){
 function viewStudentFees(){
   const s=me();const sm=feeSum(s);const pays=db.payments.filter(p=>p.studentId===s.id).sort((a,b)=>b.entryAt-a.entryAt);
   return head('My fees',`Tuition fee: total ${inr(sm.total)} · paid ${inr(sm.paid)} · due now ${inr(sm.payable)}`)+payRequestsHtml(s)+semCards(s,{pay:true})+
-  `<div class="panel" style="margin-top:16px"><h2>Receipts</h2><div class="list">${pays.map(p=>`<div class="li"><div><b>${E(p.rc)} · ${inr(p.amount)}</b><small>Tuition fee · Semester ${p.sem} · Batch ${E(batchOf(p))} · invoice ${fmtD(p.invoiceDate)}</small></div><div class="actions nowrap">${p.status==='SUCCESS'?'':payPill(p.status)}<button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button><button class="btn sm" data-act="dlPdf" data-id="${E(p.id)}">PDF</button></div></div>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
-  <p class="note">Paying with UPI: your receipt is ready as soon as the bank confirms. Its invoice date is the next day (college rule).</p>`;
+  `<div class="panel" style="margin-top:16px"><h2>Receipts</h2><div class="list">${pays.map(p=>`<div class="li"><div><b>${p.needsRc?'Payment received':E(p.rc)} · ${inr(p.amount)}</b><small>Tuition fee · Semester ${p.sem} · Batch ${E(batchOf(p))} · invoice ${fmtD(p.invoiceDate)}</small></div><div class="actions nowrap">${p.status==='SUCCESS'?(p.needsRc?pill('Invoice being issued','warn'):''):payPill(p.status)}<button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button>${p.needsRc?'':`<button class="btn sm" data-act="dlPdf" data-id="${E(p.id)}">PDF</button>`}</div></div>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
+  <p class="note">Paying with UPI: the payment counts as soon as the bank confirms it. The college office then checks it and issues your invoice (receipt). Its invoice date is the next day (college rule).</p>`;
 }
 /* payment requests the office sent to this student (UPI QR orders still open) */
 function payRequestsHtml(s){expireOrders();const l=db.upiOrders.filter(o=>o.studentId===s.id&&o.sentAt&&orderLive(o));if(!l.length)return'';

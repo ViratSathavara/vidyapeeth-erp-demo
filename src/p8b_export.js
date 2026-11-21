@@ -25,7 +25,7 @@ EXPORTS['fees.collect']={title:'Fee collection',perm:'fees.view',rows:()=>colRow
 EXPORTS['fees.dues']={title:'Pending dues',perm:'fees.view',rows:()=>duesFiltered(),cols:()=>[...stuCols().map(c=>['phone','cat','fund'].includes(c.k)?{...c,def:true}:c),
   XC('sems','Semesters due','text',r=>r.sm.sems.filter(x=>x.started&&x.due>0).map(x=>`Sem ${x.sem} ${inr(x.due)}${x.overdue?' (overdue)':''}`).join('; '),1,'Fees'),
   XC('oldest','Oldest due date','date',r=>(r.sm.sems.find(x=>x.started&&x.due>0)||{}).dueDate||'',0,'Fees'),XC('over','Overdue','text',r=>yesNo(r.sm.overdue),1,'Fees'),XC('due','Due now','money',r=>r.sm.payable,1,'Fees')]};
-const payCols=g=>[XC('rc','Receipt no','text',p=>p.rc,1,'Invoice'),XC('date','Invoice date','date',p=>p.invoiceDate,1,'Invoice'),XC('entry','Entry time','datetime',p=>p.entryAt,0,'Invoice'),
+const payCols=g=>[XC('rc','Receipt no','text',p=>rcShow(p),1,'Invoice'),XC('date','Invoice date','date',p=>p.invoiceDate,1,'Invoice'),XC('entry','Entry time','datetime',p=>p.entryAt,0,'Invoice'),
   XC('name','Student name','text',p=>stu(p.studentId).name,1,'Student'),XC('enrol','Enrolment no','text',p=>stu(p.studentId).enrol,1,'Student'),XC('course','Course','text',p=>course(stu(p.studentId).course).name,1,'Course'),
   XC('batch','Batch','text',p=>batchOf(p),1,'Course'),XC('sem','Semester','int',p=>p.sem,1,'Course'),XC('cat','Category','text',p=>stu(p.studentId).category,0,'Student'),XC('fund','Funding','text',p=>fundLabel(stu(p.studentId).funding),0,'Student'),
   XC('ref','Admission reference','text',p=>stu(p.studentId).ref||'',0,'Student'),

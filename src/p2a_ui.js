@@ -130,7 +130,7 @@ function run(cat,label,detail,fn,...a){
   catch(err){toast(err.message||String(err),true);(err instanceof TypeError||err instanceof ReferenceError||err instanceof RangeError?console.error:console.warn)(err);ev(cat==='Form'?'Form':'Error',label,err.message||String(err),{status:'fail'});return false}
 }
 /* Submit-once guard for everything that moves money or cannot be undone. The first submit disables the buttons and any repeat (double-click, Enter held down, a click during the closing animation) is ignored until the action has finished. If the action is refused the buttons come back so the person can fix the form. The server must still enforce this itself (an Active-receipt check in cancelPayment, a "waiting" check on requests). */
-const ONCE_FORMS=new Set(['collect','cancelReceipt','addStudent','expense','deposit','notice','sendRemind','restore','upiPay','stuPwReset']);
+const ONCE_FORMS=new Set(['collect','cancelReceipt','addStudent','expense','deposit','notice','sendRemind','restore','upiPay','stuPwReset','rcConfirm']);
 const ONCE_ACTS=new Set(['gwOk','gwFail','resendCred']);
 function lockOnce(root,on){
   const bs=root.matches&&root.matches('button')?[root]:$$('button:not([type=button])',root);

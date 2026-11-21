@@ -137,7 +137,8 @@ Flow: search student (name / enrolment no / phone) → see 4 semester cards with
 - The invoice date of Cash / Cheque rows can be edited **inline in the Receipts table**; changing it regenerates the receipt PDF and writes an AuditLog entry with old → new date.
 - `entryAt` (real timestamp) is always stored separately for audit.
 - **Batch is mandatory on every payment** and typed by the clerk, e.g. `2025-27` (inputs like `2025-2027` or `2025/27` are normalised to `2025-27`; end year must be after start year, max 5 years). Shown on the receipt, PDF, Receipts table, Audit and exports, and searchable. When a student pays UPI from the portal, the batch of their last receipt is used (else admission year + 2).
-- After a successful payment: receipt number (prefix + running number), PDF receipt, email to student, in-app + push notification to the student, live update on dashboards via Socket.IO.
+- **Invoice (receipt) no. is typed by the office on every receipt (change 14, 21-11-2026)**: 4 or 5 digits from the college receipt book, never generated. Refused if already used in the same course (B.Ed and M.Ed have separate receipt books; a cancelled receipt keeps its number). Under the field: the last invoice no. typed (date, who) and the highest used, plus a live "free / already used" check.
+- After a successful payment: the typed invoice no., PDF receipt, email to student, in-app + push notification to the student, live update on dashboards via Socket.IO.
 
 ### 5.3 Cash split: expense now + cash in hand (change 4, 21-11-2026; replaces "By Expense")
 
@@ -160,6 +161,7 @@ Flow: search student (name / enrolment no / phone) → see 4 semester cards with
   1. **UPI intent / QR** with the college's merchant VPA + payment-gateway webhook (Razorpay / Cashfree / PhonePe PG) — works with Google Pay and any UPI app.
   2. Keep a **Google Pay** adapter stub to switch on if direct access is approved.
 - Only the server marks a UPI payment SUCCESS (from the verified webhook), never the browser.
+- **UPI confirmation (change 14):** a UPI payment (student portal or office QR) counts as paid as soon as the webhook verifies it, but it has **no invoice no. yet**. Staff with the permission `fees.confirm` ("Confirm UPI payments (add the invoice no.)", default Principal + Clerk, Super Admin always) get a notification; **Fee Collection → UPI to confirm (n)** lists them (paid on, student, batch, amount, UTR, portal / office). One of them checks the UTR, types the invoice no. (same rules as above) → the receipt is issued, emailed, and the student is notified. Until then the student sees "Payment received · invoice being issued" and no PDF; the office sees "Invoice no. pending" with an Add button in Receipts.
 - Student portal: "Pay now" button per due semester.
 
 ### 5.5 Pending dues
@@ -259,7 +261,7 @@ Same website, installable like the ABCD learning app:
 
 - College profile (name, trust, logo, address, contact — shown on receipts).
 - Default fee per course × semester; due dates per semester; reminder days.
-- Receipt prefix & next number.
+- Invoice numbers: typed per receipt (change 14); Fee setup shows the last and highest number per course.
 - UPI provider keys (server-side only, never sent to the browser).
 - Email sender settings.
 - Roles & Permissions matrix.

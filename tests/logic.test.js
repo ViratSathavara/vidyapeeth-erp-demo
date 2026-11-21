@@ -1,5 +1,5 @@
 const A=require('./harness.js');let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++}else{fail++;console.log('FAIL',m)}};
-A.load();const db=A.db;
+A.load();const db=A.db;let RCN=70000;const nrc=()=>String(RCN++);
 // change 5: example cash in hand in the seed data
 {const L=db.payments.filter(p=>p.demoSplit);const cb=db.cashbox;
  ok(L.length>=4&&L.every(p=>p.mode==='CASH'&&p.cih>0&&!p.depositId&&A.payExp(p)+A.payCih(p)<=p.amount),'example: cash receipts with cash in hand (never already banked)');
@@ -23,7 +23,7 @@ let threw=false;try{A.viewSettings()}catch(e){threw=true}ok(threw,'clerk setting
 const s=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).payable>0);
 const m=A.feeSum(s).sems.find(x=>x.started&&x.due>0);
 const T=A.istDate(Date.now());
-const p=A.recordPayment(s,{sem:m.sem,mode:'CASH',amount:100000,invoiceDate:'2026-11-08'});ok(p.invoiceDate==='2026-11-08','cash manual date');
+const p=A.recordPayment(s,{rc:nrc(),sem:m.sem,mode:'CASH',amount:100000,invoiceDate:'2026-11-08'});ok(p.invoiceDate==='2026-11-08','cash manual date');
 // UPI 8 Nov 23:50 IST and 00:10 IST
 const ist=(d,h,mi)=>Date.UTC(2026,10,d,h,mi)-330*60000;
 ok(A.upiInvoiceDate(ist(8,23,50))==='2026-11-09','upi 23:50');ok(A.upiInvoiceDate(ist(8,0,10))==='2026-11-09','upi 00:10');
@@ -63,17 +63,17 @@ ok(A.cleanBatch('2025-27')==='2025-27'&&A.cleanBatch(' 2025 - 2027 ')==='2025-27
 for(const bad of ['','2025','25-27','2027-25','2025-2035','abcd-ef']){threw=false;try{A.cleanBatch(bad)}catch(e){threw=true}ok(threw,'batch rejects '+JSON.stringify(bad))}
 login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).payable>=2000000);const m2=A.feeSum(s2).sems.find(x=>x.due>=1000000);
  A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'CASH'};const n0=db.payments.length;
- threw=false;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'1000',batch:'',invoiceDate:'2026-11-08'})}catch(e){threw=/batch/i.test(e.message)}ok(threw&&db.payments.length===n0,'cash without batch refused');
+ threw=false;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'1000',batch:'',invoiceDate:'2026-11-08',rc:nrc()})}catch(e){threw=/batch/i.test(e.message)}ok(threw&&db.payments.length===n0,'cash without batch refused');
  // change 4: no "By Expense" mode; By Cash can keep an expense part and a cash-in-hand part, the rest goes to the bank
  const due0=A.semSummary(s2,m2.sem).due;const quiet=e=>{if(!/showReceipt|not defined|drawer|firstElementChild|null/.test(e.message))console.log('collect err',e.message)};
- threw=false;try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'1000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){threw=true}ok(threw&&db.payments.length===n0,'By Expense mode is refused');
+ threw=false;try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'1000',batch:'2025-27',invoiceDate:'2026-11-08',rc:nrc()})}catch(e){threw=true}ok(threw&&db.payments.length===n0,'By Expense mode is refused');
  ok(!/By Expense/.test(A.feeCollect())&&!A.viewFees().includes('value="EXPENSE"'),'no By Expense option');
  A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'CASH'};A.ui.split={sid:s2.id,exp:true,cih:false,cihAmt:''};A.ui.exp={sid:s2.id,ctx:'split',rows:[{amount:'1000',reason:'',doc:null}]};
- threw=false;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){threw=/reason/.test(e.message)}ok(threw&&db.payments.length===n0,'expense line needs a reason');
+ threw=false;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08',rc:nrc()})}catch(e){threw=/reason/.test(e.message)}ok(threw&&db.payments.length===n0,'expense line needs a reason');
  A.ui.split={sid:s2.id,exp:true,cih:true,cihAmt:'7000'};A.ui.exp={sid:s2.id,ctx:'split',rows:[{amount:'4000',reason:'Exam fees paid to university',doc:null}]};
- threw=false;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){threw=/more than/.test(e.message)}ok(threw&&db.payments.length===n0,'expense + cash in hand cannot be more than the fee');
+ threw=false;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08',rc:nrc()})}catch(e){threw=/more than/.test(e.message)}ok(threw&&db.payments.length===n0,'expense + cash in hand cannot be more than the fee');
  A.ui.split={sid:s2.id,exp:true,cih:true,cihAmt:'3000'};A.ui.exp={sid:s2.id,ctx:'split',rows:[{amount:'4000',reason:'Exam fees paid to university',doc:null},{amount:'1000',reason:'Teaching material',doc:null}]};
- try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){quiet(e)}
+ try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08',rc:nrc()})}catch(e){quiet(e)}
  const pe=db.payments.at(-1);ok(pe.mode==='CASH'&&pe.batch==='2025-27'&&pe.expenseItems.length===2&&A.payExp(pe)===500000&&A.payCih(pe)===300000&&A.payToBank(pe)===200000,'cash split saved: 5,000 expense + 3,000 cash in hand + 2,000 bank');
  ok(A.semSummary(s2,m2.sem).due===due0-1000000,'the whole fee counts as paid');ok(!A.db.expenses&&!A.feeTabs().some(t=>t[0]==='expenses'),'no separate expense section');
  ok(/2025-27/.test(A.receiptHtml(pe))&&/Exam fees/.test(A.receiptHtml(pe))&&/Where this cash went/.test(A.receiptHtml(pe)),'office receipt shows where the cash went');
@@ -156,9 +156,9 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
 {const D=A.db;const login2=un=>{const u=D.users.find(x=>x.username===un);A.sesSet(u.id);return u};login2('clerk');A.setPickedCourse('');
  const quiet=e=>{if(!/null|firstElementChild|innerHTML|not a function/.test(e.message))console.log('cash err',e.message)};
  const three=D.students.filter(x=>x.course==='BED'&&x.status==='ACTIVE'&&A.feeSum(x).sems.some(m=>m.due>=1500000)).slice(0,3);ok(three.length===3,'three B.Ed students for the example');
- const lots=three.map((s,i)=>{const m=A.feeSum(s).sems.find(x=>x.due>=1500000);return A.recordPayment(s,{sem:m.sem,mode:'CASH',amount:[500000,1000000,1500000][i],cih:[500000,1000000,1500000][i],invoiceDate:['2026-01-05','2026-01-10','2026-01-15'][i],batch:'2025-27'})});
+ const lots=three.map((s,i)=>{const m=A.feeSum(s).sems.find(x=>x.due>=1500000);return A.recordPayment(s,{rc:nrc(),sem:m.sem,mode:'CASH',amount:[500000,1000000,1500000][i],cih:[500000,1000000,1500000][i],invoiceDate:['2026-01-05','2026-01-10','2026-01-15'][i],batch:'2025-27'})});
  ok(lots.every(p=>A.payToBank(p)===0)&&A.cihBalance('BED','2026-01-31')===3000000,'cash in hand on 31-01-2026 = 30,000 (5,000 + 10,000 + 15,000)');
- let th=false;try{A.recordPayment(three[0],{sem:A.feeSum(three[0]).sems.find(m=>m.due>0).sem,mode:'CHEQUE',amount:100,cih:100,invoiceDate:'2026-01-05',chequeNo:'123456',bank:'SBI'})}catch(e){th=/only for cash/.test(e.message)}ok(th,'cash in hand only for cash');
+ let th=false;try{A.recordPayment(three[0],{rc:nrc(),sem:A.feeSum(three[0]).sems.find(m=>m.due>0).sem,mode:'CHEQUE',amount:100,cih:100,invoiceDate:'2026-01-05',chequeNo:'123456',bank:'SBI'})}catch(e){th=/only for cash/.test(e.message)}ok(th,'cash in hand only for cash');
  // 20,000 of expenses over 6 months, entered as two expenses
  A.ui.exp={sid:'cash',ctx:'spend',rows:[{amount:'12000',reason:'Annual function decoration',doc:null}]};try{A.FORM.cashSpend({},{course:'BED',date:'2026-03-10'})}catch(e){quiet(e)}
  A.ui.exp={sid:'cash',ctx:'spend',rows:[{amount:'5000',reason:'Water cooler repair',doc:null},{amount:'3000',reason:'Stationery',doc:null}]};try{A.FORM.cashSpend({},{course:'BED',date:'2026-06-30'})}catch(e){quiet(e)}
@@ -201,7 +201,7 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  login2('clerk');ok(/Cash in office/.test(A.viewDashboard()),'dashboard shows cash in office');
  login2('principal');ok(A.cashNow('MED').total===0&&A.depPending('MED').length===0,'B.Ed principal never sees M.Ed cash');login2('clerk');
  // old data: a "By Expense" receipt becomes Cash with the whole amount as expense
- const so=D.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).sems.some(m=>m.due>=100000));const old=A.recordPayment(so,{sem:A.feeSum(so).sems.find(m=>m.due>=100000).sem,mode:'CASH',amount:100000,invoiceDate:'2026-11-02',batch:'2025-27'});old.mode='EXPENSE';old.reason='Old expense';delete D.mig.cash;A.save();A.load();
+ const so=D.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).sems.some(m=>m.due>=100000));const old=A.recordPayment(so,{rc:nrc(),sem:A.feeSum(so).sems.find(m=>m.due>=100000).sem,mode:'CASH',amount:100000,invoiceDate:'2026-11-02',batch:'2025-27'});old.mode='EXPENSE';old.reason='Old expense';delete D.mig.cash;A.save();A.load();
  const o2=A.db.payments.find(p=>p.id===old.id);ok(o2.mode==='CASH'&&A.payExp(o2)===o2.amount&&A.payToBank(o2)===0&&o2.expenseItems[0].reason==='Old expense','migration: By Expense receipt → Cash, whole amount as expense');
  ok(A.db.roles.Clerk.includes('cash.spend')&&A.db.roles.Principal.includes('cash.spend')&&!Object.values(A.db.roles).some(l=>l.includes('cash.view')||l.includes('cash.deposit')),'migration: cash permissions merged (cash.spend kept; view/deposit use the audit permissions)');
  // a browser that already uses cash in hand does not get example data again
@@ -271,4 +271,36 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  A.ui.expF={'audit.tx':{batch:pb}};const cols=X.cols().filter(c=>c.def);const t=A.withFilters(A.ui.expF,()=>A.expTable(X,cols,X.rows()));const ft=A.expFilterText('audit.tx');
  const xl=Buffer.from(A.xlsxOf(X.title,cols,t,[['Filters',ft]])).toString('latin1');ok(xl.includes('xl/worksheets/sheet2.xml')&&xl.includes('Batch: '+pb)&&xl.includes('name="Filters"'),'Excel file has a Filters sheet');
  const pdf=A.withFilters(A.ui.expF,()=>A.expPdf(X,cols,t,ft));ok(typeof pdf==='string'&&pdf.startsWith('%PDF')&&pdf.includes('Filters: Batch'),'PDF prints the filters');A.ui.f['audit.tx']={};}
+// ---- change 14: invoice no. typed by the office; UPI payments confirmed by staff with the permission ----
+{const D=A.db;const lg=un=>{const u=D.users.find(x=>x.username===un);A.sesSet(u.id);return u};lg('clerk');A.setPickedCourse('');
+ const sB=D.students.find(s=>s.course==='BED'&&s.status==='ACTIVE'&&A.feeSum(s).sems.some(m=>m.due>=200000));const sM=D.students.find(s=>s.course==='MED'&&s.status==='ACTIVE'&&A.feeSum(s).sems.some(m=>m.due>=200000));
+ const semOf=s=>A.feeSum(s).sems.find(m=>m.due>=200000).sem;const n0=D.payments.length;
+ const tryRc=(s,rc)=>{try{A.recordPayment(s,{rc,sem:semOf(s),mode:'CASH',amount:100000,invoiceDate:'2026-11-10',batch:'2025-27'});return 'ok'}catch(e){return e.message}};
+ ok(/4 or 5 digits/.test(tryRc(sB,undefined))&&/4 or 5 digits/.test(tryRc(sB,'123'))&&/4 or 5 digits/.test(tryRc(sB,'123456'))&&/4 or 5 digits/.test(tryRc(sB,'12a4'))&&D.payments.length===n0,'invoice no. required: 4 or 5 digits only');
+ const usedB=D.payments.find(p=>p.rc&&A.payCourse(p)==='BED');const k=A.rcKey(usedB.rc);const same=k.padStart(4,'0');
+ ok(/already used/.test(tryRc(sB,same))&&D.payments.length===n0,'a number already used in the course is refused ('+usedB.rc+' vs '+same+')');
+ ok(tryRc(sB,'61001')==='ok'&&D.payments.at(-1).rc==='61001'&&D.payments.at(-1).rcBy==='Accounts Clerk','a new 5-digit number is accepted');
+ ok(/already used/.test(tryRc(sB,'61001')),'the same number cannot be used twice');
+ ok(tryRc(sM,'61001')==='ok','B.Ed and M.Ed have their own receipt books: the same number is allowed in the other course');
+ ok(tryRc(sB,'6102')==='ok'&&A.lastRc('BED').last.rc==='6102'&&+A.rcKey(A.lastRc('BED').hi.rc)===Math.max(...D.payments.filter(p=>p.rc&&A.payCourse(p)==='BED').map(p=>+A.rcKey(p.rc))),'last and highest invoice no. per course');
+ const cancelled=D.payments.find(p=>p.status==='CANCELLED'&&p.rc&&A.payCourse(p)==='BED');if(cancelled){ok(/already used/.test(tryRc(sB,A.rcKey(cancelled.rc).padStart(4,'0'))),'a cancelled receipt keeps its number')}
+ A.ui.col={sid:sB.id,sem:semOf(sB),mode:'CASH'};A.ui.split=null;ok(/name="rc"/.test(A.collectForm(sB,A.semSummary(sB,semOf(sB)),'CASH'))&&/Last invoice no\.: <b class="mono">6102/.test(A.collectForm(sB,A.semSummary(sB,semOf(sB)),'CASH'))&&/name="rc"/.test(A.collectForm(sB,A.semSummary(sB,semOf(sB)),'CHEQUE'))&&!/name="rc"/.test(A.collectForm(sB,A.semSummary(sB,semOf(sB)),'UPI')),'cash and cheque forms ask for the invoice no. and show the last one; UPI does not');
+ // UPI from the student portal: counts as paid at once, waits for the office
+ A.sesSet(sB.userId); /* the student pays from the portal */
+ const due0=A.semSummary(sB,semOf(sB)).due;const o=A.provider.createOrder(sB,semOf(sB),150000,'student');o.source='portal';const mails=D.outbox.length;
+ const up=A.handleUpiWebhook(A.gwEvent(o.id,'captured'));ok(up&&up.needsRc&&up.rc===''&&up.status==='SUCCESS'&&A.semSummary(sB,up.sem).due===due0-150000,'UPI payment counts as paid but has no invoice no. yet');
+ ok(D.outbox.length===mails,'no receipt email before the office confirms');
+ const cl=D.users.find(u=>u.username==='clerk'),pr=D.users.find(u=>u.username==='principal');const asked=u=>D.notifs.some(n=>n.uid===u.id&&/UPI payment to confirm/.test(n.t));
+ ok(asked(cl)&&asked(pr)&&D.notifs.some(n=>n.uid===sB.userId&&/office confirms/.test(n.x)),'clerk + principal (with the permission) and the student are notified');
+ lg('clerk');ok(A.rcPending().some(p=>p.id===up.id)&&A.feeTabs().some(t=>t[0]==='confirm'&&/UPI to confirm \(\d+\)/.test(t[1]))&&/Confirm · add invoice no\./.test(A.feeConfirm()),'Fee Collection → UPI to confirm lists it');
+ let th=false;try{A.ACT.dlPdf({dataset:{id:up.id}})}catch(e){th=/not issued yet/.test(e.message)}ok(th,'no invoice PDF before confirmation');
+ // permission: without it the clerk is not asked and cannot confirm
+ D.roles.Clerk=D.roles.Clerk.filter(x=>x!=='fees.confirm');ok(!A.rolesWith('fees.confirm').includes('Clerk')&&A.rolesWith('fees.confirm').includes('Principal'),'notifications follow the permission');
+ th=false;try{A.FORM.rcConfirm({dataset:{id:up.id}},{rc:'6200'})}catch(e){th=/access/.test(e.message)}ok(th&&up.needsRc,'clerk without the permission cannot confirm');D.roles.Clerk.push('fees.confirm');
+ th=false;try{A.FORM.rcConfirm({dataset:{id:up.id}},{rc:'6102'})}catch(e){th=/already used/.test(e.message)}ok(th&&up.needsRc,'confirming with a used number is refused');
+ try{A.FORM.rcConfirm({dataset:{id:up.id}},{rc:'6103'})}catch(e){if(!/null|innerHTML|firstElementChild/.test(e.message))console.log('confirm err',e.message)}
+ ok(up.rc==='6103'&&!up.needsRc&&up.confirmedBy==='Accounts Clerk'&&D.outbox[0].kind==='receipt'&&D.outbox[0].paymentId===up.id&&!A.rcPending().some(p=>p.id===up.id),'confirmed: invoice no. added, receipt emailed, removed from the list');
+ ok(D.audit.some(a=>a.action==='UPI payment confirmed'&&a.entityId==='6103'),'confirmation is in the activity log');
+ // old receipts keep their numbers
+ ok(D.payments.filter(p=>p.imported||/^\d{4}$/.test(p.rc)).length>0,'existing receipt numbers unchanged');}
 console.log('pass',pass,'fail',fail);

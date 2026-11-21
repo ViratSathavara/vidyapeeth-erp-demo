@@ -461,3 +461,7 @@ input.inl[type=date]{width:152px;padding-right:28px;background-position:right 7p
 .alloc li{display:flex;justify-content:space-between;gap:10px;font-size:13.5px}.alloc li span{min-width:0;overflow-wrap:anywhere}
 .t-warn{color:var(--warn)}
 @media (max-width:520px){.split3 i{display:none}.sp3{flex:1 1 calc(50% - 6px)}.splitbox .cihf{margin-left:0;max-width:none}}
+/* change 14: invoice (receipt) no. field: last number used + live check */
+.rc-field .rc-note{display:block;font-size:12.5px;color:var(--muted);line-height:1.4}.rc-field .rc-note b{color:var(--fg)}
+.rc-state{display:block;font-size:12.5px;font-weight:600;min-height:1em}.rc-state.ok{color:var(--good)}.rc-state.bad{color:var(--bad)}
+.rc-field input{font-family:var(--mono);letter-spacing:.08em;max-width:220px}

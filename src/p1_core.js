@@ -67,6 +67,8 @@ function migrate(){
   if(!db.mig.cash){db.mig.cash=1;
     db.payments.forEach(p=>{if(p.mode!=='EXPENSE')return;p.mode='CASH';p.wasExpenseMode=true;if(!(p.expenseItems||[]).length)p.expenseItems=[{amount:p.amount,reason:p.reason||'College expense',doc:null}]});
     STAFF_ROLES.forEach(r=>{const l=db.roles[r]=db.roles[r]||[];if(!l.includes('cash.spend'))l.push('cash.spend')})}
+  /* change 14 (21-11-2026): invoice numbers are typed by the office; UPI payments wait for a staff member to confirm them and add the number */
+  if(!db.mig.rc14){db.mig.rc14=1;STAFF_ROLES.forEach(r=>{const l=db.roles[r]=db.roles[r]||[];if(!l.includes('fees.confirm'))l.push('fees.confirm')})}
   /* change 7: cash is managed in one place (Audit → Cash). Cheque and UPI go to the bank directly. One bank deposit can hold the fee cash and
      students' cash in hand, so cash-in-hand deposits move into db.deposits (cihLines). Viewing and depositing use the audit permissions. */
   if(!db.mig.cash7){db.mig.cash7=1;
@@ -83,7 +85,7 @@ const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)th
 const PERMS=[
  ['dashboard.view','See the dashboard'],
  ['students.view','View students'],['students.edit','Add and edit students'],['students.password','Reset student passwords and resend login details'],
- ['fees.view','Open Fee Collection'],['fees.collect','Collect payments (Cash, Cheque, UPI)'],['fees.cancel','Cancel a receipt (with reason)'],
+ ['fees.view','Open Fee Collection'],['fees.collect','Collect payments (Cash, Cheque, UPI)'],['fees.confirm','Confirm UPI payments (add the invoice no.)'],['fees.cancel','Cancel a receipt (with reason)'],
  ['fees.editdate','Edit invoice date of Cash / Cheque'],['expenses.manage','Split a cash fee: expense now / cash in hand'],
  ['cash.spend','Add expense from cash in hand'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
  ['audit.view','Transactions audit and exports'],['audit.deposit','Deposit cash to the bank'],['activity.view','Activity log (every action)'],
@@ -94,7 +96,7 @@ const STAFF_ROLES=['Principal','Clerk'];
 const ALL_STAFF_PERMS=PERMS.map(p=>p[0]);
 const DEFAULT_ROLES=()=>({
  'Principal':ALL_STAFF_PERMS.slice(),
- 'Clerk':['dashboard.view','students.view','students.edit','fees.view','fees.collect','fees.cancel','fees.editdate','expenses.manage','cash.spend','audit.view','audit.deposit','notices.post','enquiries.view']});
+ 'Clerk':['dashboard.view','students.view','students.edit','fees.view','fees.collect','fees.confirm','fees.cancel','fees.editdate','expenses.manage','cash.spend','audit.view','audit.deposit','notices.post','enquiries.view']});
 const cur=()=>db&&db.users.find(u=>u.id===sesGet()&&u.active);
 /* hierarchy: Super Admin > Principal > Clerk > Student. A lower role never gets a higher role's settings or sees its logs. */
 const ROLE_RANK={'Super Admin':3,'Principal':2,'Clerk':1,'Student':0};
@@ -204,7 +206,22 @@ const cihLocked=p=>payCih(p)>0&&(cihUsed(p)>0||cihDeposited(p)>0);
    CASH / CHEQUE -> the date the user enters (default today, editable later)
    UPI -> payment date in India + 1 day, never editable */
 const upiInvoiceDate=paidAt=>addDays(istDate(paidAt),1);
-function nextReceiptNo(){const c=db.college;const n=c.nextReceipt++;return`${c.receiptPrefix}${pad(n,4)}`}
+function nextReceiptNo(){const c=db.college;const n=c.nextReceipt++;return`${c.receiptPrefix}${pad(n,4)}`} /* old automatic numbers; not used for new receipts since change 14 */
+/* ---------- change 14: the invoice (receipt) no. is typed by the office on every receipt ----------
+   4 or 5 digits. B.Ed and M.Ed keep separate receipt books, so a number may be used once per course.
+   A number counts as used even on a cancelled receipt. Old numbers (NPCTE/26-0012, 1523, 1523.0) compare by their number. */
+const rcKey=rc=>{const m=String(rc||'').trim().replace(/\.0+$/,'').match(/(\d+)\D*$/);return m?String(+m[1]):''};
+const rcShow=p=>p.rc||'Invoice no. pending';
+function rcCheck(v,cid,exceptId){const n=String(v??'').trim();
+  if(!/^\d{4,5}$/.test(n))throw new Error('Invoice no.: type 4 or 5 digits (numbers only)');
+  const k=rcKey(n);const dup=db.payments.find(p=>p.id!==exceptId&&p.rc&&payCourse(p)===cid&&rcKey(p.rc)===k);
+  if(dup){const s=stu(dup.studentId);throw new Error(`Invoice no. ${n} is already used (${dup.rc} · ${s?s.name:''} · ${fmtD(dup.invoiceDate)}${dup.status==='CANCELLED'?' · cancelled':''}). Check the receipt book and type the right number.`)}
+  return n}
+/* the last invoice no. typed in this course's receipt book, and the highest number used */
+function lastRc(cid){const l=db.payments.filter(p=>p.rc&&payCourse(p)===cid);if(!l.length)return null;const at=p=>p.rcAt||p.entryAt||0;
+  return{last:l.reduce((a,p)=>at(p)>=at(a)?p:a),hi:l.reduce((a,p)=>(+rcKey(p.rc)>+rcKey(a.rc)?p:a))}}
+/* staff roles that hold a permission (Super Admin always): notifications "based on permission" */
+const rolesWith=perm=>['Super Admin',...STAFF_ROLES.filter(r=>(db.roles[r]||[]).includes(perm)&&!(r==='Clerk'&&PRINCIPAL_ONLY.includes(perm)))];
 /* batch = the student's 2-year course batch, typed by the clerk on every receipt, e.g. 2025-27 */
 const courseYears=cid=>(course(cid)||{}).years||2;
 const batchLabel=(cid,y)=>`${y}-${String(+y+courseYears(cid)).slice(2)}`;
@@ -221,6 +238,8 @@ function recordPayment(s,o){
   const sm=semSummary(s,o.sem);
   if(!(o.amount>0))throw new Error('Enter an amount greater than zero');
   if(o.amount>sm.due)throw new Error(`Amount is more than the semester ${o.sem} due (${inr(sm.due)})`);
+  /* change 14: cash / cheque need the invoice no. now; a UPI payment gets it when a staff member confirms it */
+  const rc=o.mode==='UPI'?'':rcCheck(o.rc,s.course);
   const entryAt=Date.now();
   const invoiceDate=o.mode==='UPI'?upiInvoiceDate(o.paidAt||entryAt):o.invoiceDate;
   if(!validIso(invoiceDate))throw new Error('Choose a valid invoice date');
@@ -229,10 +248,11 @@ function recordPayment(s,o){
   const u=cur();
   const p={id:uid('p'),studentId:s.id,sem:o.sem,mode:o.mode,amount:o.amount,invoiceDate,entryAt,paidAt:o.paidAt||entryAt,
     chequeNo:o.chequeNo||'',bank:o.bank||'',chequeDate:o.chequeDate||'',upiRef:o.upiRef||'',providerTxnId:o.providerTxnId||'',note:o.note||'',
-    batch:o.batch||defaultBatch(s),reason:o.reason||'',category:o.category||'',status:'SUCCESS',cancelReason:'',rc:nextReceiptNo(),depositId:'',by:u?u.name:'Payment gateway',byId:u?u.id:'',dateEdits:[]};
+    batch:o.batch||defaultBatch(s),reason:o.reason||'',category:o.category||'',status:'SUCCESS',cancelReason:'',rc,depositId:'',by:u?u.name:'Payment gateway',byId:u?u.id:'',dateEdits:[]};
+  if(rc){p.rcAt=entryAt;p.rcBy=u?u.name:''}else p.needsRc=true;
   if(o.mode==='CASH'){if((o.expenseItems||[]).length)p.expenseItems=o.expenseItems;if(o.cih>0)p.cih=o.cih}
   db.payments.push(p);
-  log('Payment recorded','Payment',p.rc,null,{student:s.enrol,batch:p.batch,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate),
+  log('Payment recorded','Payment',p.rc||('UPI '+(p.upiRef||'')),null,{student:s.enrol,batch:p.batch,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate),
     ...(payExp(p)?{expense:inr(payExp(p))}:{}),...(payCih(p)?{cashInHand:inr(payCih(p))}:{}),...(payExp(p)||payCih(p)?{toBank:inr(payToBank(p))}:{})});
   return p;
 }
@@ -417,8 +437,8 @@ function seed(){
     s.cred={status:'Sent (demo)',at:Date.now()-(40-i)*864e5,to:s.email};
   });
   /* payments in all 4 modes, dated in the last few weeks */
-  const by=db.users[2];const mk=(s,sem,mode,amt,dAgo,extra={})=>{const ts=Date.now()-dAgo*864e5-3600e3*(1+(dAgo%5));const inv=mode==='UPI'?upiInvoiceDate(ts):addDays(today(),-dAgo-(extra.back||0));
-    db.payments.push(Object.assign({id:uid('p'),studentId:s.id,sem,mode,amount:amt,invoiceDate:inv,entryAt:ts,paidAt:ts,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'SUCCESS',cancelReason:'',rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:mode==='UPI'?'Payment gateway':by.name,byId:mode==='UPI'?'':by.id,dateEdits:[],batch:defaultBatch(s),reason:'',category:''},extra.f||{}))};
+  const by=db.users.find(u=>u.id==='u_clerk')||db.users[2]; /* sample receipts are entered by the Accounts Clerk */const mk=(s,sem,mode,amt,dAgo,extra={})=>{const ts=Date.now()-dAgo*864e5-3600e3*(1+(dAgo%5));const inv=mode==='UPI'?upiInvoiceDate(ts):addDays(today(),-dAgo-(extra.back||0));
+    db.payments.push(Object.assign({id:uid('p'),studentId:s.id,sem,mode,amount:amt,invoiceDate:inv,entryAt:ts,paidAt:ts,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'SUCCESS',cancelReason:'',rc:pad(db.college.nextReceipt++,4),depositId:'',by:mode==='UPI'?'Payment gateway':by.name,byId:mode==='UPI'?'':by.id,dateEdits:[],batch:defaultBatch(s),reason:'',category:''},extra.f||{}))};
   const S=db.students;
   S.forEach((s,i)=>{
     const f1=semFee(s,1).amount;
@@ -430,8 +450,10 @@ function seed(){
     if(s.sem===3){mk(s,2,i%2?'UPI':'CASH',semFee(s,2).amount,60+i);const r1=semSummary(s,1).due;if(r1>0)mk(s,1,'CASH',r1,200+i)}
   });
   /* one cancelled receipt */
-  const pc=db.payments.find(p=>p.mode==='CASH');if(pc){const s=stu(pc.studentId);const extra={id:uid('p'),studentId:s.id,sem:pc.sem,mode:'CASH',amount:500000,invoiceDate:addDays(today(),-9),entryAt:Date.now()-9*864e5,paidAt:Date.now()-9*864e5,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'CANCELLED',cancelReason:'Entered twice by mistake',cancelledAt:Date.now()-9*864e5+6e5,cancelledBy:by.name,rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:by.name,byId:by.id,dateEdits:[]};db.payments.push(extra)}
+  const pc=db.payments.find(p=>p.mode==='CASH');if(pc){const s=stu(pc.studentId);const extra={id:uid('p'),studentId:s.id,sem:pc.sem,mode:'CASH',amount:500000,invoiceDate:addDays(today(),-9),entryAt:Date.now()-9*864e5,paidAt:Date.now()-9*864e5,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'CANCELLED',cancelReason:'Entered twice by mistake',cancelledAt:Date.now()-9*864e5+6e5,cancelledBy:by.name,rc:pad(db.college.nextReceipt++,4),depositId:'',by:by.name,byId:by.id,dateEdits:[]};db.payments.push(extra)}
   db.payments.forEach(p=>{if(p.mode==='UPI'){p.upiRef='UTR'+String(400000000000+Math.floor(rnd()*9e10));p.providerTxnId='pay_'+Math.floor(rnd()*1e12).toString(36)}});
+  /* change 14 (sample only): the newest UPI payment was paid from the student portal and waits for the office to confirm it and add the invoice no. */
+  {const up=db.payments.filter(p=>p.mode==='UPI'&&p.status==='SUCCESS').sort((a,b)=>b.entryAt-a.entryAt)[0];if(up){up.rc='';up.needsRc=true;up.by='UPI · student portal'}}
   /* an older deposit so the report shows both deposited and pending money */
   const old=db.payments.filter(p=>p.status==='SUCCESS'&&p.mode==='CASH'&&payToBank(p)>0&&diffDays(today(),p.invoiceDate)>40);
   if(old.length){const dp={id:uid('d'),type:'CASH',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,payToBank),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}
