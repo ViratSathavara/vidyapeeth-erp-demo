@@ -34,7 +34,7 @@ function rcptInfo(p,studentCopy){
   if(!studentCopy){
     if(p.mode==='CHEQUE'&&(p.bank||p.chequeDate))notes.push(`Cheque${p.chequeNo?' No. '+p.chequeNo:''}${p.bank?', '+p.bank:''}${p.chequeDate?', dated '+fmtD(p.chequeDate):''}.`);
     if(p.mode==='UPI'&&p.upiRef)notes.push('UPI reference '+p.upiRef+(p.paidAt&&!p.imported?', paid '+fmtT(p.paidAt):'')+'.');
-    if(p.mode==='EXPENSE'&&!(p.expenseItems||[]).length&&p.reason&&!(p.note||'').includes(p.reason))notes.push('Used for (expense): '+p.reason);
+    if(payExp(p)||payCih(p))notes.push(`Cash split: expense Rs. ${amt2(payExp(p))} · cash in hand Rs. ${amt2(payCih(p))} · to bank Rs. ${amt2(payToBank(p))}.`);
     if(p.note)notes.push('Office note: '+p.note);
     notes.push(`Entered by ${p.by||'-'} on ${fmtT(p.entryAt)}.`)}
   if((p.dateEdits||[]).length)notes.push('Invoice date changed: '+p.dateEdits.map(x=>`${fmtD(x.from)} → ${fmtD(x.to)} (${x.by})`).join('; ')+'.');
@@ -86,7 +86,7 @@ function receiptPdf(p,studentCopy){if(studentCopy===undefined)studentCopy=isStud
     /* notes */
     let ny=Math.max(646.2,y+50);g.text(L,ny,'Notes',{size:9,bold:true,color:INK});ny+=16.3;
     const notes=I.notes.slice();
-    if(!studentCopy&&p.mode==='EXPENSE'&&(p.expenseItems||[]).length)notes.splice(notes.length-1,0,'Expense details: '+p.expenseItems.map(x=>`${x.reason} Rs. ${amt2(x.amount)}${x.doc?' (bill attached)':''}`).join('; ')+'.');
+    if(!studentCopy&&(p.expenseItems||[]).length)notes.splice(notes.length-1,0,'Expense details: '+p.expenseItems.map(x=>`${x.reason} Rs. ${amt2(x.amount)}${x.doc?' (bill attached)':''}`).join('; ')+'.');
     notes.forEach(t=>{if(ny>782)return;g.rect(L+0.5,ny-4.2,2.6,2.6,MUT);ny=g.wrap(L+10.4,ny,t,W-10.4,{size:8.5,color:MUT,lead:4.5})});
     /* signature and footer */
     const sy=Math.max(711.5,ny+16);

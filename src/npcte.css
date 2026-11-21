@@ -417,3 +417,23 @@ input.inl[type=date]{width:152px;padding-right:28px;background-position:right 7p
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .cbx-list{box-shadow:0 12px 32px rgba(0,0,0,.55)}}
 @media (max-width:420px){.cbx-opt{flex-wrap:wrap;gap:2px 10px}.cbx-opt small{white-space:normal}}
 .pw-kind .chk{align-items:flex-start}.pw-kind .chk span{min-width:0;overflow-wrap:anywhere}
+/* ---------- change 4: cash split on By Cash, cash in hand page (21-11-2026) ---------- */
+.splitbox{display:grid;gap:10px}
+.splitbox .chk{align-items:flex-start}.splitbox .chk span{min-width:0}
+.splitbox .expbox{padding:10px;border:1px dashed var(--line);border-radius:12px;background:var(--sunk)}
+.splitbox .cihf{max-width:280px;margin-left:30px}
+.split3{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;margin-top:4px}
+.split3 i{font-style:normal;color:var(--muted);align-self:center;font-weight:600}
+.sp3{flex:1 1 110px;min-width:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.sp3 span{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.sp3 b{font-variant-numeric:tabular-nums;font-size:15px}
+.sp3.bank{border-color:color-mix(in srgb,var(--good) 45%,var(--line));background:color-mix(in srgb,var(--good) 8%,var(--surface))}
+.sp3.bad{border-color:var(--bad);background:var(--bad-soft)}
+.split-line{display:block;font-weight:400;font-size:11.5px;line-height:1.35;white-space:normal}
+.cih-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:0 0 14px}
+.cih-card .v{font-size:26px}
+.alloc{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.alloc ul{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
+.alloc li{display:flex;justify-content:space-between;gap:10px;font-size:13.5px}.alloc li span{min-width:0;overflow-wrap:anywhere}
+.t-warn{color:var(--warn)}
+@media (max-width:520px){.split3 i{display:none}.sp3{flex:1 1 calc(50% - 6px)}.splitbox .cihf{margin-left:0;max-width:none}}

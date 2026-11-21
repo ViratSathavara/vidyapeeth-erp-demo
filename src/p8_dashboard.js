@@ -42,9 +42,9 @@ function donut(parts){/* [label,value,cls,link] */
 }
 function viewDashboard(){
   need('dashboard.view');const u=cur(),T=today(),M=T.slice(0,7);const L=live();
-  const allP=okP();const pays=allP.filter(p=>p.mode!=='EXPENSE');const today_=sum(pays.filter(p=>p.invoiceDate===T),p=>p.amount);const month=sum(pays.filter(p=>p.invoiceDate.slice(0,7)===M),p=>p.amount);
+  const allP=okP();const pays=allP;const today_=sum(pays.filter(p=>p.invoiceDate===T),p=>p.amount);const month=sum(pays.filter(p=>p.invoiceDate.slice(0,7)===M),p=>p.amount);
   const dl=L.map(s=>({s,sm:feeSum(s)})).filter(x=>x.sm.payable>0).sort((a,b)=>b.sm.payable-a.sm.payable);const outst=sum(dl,x=>x.sm.payable);
-  const expPM=allP.filter(p=>p.mode==='EXPENSE'&&p.invoiceDate.slice(0,7)===M);const expM=sum(expPM,p=>p.amount);const sch=L.filter(s=>s.funding==='SCHOLARSHIP').length;
+  /* change 4: expenses of this month = expense parts of cash fees + expenses paid from cash in hand */const expM=sum(allP.filter(p=>p.invoiceDate.slice(0,7)===M),payExp)+sum(cashbox().spends.filter(x=>x.status==='ACTIVE'&&x.date.slice(0,7)===M&&inScope(x.course)),x=>x.amount);const cihNow=sum(scopeCourses(),c=>cihBalance(c.id));const sch=L.filter(s=>s.funding==='SCHOLARSHIP').length;
   const clerk=u.role==='Clerk';const mF={from:M+'-01',to:monthEnd(M),modes:['CASH','CHEQUE','UPI'],status:'SUCCESS'};
   const k=[
     !clerk&&kpi('Students',L.length,`${L.filter(s=>s.course==='BED').length} B.Ed · ${L.filter(s=>s.course==='MED').length} M.Ed`,'students',null,{status:'ACTIVE'}),
@@ -52,11 +52,11 @@ function viewDashboard(){
     kpi('Collected this month',inr(month),MON[+M.slice(5)-1]+' '+M.slice(0,4),'audit','tx',mF),
     kpi('Total outstanding',inr(outst),dl.length+' students · '+dl.filter(x=>x.sm.overdue).length+' overdue','fees','dues',{},'warn'),
     !clerk&&kpi('Scholarship students',sch,'SC / ST · by scholarship','students',null,{fund:'SCHOLARSHIP',status:'ACTIVE'}),
-    kpi('Fees used as expense',inr(expM),expPM.length+(expPM.length===1?' receipt':' receipts')+' this month','audit','tx',{from:M+'-01',to:monthEnd(M),modes:['EXPENSE'],status:'SUCCESS'})].filter(Boolean);
+    can('cash.view')?kpi('Cash in hand',inr(cihNow),'Expenses this month '+inr(expM),'cash','lots',null):kpi('Expenses this month',inr(expM),'from cash fees and cash in hand','audit','tx',{from:M+'-01',to:monthEnd(M),split:'exp',status:'SUCCESS'})].filter(Boolean);
   const keys=monthKeys(12);const vals=keys.map(m=>sum(pays.filter(p=>p.invoiceDate.slice(0,7)===m),p=>p.amount));
   const yFrom=keys[0]+'-01';const inY=allP.filter(p=>p.invoiceDate>=yFrom);
   const modeParts=[['Cash',sum(inY.filter(p=>p.mode==='CASH'),p=>p.amount),'d-cash',{to:'audit',sub:'tx',f:{from:yFrom,modes:['CASH']}}],['Cheque',sum(inY.filter(p=>p.mode==='CHEQUE'),p=>p.amount),'d-cheque',{to:'audit',sub:'tx',f:{from:yFrom,modes:['CHEQUE']}}],
-    ['UPI',sum(inY.filter(p=>p.mode==='UPI'),p=>p.amount),'d-upi',{to:'audit',sub:'tx',f:{from:yFrom,modes:['UPI']}}],['Expense',sum(inY.filter(p=>p.mode==='EXPENSE'),p=>p.amount),'d-exp',{to:'audit',sub:'tx',f:{from:yFrom,modes:['EXPENSE']}}]];
+    ['UPI',sum(inY.filter(p=>p.mode==='UPI'),p=>p.amount),'d-upi',{to:'audit',sub:'tx',f:{from:yFrom,modes:['UPI']}}]];
   const catBars=CATS.map(c=>[c,L.filter(s=>s.category===c).length,'cat-'+c,{to:'students',f:{cat:c,status:'ACTIVE'}}]);
   const fundBars=[['By Cash',L.filter(s=>s.funding==='CASH').length,'c-cash',{to:'students',f:{fund:'CASH',status:'ACTIVE'}}],['By Scholarship',sch,'c-sch',{to:'students',f:{fund:'SCHOLARSHIP',status:'ACTIVE'}}]];
   const hr=+new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hour:'2-digit',hour12:false}).format(Date.now());const greet=hr<12?'Good morning':hr<17?'Good afternoon':'Good evening';

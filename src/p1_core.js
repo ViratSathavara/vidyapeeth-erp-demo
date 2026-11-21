@@ -52,7 +52,7 @@ function save(){if(typeof evMerge==='function')evMerge();const ok=lsSet(LS_KEY,J
 function load(){const raw=lsGet(LS_KEY);if(raw){try{db=JSON.parse(raw);if(db&&db.ver===DB_VER){migrate();return}}catch(e){}}seed();save()}
 function migrate(){
   const s=db.settings;s.flags=Object.assign({fundingAllCategories:false,lateFee:false},s.flags||{});delete s.flags.expenseReducesDue;delete s.expenseCats;
-  if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no separate expense ledger: an expense is a fee taken By Expense */
+  if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no old separate expense ledger: expenses are the expense part of a cash fee, or paid from cash in hand (change 4) */
   {const a=(db.users||[]).find(u=>u.id==='u_admin');if(a&&a.email==='admin@npcte.org')a.email='viratsathavara@gmail.com'} /* Super Admin = Virat */
   if(!db.enquiries)db.enquiries=[];if(!Array.isArray(db.events))db.events=[];
   if(!db.college.rcpt&&typeof RCPT_DEFAULT==='function')db.college.rcpt=RCPT_DEFAULT();
@@ -63,6 +63,11 @@ function migrate(){
   if(!db.mig.stuPw){db.mig.stuPw=1;const p=db.roles.Principal;if(p&&!p.includes('students.password'))p.push('students.password');db.users.forEach(u=>{if(u.role!=='Student')return;u.mustChange=false;const s=stu(u.studentId);if(s&&u.password==='student123')u.password=studentPwOf(s)})} /* only the old demo seed password moves to the rule; emailed ones stay */
   /* change 2: admission references are saved records with an id */
   if(!Array.isArray(db.refs))syncRefs();
+  /* change 4 (21-11-2026): no "By Expense" mode any more. An old Expense receipt becomes a Cash receipt whose whole amount is the expense part. */
+  if(!db.mig.cash){db.mig.cash=1;
+    db.payments.forEach(p=>{if(p.mode!=='EXPENSE')return;p.mode='CASH';p.wasExpenseMode=true;if(!(p.expenseItems||[]).length)p.expenseItems=[{amount:p.amount,reason:p.reason||'College expense',doc:null}]});
+    STAFF_ROLES.forEach(r=>{const l=db.roles[r]=db.roles[r]||[];['cash.view','cash.spend','cash.deposit'].forEach(k=>{if(!l.includes(k))l.push(k)})})}
+  cashbox();
 }
 const NAME_MAX=80;
 const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)throw new Error(`${label} is too long (${v.length} characters; the limit is ${max}).`);return v};
@@ -72,7 +77,8 @@ const PERMS=[
  ['dashboard.view','See the dashboard'],
  ['students.view','View students'],['students.edit','Add and edit students'],['students.password','Reset student passwords and resend login details'],
  ['fees.view','Open Fee Collection'],['fees.collect','Collect payments (Cash, Cheque, UPI)'],['fees.cancel','Cancel a receipt (with reason)'],
- ['fees.editdate','Edit invoice date of Cash / Cheque / Expense'],['expenses.manage','Collect fee By Expense'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
+ ['fees.editdate','Edit invoice date of Cash / Cheque'],['expenses.manage','Split a cash fee: expense now / cash in hand'],
+ ['cash.view','See cash in hand'],['cash.spend','Add expenses from cash in hand'],['cash.deposit','Deposit cash in hand to the bank'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
  ['audit.view','Transactions audit and exports'],['audit.deposit','Mark cash / cheque as deposited'],['activity.view','Activity log (every action)'],
  ['notices.post','Post notices and fee reminders'],['enquiries.view','Admission enquiries'],
  ['settings.manage','College settings'],['roles.manage','Roles and permissions']];
@@ -81,7 +87,7 @@ const STAFF_ROLES=['Principal','Clerk'];
 const ALL_STAFF_PERMS=PERMS.map(p=>p[0]);
 const DEFAULT_ROLES=()=>({
  'Principal':ALL_STAFF_PERMS.slice(),
- 'Clerk':['dashboard.view','students.view','students.edit','fees.view','fees.collect','fees.cancel','fees.editdate','expenses.manage','audit.view','audit.deposit','notices.post','enquiries.view']});
+ 'Clerk':['dashboard.view','students.view','students.edit','fees.view','fees.collect','fees.cancel','fees.editdate','expenses.manage','cash.view','cash.spend','cash.deposit','audit.view','audit.deposit','notices.post','enquiries.view']});
 const cur=()=>db&&db.users.find(u=>u.id===sesGet()&&u.active);
 /* hierarchy: Super Admin > Principal > Clerk > Student. A lower role never gets a higher role's settings or sees its logs. */
 const ROLE_RANK={'Super Admin':3,'Principal':2,'Clerk':1,'Student':0};
@@ -160,8 +166,33 @@ function feeSum(s){
   const cur_=sems.filter(x=>x.started);
   return{sems,total:sum(sems,x=>x.amount),paid:sum(sems,x=>x.paid),payable:s.status==='ACTIVE'?sum(cur_,x=>x.due):0,upcoming:sum(sems.filter(x=>!x.started),x=>x.due),overdue:cur_.some(x=>x.overdue)};
 }
+/* ---------- change 4: a cash fee can be split ----------
+   Fee received in cash = expense now (spent at once, with bills) + cash in hand (kept in the college) + the rest, which goes to the bank.
+   The student's fee always counts in full; the split is office bookkeeping only. */
+const payExp=p=>p.mode==='CASH'?sum(p.expenseItems||[],x=>x.amount):0;
+const payCih=p=>p.mode==='CASH'?(p.cih||0):0;
+const payToBank=p=>p.mode==='CASH'||p.mode==='CHEQUE'?p.amount-payExp(p)-payCih(p):0; /* what the office deposits (UPI reaches the bank through the gateway) */
+/* ---------- cash in hand: one pool per course. In = cash-in-hand parts of cash receipts; out = expenses (taken from the oldest
+   receipt first, so every rupee stays linked to a student) and deposits to the bank in the student's name. ---------- */
+function cashbox(){if(!db.cashbox)db.cashbox={spends:[],deposits:[]};return db.cashbox}
+const cihUsed=p=>sum(cashbox().spends.filter(x=>x.status==='ACTIVE'),x=>sum(x.alloc.filter(a=>a.pid===p.id),a=>a.amount));
+const cihDeposited=p=>sum(cashbox().deposits,d=>sum(d.lines.filter(a=>a.pid===p.id),a=>a.amount));
+const cihLeft=p=>p.status==='SUCCESS'?Math.max(0,payCih(p)-cihUsed(p)-cihDeposited(p)):0;
+const lotOrder=(a,b)=>a.invoiceDate<b.invoiceDate?-1:a.invoiceDate>b.invoiceDate?1:(a.entryAt||0)-(b.entryAt||0);
+/* cash receipts with a cash-in-hand part (oldest first), of one course, received on or before a date */
+const cihLots=(cid,onDate)=>db.payments.filter(p=>p.status==='SUCCESS'&&payCih(p)>0&&(!cid||payCourse(p)===cid)&&(!onDate||p.invoiceDate<=onDate)).sort(lotOrder);
+const cihBalance=(cid,onDate)=>sum(cihLots(cid,onDate),cihLeft);
+/* FIFO: an expense uses the oldest student money first; it cannot use money that came in after the expense date */
+function cihAllocate(cid,date,amount){
+  const l=cihLots(cid,date).filter(p=>cihLeft(p)>0);const avail=sum(l,cihLeft);
+  if(amount>avail)throw new Error(`Cash in hand of ${(course(cid)||{}).name||cid} on ${fmtD(date)} is ${inr(avail)}, less than ${inr(amount)}.`);
+  let rest=amount;const out=[];for(const p of l){if(!rest)break;const t=Math.min(rest,cihLeft(p));out.push({pid:p.id,amount:t});rest-=t}return out;
+}
+/* EXP-0001 for expenses from cash in hand, DEP-0001 for its bank deposits */
+function nextCashRef(k){const c=db.counters;const key='cash'+k;c[key]=(c[key]||0)+1;return k+'-'+pad(c[key],4)}
+const cihLocked=p=>payCih(p)>0&&(cihUsed(p)>0||cihDeposited(p)>0);
 /* invoice date rules (spec §5.2)
-   CASH / CHEQUE / EXPENSE -> the date the user enters (default today, editable later)
+   CASH / CHEQUE -> the date the user enters (default today, editable later)
    UPI -> payment date in India + 1 day, never editable */
 const upiInvoiceDate=paidAt=>addDays(istDate(paidAt),1);
 function nextReceiptNo(){const c=db.college;const n=c.nextReceipt++;return`${c.receiptPrefix}${pad(n,4)}`}
@@ -184,12 +215,16 @@ function recordPayment(s,o){
   const entryAt=Date.now();
   const invoiceDate=o.mode==='UPI'?upiInvoiceDate(o.paidAt||entryAt):o.invoiceDate;
   if(!validIso(invoiceDate))throw new Error('Choose a valid invoice date');
+  if(o.mode!=='CASH'&&((o.expenseItems||[]).length||o.cih))throw new Error('Expense and cash in hand are only for cash');
+  if(sum(o.expenseItems||[],x=>x.amount)+(o.cih||0)>o.amount)throw new Error(`Expense + cash in hand is more than the fee amount (${inr(o.amount)})`);
   const u=cur();
   const p={id:uid('p'),studentId:s.id,sem:o.sem,mode:o.mode,amount:o.amount,invoiceDate,entryAt,paidAt:o.paidAt||entryAt,
     chequeNo:o.chequeNo||'',bank:o.bank||'',chequeDate:o.chequeDate||'',upiRef:o.upiRef||'',providerTxnId:o.providerTxnId||'',note:o.note||'',
     batch:o.batch||defaultBatch(s),reason:o.reason||'',category:o.category||'',status:'SUCCESS',cancelReason:'',rc:nextReceiptNo(),depositId:'',by:u?u.name:'Payment gateway',byId:u?u.id:'',dateEdits:[]};
+  if(o.mode==='CASH'){if((o.expenseItems||[]).length)p.expenseItems=o.expenseItems;if(o.cih>0)p.cih=o.cih}
   db.payments.push(p);
-  log('Payment recorded','Payment',p.rc,null,{student:s.enrol,batch:p.batch,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate)});
+  log('Payment recorded','Payment',p.rc,null,{student:s.enrol,batch:p.batch,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate),
+    ...(payExp(p)?{expense:inr(payExp(p))}:{}),...(payCih(p)?{cashInHand:inr(payCih(p))}:{}),...(payExp(p)||payCih(p)?{toBank:inr(payToBank(p))}:{})});
   return p;
 }
 function cancelPayment(p,reason){
@@ -197,6 +232,7 @@ function cancelPayment(p,reason){
   reason=capText(reason,'Reason',200);if(reason.length<4)throw new Error('Write the reason for cancelling (at least 4 characters)');
   if(p.status!=='SUCCESS')throw new Error('Only a successful receipt can be cancelled');
   if(p.depositId)throw new Error('This money is already marked as deposited. Undo the deposit first.');
+  if(cihLocked(p))throw new Error('The cash in hand of this receipt is already used for an expense or deposited. Cancel that expense or undo that deposit first.');
   p.status='CANCELLED';p.cancelReason=reason;p.cancelledAt=Date.now();p.cancelledBy=cur().name;
   log('Receipt cancelled','Payment',p.rc,{status:'SUCCESS'},{status:'CANCELLED',reason});
 }
@@ -205,6 +241,7 @@ function editInvoiceDate(kind,rec,iso){
   if(!validIso(iso))throw new Error('Choose a valid date');
   if(kind==='p'&&rec.mode==='UPI')throw new Error('UPI invoice date is fixed (payment date + 1 day)');
   if(kind==='p'&&rec.status!=='SUCCESS')throw new Error('A cancelled receipt cannot be changed');
+  if(kind==='p'&&cihLocked(rec))throw new Error('The cash in hand of this receipt is already used or deposited, so its date stays as it is');
   const field=kind==='p'?'invoiceDate':'date';const old=rec[field];if(old===iso)return false;
   rec[field]=iso;(rec.dateEdits=rec.dateEdits||[]).push({at:Date.now(),from:old,to:iso,by:cur().name});
   log('Invoice date changed',kind==='p'?'Payment':'Expense',kind==='p'?rec.rc:rec.ref,{date:fmtD(old)},{date:fmtD(iso)},'Receipt regenerated');
@@ -289,13 +326,14 @@ function seedReal(R){
   R.payments.forEach(x=>{const s=list[x.s];const ts=Date.parse(x.date+'T11:00:00+05:30');
     const p={id:uid('p'),studentId:s.id,sem:x.sem,mode:x.mode,amount:x.amt,invoiceDate:x.date,entryAt:ts,paidAt:ts,chequeNo:x.chq||'',bank:'',chequeDate:x.mode==='CHEQUE'?x.date:'',upiRef:'',providerTxnId:'',note:x.note||'',
       status:'SUCCESS',cancelReason:'',rc:x.rc,depositId:'',by:by?by.name:'Accounts Clerk',byId:by?by.id:'',dateEdits:[],batch:x.batch,reason:x.reason||'',category:'',imported:true};
-    if(x.mode==='EXPENSE'){p.expenseItems=expItems(x);p.reason=p.expenseItems.map(i=>i.reason).join('; ').slice(0,300)}
+    /* change 4: a register line "BY EXP" is a cash fee that was spent at once -> Cash receipt, whole amount as the expense part */
+    if(x.mode==='EXPENSE'){p.mode='CASH';p.wasExpenseMode=true;p.expenseItems=expItems(x);p.reason=p.expenseItems.map(i=>i.reason).join('; ').slice(0,300)}
     db.payments.push(p)});
   /* bank deposits: one per month up to two months ago (cash + cheque), made on the 3rd of the next month */
   const lastMonth=addDays(today().slice(0,7)+'-01',-1).slice(0,7);const months={};
-  db.payments.forEach(p=>{if((p.mode==='CASH'||p.mode==='CHEQUE')&&p.invoiceDate.slice(0,7)<lastMonth)(months[p.invoiceDate.slice(0,7)]=months[p.invoiceDate.slice(0,7)]||[]).push(p)});
+  db.payments.forEach(p=>{if(payToBank(p)>0&&p.invoiceDate.slice(0,7)<lastMonth)(months[p.invoiceDate.slice(0,7)]=months[p.invoiceDate.slice(0,7)]||[]).push(p)});
   Object.keys(months).sort().forEach((m,i)=>{const l=months[m];const [y,mo]=m.split('-').map(Number);const nx=mo===12?`${y+1}-01`:`${y}-${pad(mo+1)}`;
-    const on=nx+'-03';const dp={id:uid('d'),type:[...new Set(l.map(p=>p.mode))].join('+'),periodFrom:m+'-01',periodTo:addDays(nx+'-01',-1),total:sum(l,p=>p.amount),depositedOn:on,
+    const on=nx+'-03';const dp={id:uid('d'),type:[...new Set(l.map(p=>p.mode))].join('+'),periodFrom:m+'-01',periodTo:addDays(nx+'-01',-1),total:sum(l,payToBank),depositedOn:on,
       bankRef:`SBI slip ${55800+i*17}`,by:by?by.name:'Accounts Clerk',at:Date.parse(on+'T15:00:00+05:30'),count:l.length};
     db.deposits.push(dp);l.forEach(p=>p.depositId=dp.id)});
 }
@@ -319,7 +357,7 @@ function seed(){
       {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
     students:[],refs:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
-    counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1}};
+    cashbox:{spends:[],deposits:[]},counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1,cash:1}};
   /* real college data (fee registers 2026-27), available only after the password gate has decrypted it */
   if(typeof REAL!=='undefined'&&REAL){seedReal(REAL)}else{
   /* sample names only (demo) */
@@ -341,18 +379,20 @@ function seed(){
   S.forEach((s,i)=>{
     const f1=semFee(s,1).amount;
     if(i%5===0)mk(s,1,'UPI',f1,2+i);
-    else if(i%5===1)mk(s,1,'CASH',f1,3+i,{back:i%3});
+    else if(i%5===1)mk(s,1,'CASH',f1,3+i,{back:i%3,f:i%2?{cih:500000}:{}}); /* sample: some cash fees keep ₹5,000 as cash in hand */
     else if(i%5===2)mk(s,1,'CHEQUE',Math.round(f1/2),4+i,{f:{chequeNo:String(100200+i),bank:['SBI','Bank of Baroda','Mehsana Urban Co-op Bank'][i%3],chequeDate:addDays(today(),-6-i)}});
     else if(i%5===3)mk(s,1,'CASH',1500000,1+i);
-    else if(i%10===4)mk(s,1,'EXPENSE',1000000,5+i,{f:{reason:['Exam form fees paid to the university','Practice-teaching school material'][i%2]}});
+    else if(i%10===4){const r=['Exam form fees paid to the university','Practice-teaching school material'][i%2];mk(s,1,'CASH',1000000,5+i,{f:{reason:r,expenseItems:[{amount:1000000,reason:r,doc:null}]}})}
     if(s.sem===3){mk(s,2,i%2?'UPI':'CASH',semFee(s,2).amount,60+i);const r1=semSummary(s,1).due;if(r1>0)mk(s,1,'CASH',r1,200+i)}
   });
   /* one cancelled receipt */
   const pc=db.payments.find(p=>p.mode==='CASH');if(pc){const s=stu(pc.studentId);const extra={id:uid('p'),studentId:s.id,sem:pc.sem,mode:'CASH',amount:500000,invoiceDate:addDays(today(),-9),entryAt:Date.now()-9*864e5,paidAt:Date.now()-9*864e5,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'CANCELLED',cancelReason:'Entered twice by mistake',cancelledAt:Date.now()-9*864e5+6e5,cancelledBy:by.name,rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:by.name,byId:by.id,dateEdits:[]};db.payments.push(extra)}
   db.payments.forEach(p=>{if(p.mode==='UPI'){p.upiRef='UTR'+String(400000000000+Math.floor(rnd()*9e10));p.providerTxnId='pay_'+Math.floor(rnd()*1e12).toString(36)}});
   /* an older deposit so the report shows both deposited and pending money */
-  const old=db.payments.filter(p=>p.status==='SUCCESS'&&(p.mode==='CASH'||p.mode==='CHEQUE')&&diffDays(today(),p.invoiceDate)>40);
-  if(old.length){const dp={id:uid('d'),type:'CASH+CHEQUE',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,p=>p.amount),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}
+  const old=db.payments.filter(p=>p.status==='SUCCESS'&&payToBank(p)>0&&diffDays(today(),p.invoiceDate)>40);
+  /* sample: one expense paid from cash in hand two days ago (taken from the oldest receipts first) */
+  db.courses.forEach(c=>{const d=addDays(today(),-2);const amt=Math.min(300000,cihBalance(c.id,d));if(amt>0)cashbox().spends.push({id:uid('x'),ref:nextCashRef('EXP'),course:c.id,date:d,items:[{amount:amt,reason:'Stationery and printing for the office',doc:null}],amount:amt,alloc:cihAllocate(c.id,d,amt),by:by.name,byId:by.id,at:Date.now()-2*864e5,status:'ACTIVE'})});
+  if(old.length){const dp={id:uid('d'),type:'CASH+CHEQUE',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,payToBank),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}
   }
   /* notices */
   db.notices=[

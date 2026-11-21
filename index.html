@@ -1018,7 +1018,27 @@ input.inl[type=date]{width:152px;padding-right:28px;background-position:right 7p
 :root[data-theme="dark"] .cbx-list{box-shadow:0 12px 32px rgba(0,0,0,.55)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .cbx-list{box-shadow:0 12px 32px rgba(0,0,0,.55)}}
 @media (max-width:420px){.cbx-opt{flex-wrap:wrap;gap:2px 10px}.cbx-opt small{white-space:normal}}
-.pw-kind .chk{align-items:flex-start}.pw-kind .chk span{min-width:0;overflow-wrap:anywhere}</style>
+.pw-kind .chk{align-items:flex-start}.pw-kind .chk span{min-width:0;overflow-wrap:anywhere}
+/* ---------- change 4: cash split on By Cash, cash in hand page (21-11-2026) ---------- */
+.splitbox{display:grid;gap:10px}
+.splitbox .chk{align-items:flex-start}.splitbox .chk span{min-width:0}
+.splitbox .expbox{padding:10px;border:1px dashed var(--line);border-radius:12px;background:var(--sunk)}
+.splitbox .cihf{max-width:280px;margin-left:30px}
+.split3{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;margin-top:4px}
+.split3 i{font-style:normal;color:var(--muted);align-self:center;font-weight:600}
+.sp3{flex:1 1 110px;min-width:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.sp3 span{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.sp3 b{font-variant-numeric:tabular-nums;font-size:15px}
+.sp3.bank{border-color:color-mix(in srgb,var(--good) 45%,var(--line));background:color-mix(in srgb,var(--good) 8%,var(--surface))}
+.sp3.bad{border-color:var(--bad);background:var(--bad-soft)}
+.split-line{display:block;font-weight:400;font-size:11.5px;line-height:1.35;white-space:normal}
+.cih-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:0 0 14px}
+.cih-card .v{font-size:26px}
+.alloc{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.alloc ul{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
+.alloc li{display:flex;justify-content:space-between;gap:10px;font-size:13.5px}.alloc li span{min-width:0;overflow-wrap:anywhere}
+.t-warn{color:var(--warn)}
+@media (max-width:520px){.split3 i{display:none}.sp3{flex:1 1 calc(50% - 6px)}.splitbox .cihf{margin-left:0;max-width:none}}</style>
 <div id="root"></div><div id="layer"></div><div id="dlg"></div>
 <script>
 /* Real NPCTE fee-register data (B.Ed + M.Ed 2026-27), ENCRYPTED. Built by tools/build_vault.py.
@@ -1131,7 +1151,7 @@ function save(){if(typeof evMerge==='function')evMerge();const ok=lsSet(LS_KEY,J
 function load(){const raw=lsGet(LS_KEY);if(raw){try{db=JSON.parse(raw);if(db&&db.ver===DB_VER){migrate();return}}catch(e){}}seed();save()}
 function migrate(){
   const s=db.settings;s.flags=Object.assign({fundingAllCategories:false,lateFee:false},s.flags||{});delete s.flags.expenseReducesDue;delete s.expenseCats;
-  if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no separate expense ledger: an expense is a fee taken By Expense */
+  if(!db.outbox)db.outbox=[];if(!db.notifs)db.notifs=[];if(!db.deposits)db.deposits=[];if(!db.upiOrders)db.upiOrders=[];delete db.expenses; /* no old separate expense ledger: expenses are the expense part of a cash fee, or paid from cash in hand (change 4) */
   {const a=(db.users||[]).find(u=>u.id==='u_admin');if(a&&a.email==='admin@npcte.org')a.email='viratsathavara@gmail.com'} /* Super Admin = Virat */
   if(!db.enquiries)db.enquiries=[];if(!Array.isArray(db.events))db.events=[];
   if(!db.college.rcpt&&typeof RCPT_DEFAULT==='function')db.college.rcpt=RCPT_DEFAULT();
@@ -1142,6 +1162,11 @@ function migrate(){
   if(!db.mig.stuPw){db.mig.stuPw=1;const p=db.roles.Principal;if(p&&!p.includes('students.password'))p.push('students.password');db.users.forEach(u=>{if(u.role!=='Student')return;u.mustChange=false;const s=stu(u.studentId);if(s&&u.password==='student123')u.password=studentPwOf(s)})} /* only the old demo seed password moves to the rule; emailed ones stay */
   /* change 2: admission references are saved records with an id */
   if(!Array.isArray(db.refs))syncRefs();
+  /* change 4 (21-11-2026): no "By Expense" mode any more. An old Expense receipt becomes a Cash receipt whose whole amount is the expense part. */
+  if(!db.mig.cash){db.mig.cash=1;
+    db.payments.forEach(p=>{if(p.mode!=='EXPENSE')return;p.mode='CASH';p.wasExpenseMode=true;if(!(p.expenseItems||[]).length)p.expenseItems=[{amount:p.amount,reason:p.reason||'College expense',doc:null}]});
+    STAFF_ROLES.forEach(r=>{const l=db.roles[r]=db.roles[r]||[];['cash.view','cash.spend','cash.deposit'].forEach(k=>{if(!l.includes(k))l.push(k)})})}
+  cashbox();
 }
 const NAME_MAX=80;
 const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)throw new Error(`${label} is too long (${v.length} characters; the limit is ${max}).`);return v};
@@ -1151,7 +1176,8 @@ const PERMS=[
  ['dashboard.view','See the dashboard'],
  ['students.view','View students'],['students.edit','Add and edit students'],['students.password','Reset student passwords and resend login details'],
  ['fees.view','Open Fee Collection'],['fees.collect','Collect payments (Cash, Cheque, UPI)'],['fees.cancel','Cancel a receipt (with reason)'],
- ['fees.editdate','Edit invoice date of Cash / Cheque / Expense'],['expenses.manage','Collect fee By Expense'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
+ ['fees.editdate','Edit invoice date of Cash / Cheque'],['expenses.manage','Split a cash fee: expense now / cash in hand'],
+ ['cash.view','See cash in hand'],['cash.spend','Add expenses from cash in hand'],['cash.deposit','Deposit cash in hand to the bank'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
  ['audit.view','Transactions audit and exports'],['audit.deposit','Mark cash / cheque as deposited'],['activity.view','Activity log (every action)'],
  ['notices.post','Post notices and fee reminders'],['enquiries.view','Admission enquiries'],
  ['settings.manage','College settings'],['roles.manage','Roles and permissions']];
@@ -1160,7 +1186,7 @@ const STAFF_ROLES=['Principal','Clerk'];
 const ALL_STAFF_PERMS=PERMS.map(p=>p[0]);
 const DEFAULT_ROLES=()=>({
  'Principal':ALL_STAFF_PERMS.slice(),
- 'Clerk':['dashboard.view','students.view','students.edit','fees.view','fees.collect','fees.cancel','fees.editdate','expenses.manage','audit.view','audit.deposit','notices.post','enquiries.view']});
+ 'Clerk':['dashboard.view','students.view','students.edit','fees.view','fees.collect','fees.cancel','fees.editdate','expenses.manage','cash.view','cash.spend','cash.deposit','audit.view','audit.deposit','notices.post','enquiries.view']});
 const cur=()=>db&&db.users.find(u=>u.id===sesGet()&&u.active);
 /* hierarchy: Super Admin > Principal > Clerk > Student. A lower role never gets a higher role's settings or sees its logs. */
 const ROLE_RANK={'Super Admin':3,'Principal':2,'Clerk':1,'Student':0};
@@ -1239,8 +1265,33 @@ function feeSum(s){
   const cur_=sems.filter(x=>x.started);
   return{sems,total:sum(sems,x=>x.amount),paid:sum(sems,x=>x.paid),payable:s.status==='ACTIVE'?sum(cur_,x=>x.due):0,upcoming:sum(sems.filter(x=>!x.started),x=>x.due),overdue:cur_.some(x=>x.overdue)};
 }
+/* ---------- change 4: a cash fee can be split ----------
+   Fee received in cash = expense now (spent at once, with bills) + cash in hand (kept in the college) + the rest, which goes to the bank.
+   The student's fee always counts in full; the split is office bookkeeping only. */
+const payExp=p=>p.mode==='CASH'?sum(p.expenseItems||[],x=>x.amount):0;
+const payCih=p=>p.mode==='CASH'?(p.cih||0):0;
+const payToBank=p=>p.mode==='CASH'||p.mode==='CHEQUE'?p.amount-payExp(p)-payCih(p):0; /* what the office deposits (UPI reaches the bank through the gateway) */
+/* ---------- cash in hand: one pool per course. In = cash-in-hand parts of cash receipts; out = expenses (taken from the oldest
+   receipt first, so every rupee stays linked to a student) and deposits to the bank in the student's name. ---------- */
+function cashbox(){if(!db.cashbox)db.cashbox={spends:[],deposits:[]};return db.cashbox}
+const cihUsed=p=>sum(cashbox().spends.filter(x=>x.status==='ACTIVE'),x=>sum(x.alloc.filter(a=>a.pid===p.id),a=>a.amount));
+const cihDeposited=p=>sum(cashbox().deposits,d=>sum(d.lines.filter(a=>a.pid===p.id),a=>a.amount));
+const cihLeft=p=>p.status==='SUCCESS'?Math.max(0,payCih(p)-cihUsed(p)-cihDeposited(p)):0;
+const lotOrder=(a,b)=>a.invoiceDate<b.invoiceDate?-1:a.invoiceDate>b.invoiceDate?1:(a.entryAt||0)-(b.entryAt||0);
+/* cash receipts with a cash-in-hand part (oldest first), of one course, received on or before a date */
+const cihLots=(cid,onDate)=>db.payments.filter(p=>p.status==='SUCCESS'&&payCih(p)>0&&(!cid||payCourse(p)===cid)&&(!onDate||p.invoiceDate<=onDate)).sort(lotOrder);
+const cihBalance=(cid,onDate)=>sum(cihLots(cid,onDate),cihLeft);
+/* FIFO: an expense uses the oldest student money first; it cannot use money that came in after the expense date */
+function cihAllocate(cid,date,amount){
+  const l=cihLots(cid,date).filter(p=>cihLeft(p)>0);const avail=sum(l,cihLeft);
+  if(amount>avail)throw new Error(`Cash in hand of ${(course(cid)||{}).name||cid} on ${fmtD(date)} is ${inr(avail)}, less than ${inr(amount)}.`);
+  let rest=amount;const out=[];for(const p of l){if(!rest)break;const t=Math.min(rest,cihLeft(p));out.push({pid:p.id,amount:t});rest-=t}return out;
+}
+/* EXP-0001 for expenses from cash in hand, DEP-0001 for its bank deposits */
+function nextCashRef(k){const c=db.counters;const key='cash'+k;c[key]=(c[key]||0)+1;return k+'-'+pad(c[key],4)}
+const cihLocked=p=>payCih(p)>0&&(cihUsed(p)>0||cihDeposited(p)>0);
 /* invoice date rules (spec §5.2)
-   CASH / CHEQUE / EXPENSE -> the date the user enters (default today, editable later)
+   CASH / CHEQUE -> the date the user enters (default today, editable later)
    UPI -> payment date in India + 1 day, never editable */
 const upiInvoiceDate=paidAt=>addDays(istDate(paidAt),1);
 function nextReceiptNo(){const c=db.college;const n=c.nextReceipt++;return`${c.receiptPrefix}${pad(n,4)}`}
@@ -1263,12 +1314,16 @@ function recordPayment(s,o){
   const entryAt=Date.now();
   const invoiceDate=o.mode==='UPI'?upiInvoiceDate(o.paidAt||entryAt):o.invoiceDate;
   if(!validIso(invoiceDate))throw new Error('Choose a valid invoice date');
+  if(o.mode!=='CASH'&&((o.expenseItems||[]).length||o.cih))throw new Error('Expense and cash in hand are only for cash');
+  if(sum(o.expenseItems||[],x=>x.amount)+(o.cih||0)>o.amount)throw new Error(`Expense + cash in hand is more than the fee amount (${inr(o.amount)})`);
   const u=cur();
   const p={id:uid('p'),studentId:s.id,sem:o.sem,mode:o.mode,amount:o.amount,invoiceDate,entryAt,paidAt:o.paidAt||entryAt,
     chequeNo:o.chequeNo||'',bank:o.bank||'',chequeDate:o.chequeDate||'',upiRef:o.upiRef||'',providerTxnId:o.providerTxnId||'',note:o.note||'',
     batch:o.batch||defaultBatch(s),reason:o.reason||'',category:o.category||'',status:'SUCCESS',cancelReason:'',rc:nextReceiptNo(),depositId:'',by:u?u.name:'Payment gateway',byId:u?u.id:'',dateEdits:[]};
+  if(o.mode==='CASH'){if((o.expenseItems||[]).length)p.expenseItems=o.expenseItems;if(o.cih>0)p.cih=o.cih}
   db.payments.push(p);
-  log('Payment recorded','Payment',p.rc,null,{student:s.enrol,batch:p.batch,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate)});
+  log('Payment recorded','Payment',p.rc,null,{student:s.enrol,batch:p.batch,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate),
+    ...(payExp(p)?{expense:inr(payExp(p))}:{}),...(payCih(p)?{cashInHand:inr(payCih(p))}:{}),...(payExp(p)||payCih(p)?{toBank:inr(payToBank(p))}:{})});
   return p;
 }
 function cancelPayment(p,reason){
@@ -1276,6 +1331,7 @@ function cancelPayment(p,reason){
   reason=capText(reason,'Reason',200);if(reason.length<4)throw new Error('Write the reason for cancelling (at least 4 characters)');
   if(p.status!=='SUCCESS')throw new Error('Only a successful receipt can be cancelled');
   if(p.depositId)throw new Error('This money is already marked as deposited. Undo the deposit first.');
+  if(cihLocked(p))throw new Error('The cash in hand of this receipt is already used for an expense or deposited. Cancel that expense or undo that deposit first.');
   p.status='CANCELLED';p.cancelReason=reason;p.cancelledAt=Date.now();p.cancelledBy=cur().name;
   log('Receipt cancelled','Payment',p.rc,{status:'SUCCESS'},{status:'CANCELLED',reason});
 }
@@ -1284,6 +1340,7 @@ function editInvoiceDate(kind,rec,iso){
   if(!validIso(iso))throw new Error('Choose a valid date');
   if(kind==='p'&&rec.mode==='UPI')throw new Error('UPI invoice date is fixed (payment date + 1 day)');
   if(kind==='p'&&rec.status!=='SUCCESS')throw new Error('A cancelled receipt cannot be changed');
+  if(kind==='p'&&cihLocked(rec))throw new Error('The cash in hand of this receipt is already used or deposited, so its date stays as it is');
   const field=kind==='p'?'invoiceDate':'date';const old=rec[field];if(old===iso)return false;
   rec[field]=iso;(rec.dateEdits=rec.dateEdits||[]).push({at:Date.now(),from:old,to:iso,by:cur().name});
   log('Invoice date changed',kind==='p'?'Payment':'Expense',kind==='p'?rec.rc:rec.ref,{date:fmtD(old)},{date:fmtD(iso)},'Receipt regenerated');
@@ -1368,13 +1425,14 @@ function seedReal(R){
   R.payments.forEach(x=>{const s=list[x.s];const ts=Date.parse(x.date+'T11:00:00+05:30');
     const p={id:uid('p'),studentId:s.id,sem:x.sem,mode:x.mode,amount:x.amt,invoiceDate:x.date,entryAt:ts,paidAt:ts,chequeNo:x.chq||'',bank:'',chequeDate:x.mode==='CHEQUE'?x.date:'',upiRef:'',providerTxnId:'',note:x.note||'',
       status:'SUCCESS',cancelReason:'',rc:x.rc,depositId:'',by:by?by.name:'Accounts Clerk',byId:by?by.id:'',dateEdits:[],batch:x.batch,reason:x.reason||'',category:'',imported:true};
-    if(x.mode==='EXPENSE'){p.expenseItems=expItems(x);p.reason=p.expenseItems.map(i=>i.reason).join('; ').slice(0,300)}
+    /* change 4: a register line "BY EXP" is a cash fee that was spent at once -> Cash receipt, whole amount as the expense part */
+    if(x.mode==='EXPENSE'){p.mode='CASH';p.wasExpenseMode=true;p.expenseItems=expItems(x);p.reason=p.expenseItems.map(i=>i.reason).join('; ').slice(0,300)}
     db.payments.push(p)});
   /* bank deposits: one per month up to two months ago (cash + cheque), made on the 3rd of the next month */
   const lastMonth=addDays(today().slice(0,7)+'-01',-1).slice(0,7);const months={};
-  db.payments.forEach(p=>{if((p.mode==='CASH'||p.mode==='CHEQUE')&&p.invoiceDate.slice(0,7)<lastMonth)(months[p.invoiceDate.slice(0,7)]=months[p.invoiceDate.slice(0,7)]||[]).push(p)});
+  db.payments.forEach(p=>{if(payToBank(p)>0&&p.invoiceDate.slice(0,7)<lastMonth)(months[p.invoiceDate.slice(0,7)]=months[p.invoiceDate.slice(0,7)]||[]).push(p)});
   Object.keys(months).sort().forEach((m,i)=>{const l=months[m];const [y,mo]=m.split('-').map(Number);const nx=mo===12?`${y+1}-01`:`${y}-${pad(mo+1)}`;
-    const on=nx+'-03';const dp={id:uid('d'),type:[...new Set(l.map(p=>p.mode))].join('+'),periodFrom:m+'-01',periodTo:addDays(nx+'-01',-1),total:sum(l,p=>p.amount),depositedOn:on,
+    const on=nx+'-03';const dp={id:uid('d'),type:[...new Set(l.map(p=>p.mode))].join('+'),periodFrom:m+'-01',periodTo:addDays(nx+'-01',-1),total:sum(l,payToBank),depositedOn:on,
       bankRef:`SBI slip ${55800+i*17}`,by:by?by.name:'Accounts Clerk',at:Date.parse(on+'T15:00:00+05:30'),count:l.length};
     db.deposits.push(dp);l.forEach(p=>p.depositId=dp.id)});
 }
@@ -1398,7 +1456,7 @@ function seed(){
       {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
     students:[],refs:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
-    counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1}};
+    cashbox:{spends:[],deposits:[]},counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1,cash:1}};
   /* real college data (fee registers 2026-27), available only after the password gate has decrypted it */
   if(typeof REAL!=='undefined'&&REAL){seedReal(REAL)}else{
   /* sample names only (demo) */
@@ -1420,18 +1478,20 @@ function seed(){
   S.forEach((s,i)=>{
     const f1=semFee(s,1).amount;
     if(i%5===0)mk(s,1,'UPI',f1,2+i);
-    else if(i%5===1)mk(s,1,'CASH',f1,3+i,{back:i%3});
+    else if(i%5===1)mk(s,1,'CASH',f1,3+i,{back:i%3,f:i%2?{cih:500000}:{}}); /* sample: some cash fees keep ₹5,000 as cash in hand */
     else if(i%5===2)mk(s,1,'CHEQUE',Math.round(f1/2),4+i,{f:{chequeNo:String(100200+i),bank:['SBI','Bank of Baroda','Mehsana Urban Co-op Bank'][i%3],chequeDate:addDays(today(),-6-i)}});
     else if(i%5===3)mk(s,1,'CASH',1500000,1+i);
-    else if(i%10===4)mk(s,1,'EXPENSE',1000000,5+i,{f:{reason:['Exam form fees paid to the university','Practice-teaching school material'][i%2]}});
+    else if(i%10===4){const r=['Exam form fees paid to the university','Practice-teaching school material'][i%2];mk(s,1,'CASH',1000000,5+i,{f:{reason:r,expenseItems:[{amount:1000000,reason:r,doc:null}]}})}
     if(s.sem===3){mk(s,2,i%2?'UPI':'CASH',semFee(s,2).amount,60+i);const r1=semSummary(s,1).due;if(r1>0)mk(s,1,'CASH',r1,200+i)}
   });
   /* one cancelled receipt */
   const pc=db.payments.find(p=>p.mode==='CASH');if(pc){const s=stu(pc.studentId);const extra={id:uid('p'),studentId:s.id,sem:pc.sem,mode:'CASH',amount:500000,invoiceDate:addDays(today(),-9),entryAt:Date.now()-9*864e5,paidAt:Date.now()-9*864e5,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'CANCELLED',cancelReason:'Entered twice by mistake',cancelledAt:Date.now()-9*864e5+6e5,cancelledBy:by.name,rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:by.name,byId:by.id,dateEdits:[]};db.payments.push(extra)}
   db.payments.forEach(p=>{if(p.mode==='UPI'){p.upiRef='UTR'+String(400000000000+Math.floor(rnd()*9e10));p.providerTxnId='pay_'+Math.floor(rnd()*1e12).toString(36)}});
   /* an older deposit so the report shows both deposited and pending money */
-  const old=db.payments.filter(p=>p.status==='SUCCESS'&&(p.mode==='CASH'||p.mode==='CHEQUE')&&diffDays(today(),p.invoiceDate)>40);
-  if(old.length){const dp={id:uid('d'),type:'CASH+CHEQUE',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,p=>p.amount),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}
+  const old=db.payments.filter(p=>p.status==='SUCCESS'&&payToBank(p)>0&&diffDays(today(),p.invoiceDate)>40);
+  /* sample: one expense paid from cash in hand two days ago (taken from the oldest receipts first) */
+  db.courses.forEach(c=>{const d=addDays(today(),-2);const amt=Math.min(300000,cihBalance(c.id,d));if(amt>0)cashbox().spends.push({id:uid('x'),ref:nextCashRef('EXP'),course:c.id,date:d,items:[{amount:amt,reason:'Stationery and printing for the office',doc:null}],amount:amt,alloc:cihAllocate(c.id,d,amt),by:by.name,byId:by.id,at:Date.now()-2*864e5,status:'ACTIVE'})});
+  if(old.length){const dp={id:uid('d'),type:'CASH+CHEQUE',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,payToBank),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}
   }
   /* notices */
   db.notices=[
@@ -2011,20 +2071,21 @@ ACT.resetDemo=()=>{const u=cur();if(u&&u.role!=='Super Admin')throw new Error('O
 
 /* ---------- shell ---------- */
 const ICONS={dashboard:'<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 9h8V3h-8z"/>',students:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.8.7 3 2.4 3.5 5.2"/>',
- fees:'<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M7 15h3"/>',notices:'<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
+ fees:'<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M7 15h3"/>',cash:'<path d="M4 7h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11"/><path d="M16 13.5h.01"/><path d="M20 11h-4a2 2 0 0 0 0 5h4"/>',notices:'<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
  audit:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',settings:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',
  shome:'<path d="M3 11l9-8 9 8v10H3z"/><path d="M9 21v-6h6v6"/>',sfees:'<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M7 15h3"/>',snotices:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',sprofile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4 4-6 8-6s7.2 2 8 6"/>'};
 const NAV=[
  ['dashboard','Dashboard',()=>can('dashboard.view'),()=>viewDashboard()],
  ['students','Students',()=>can('students.view'),()=>viewStudents()],
  ['fees','Fee Collection',()=>can('fees.view'),()=>viewFees()],
+ ['cash','Cash in hand',()=>can('cash.view'),()=>viewCash()],
  ['audit','Audit',()=>canAny('audit.view','activity.view'),()=>viewAudit()],
  ['notices','Notice Board',()=>can('notices.post'),()=>viewNotices()],
  ['settings','Settings',()=>canAny('settings.manage','roles.manage','fees.setup'),()=>viewSettings()]];
 const SNAV=[['shome','Home',()=>true,()=>viewStudentHome()],['sfees','Fees',()=>true,()=>viewStudentFees()],['snotices','Notices',()=>true,()=>viewStudentNotices()],['sprofile','Profile',()=>true,()=>viewStudentProfile()]];
 const isPortal=u=>isStudentUser(u);
 const navFor=u=>u.role==='Student'?SNAV:NAV.filter(n=>n[2]());
-const NAV_GROUP={dashboard:'Overview',students:'Office',fees:'Office',audit:'Office',notices:'Communication',settings:'System'};
+const NAV_GROUP={dashboard:'Overview',students:'Office',fees:'Office',cash:'Office',audit:'Office',notices:'Communication',settings:'System'};
 const badgeCount=id=>{const u=cur();if(id==='snotices'&&u&&u.role==='Student')return unreadNotices(u);return 0};
 function badgeFor(id){const n=badgeCount(id);return n?`<span class="badge" title="${n} unread">${n}</span>`:''}
 const RAIL_KEY='npcte_erp_rail';const NAV_HIDDEN=new Set();
@@ -2386,7 +2447,7 @@ function openStudent(id){
    <div class="facts">${L('Mobile',s.phone)}${L('Email',s.email)}${L('Gender',{F:'Female',M:'Male',O:'Other'}[s.gender])}${L('Date of birth',fmtD(s.dob))}${L('Category',s.category)}${L('Funding',fundLabel(s.funding)+(s.scholarshipNote?' · '+s.scholarshipNote:''))}${L('Admission year',s.admissionYear)}${L('Admission reference',s.ref)}${L('Address',s.address)}</div>
    <h3>Semester fees ${pill('Due now '+inr(sm.payable),sm.payable?(sm.overdue?'bad':'warn'):'good')}</h3>${semCards(s,{collect:true})}
    <h3>Payments and receipts</h3><div class="tablewrap"><table><thead><tr><th>Receipt</th><th>Invoice date</th><th>Sem</th><th>Mode</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>
-   ${pays.map(p=>`<tr><td class="mono">${E(p.rc)}</td><td>${fmtD(p.invoiceDate)}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}</td><td>${payPill(p.status)}</td><td><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">Receipt</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No payments yet.</td></tr>'}</tbody></table></div>
+   ${pays.map(p=>`<tr><td class="mono">${E(p.rc)}</td><td>${fmtD(p.invoiceDate)}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}${splitLine(p)}</td><td>${payPill(p.status)}</td><td><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">Receipt</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No payments yet.</td></tr>'}</tbody></table></div>
    <h3>Login</h3><div class="panel" style="padding:12px"><div class="rline"><span>Login ID</span><b class="mono">${E(u?u.username:'—')} · ${E(s.email)}</b></div>
     <div class="rline"><span>Credentials email</span><span>${mail?mailPill(mail.status)+' <small class="muted">'+E(fmtT(mail.sentAt||mail.at||mail.ts))+'</small>':pill('Not sent','warn')}</span></div>
     <div class="rline"><span>Password</span><span>${u?(u.password===studentPwOf(s)?pill('Default rule','good')+' <small class="muted">mobile 5 digits @ batch year</small>':pill('Set by the office','acc')):'—'}</span></div>
@@ -2418,9 +2479,13 @@ ACT.importGo=()=>{need('students.edit');const l=ui.importRows||[];l.forEach(v=>{
   log('Students imported','Student','',null,{count:l.length});ui.importRows=null;save();closeLayer();renderPage();toast(`${l.length} students imported. Login emails are on their way.`)};
 /* =====================================================================
    Fee Collection (spec §5): Collect fee (every student, semester-wise) · Pending dues · Receipts · Fee setup
-   Modes in one dropdown: Cash / Cheque / UPI / Expense. Only tuition fee is collected.
+   Modes in one dropdown: Cash / Cheque / UPI (change 4: "By Expense" is gone; a cash fee can keep an expense part and a
+   cash-in-hand part instead). Only tuition fee is collected.
    ===================================================================== */
-const MODES=[['CASH','By Cash'],['CHEQUE','By Cheque'],['UPI','By UPI'],['EXPENSE','By Expense']];
+const MODES=[['CASH','By Cash'],['CHEQUE','By Cheque'],['UPI','By UPI']];
+const PAY_MODES=['CASH','CHEQUE','UPI'];
+/* "Exp ₹5,000 · Cash in hand ₹5,000 · Bank ₹20,000" under a cash amount (office screens only) */
+const splitLine=p=>{if(!payExp(p)&&!payCih(p))return'';const l=[];if(payExp(p))l.push('Expense '+inr(payExp(p)));if(payCih(p)){const left=cihLeft(p);l.push('Cash in hand '+inr(payCih(p))+(p.status==='SUCCESS'&&left!==payCih(p)?` (${inr(left)} left)`:''))}l.push('Bank '+inr(payToBank(p)));return`<small class="muted split-line">${E(l.join(' · '))}</small>`};
 const modeName=m=>({CASH:'Cash',CHEQUE:'Cheque',UPI:'UPI',EXPENSE:'Expense'}[m]||m);
 const MODE_TONE={CASH:'m-cash',CHEQUE:'m-cheque',UPI:'m-upi',EXPENSE:'m-exp'};
 const modePill=m=>`<span class="pill ${MODE_TONE[m]||''}">${E(modeName(m))}</span>`;
@@ -2436,7 +2501,7 @@ function viewFees(){
 /* ---------- 1. collect fee: every student, semester by semester ----------
    One row per student (cards on a phone). "Collect" opens a panel: pick the semester, pick the mode
    from a dropdown (Cash / Cheque / UPI / Expense), pick the batch, save -> receipt. */
-const MODE_OK=k=>k==='EXPENSE'?can('expenses.manage'):can('fees.collect');
+const MODE_OK=k=>PAY_MODES.includes(k)&&can('fees.collect');
 function colFilter(){return ui.f['fees.collect']=Object.assign({q:'',course:'',sem:'',batch:'',st:'',sort:'name',dir:1,page:0},ui.f['fees.collect']||{})}
 function colRows(){const f=colFilter();const q=f.q.trim().toLowerCase();
   let l=vStudents().filter(s=>s.status==='ACTIVE').map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.batch||defaultBatch(s)===f.batch)
@@ -2453,7 +2518,7 @@ function feeCollect(){
   const bats=[...new Set(vStudents().map(defaultBatch))].sort().reverse();
   const tot={fee:sum(l,x=>x.sm.total),paid:sum(l,x=>x.sm.paid),due:sum(l,x=>x.sm.payable)};
   return`<div class="kpis k4 kpis-sm"><div class="kpi "><span class="label">Students</span><div class="v">${l.length}</div></div><div class="kpi "><span class="label">Total tuition fee</span><div class="v">${inr(tot.fee)}</div></div><div class="kpi good"><span class="label">Paid</span><div class="v">${inr(tot.paid)}</div></div><div class="kpi bad"><span class="label">Due now</span><div class="v">${inr(tot.due)}</div></div></div>
-   <div class="today-strip"><b>Today</b>${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<span>${modePill(m)} ${inr(sum(ok.filter(p=>p.mode===m),p=>p.amount))}</span>`).join('')}</div>
+   <div class="today-strip"><b>Today</b>${PAY_MODES.map(m=>`<span>${modePill(m)} ${inr(sum(ok.filter(p=>p.mode===m),p=>p.amount))}</span>`).join('')}${sum(ok,p=>payExp(p)+payCih(p))?`<span class="muted">of cash: expense ${inr(sum(ok,payExp))} · cash in hand ${inr(sum(ok,payCih))}</span>`:''}</div>
    <div class="panel"><h2>Students and their fees<button class="btn exp-btn" data-act="expOpen" data-key="fees.collect">Export</button></h2>
    <div class="filters"><input type="search" placeholder="Name, enrolment no. or mobile" aria-label="Search students" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
     ${scopeCourses().length>1?sel(sc,'course','Course',COURSE_OPTS()):''}${sel(sc,'batch','Batch',[['','All batches'],...bats.map(b=>[b,b])])}${sel(sc,'sem','Semester',[['','All semesters'],...SEMS.map(n=>[n,'Semester '+n])])}
@@ -2471,6 +2536,7 @@ function openCollect(sid,sem){
   const s=stu(sid);if(!s)throw new Error('Student not found');guardStudent(sid);if(s.status!=='ACTIVE')throw new Error('This student is not active');
   const sm=feeSum(s);if(!sem){const fs=sm.sems.find(x=>x.started&&x.due>0)||sm.sems.find(x=>x.due>0);sem=fs?fs.sem:0}
   const prev=ui.col&&ui.col.mode;ui.col={sid,sem,mode:prev&&MODE_OK(prev)?prev:(MODES.map(m=>m[0]).find(MODE_OK)||'CASH')};
+  ui.split={sid,exp:false,cih:false,cihAmt:''};ui.exp={sid,ctx:'split',rows:[{amount:'',reason:'',doc:null}]};
   drawer(`<button class="btn x" data-act="close">Close</button><h2>Collect fee</h2><div id="colBox" style="margin-top:12px">${collectBox()}</div>`,true,'Collect fee');
 }
 function collectBox(){
@@ -2485,27 +2551,45 @@ function batchField(s){const b=defaultBatch(s);const opts=batchOptions(s.course)
 function collectForm(s,m,mode){
   const T=today();const amt=F('amount','Tuition fee amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}" data-live="colAmt"`})+batchField(s);
   if(mode==='CASH')return`<form data-form="collect" data-mode="CASH" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}${F('note','Note (optional)',{span:1,attrs:'maxlength="120"'})}
-   <p class="note span">Invoice date = the date you enter here (default today). The receipt uses this date. You can change it later in Receipts.</p><div class="actions span"><button class="btn primary big">Save cash payment · issue receipt</button></div></form>`;
+   <p class="note span">Invoice date = the date you enter here (default today). The receipt uses this date. You can change it later in Receipts.</p>
+   ${can('expenses.manage')?`<div class="span" id="splitWrap">${splitBox()}</div>`:''}
+   <div class="actions span"><button class="btn primary big">Save cash payment · issue receipt</button></div></form>`;
   if(mode==='CHEQUE')return`<form data-form="collect" data-mode="CHEQUE" class="form">${amt}${F('chequeNo','Cheque no.',{req:true,attrs:'inputmode="numeric" maxlength="10"'})}${F('bank','Bank',{req:true,attrs:'maxlength="60" list="banks"'})}<datalist id="banks"><option>State Bank of India</option><option>Bank of Baroda</option><option>Mehsana Urban Co-op Bank</option><option>HDFC Bank</option><option>ICICI Bank</option></datalist>
    ${F('chequeDate','Cheque date',{type:'date',val:T,req:true})}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}<div class="actions span"><button class="btn primary big">Save cheque payment · issue receipt</button></div></form>`;
   if(mode==='UPI'){const pv=upiInvoiceDate(Date.now());return`<form data-form="upiPay" class="form">${amt}<div class="field"><span class="label">Invoice date</span><div class="ro">${fmtD(pv)} <small class="muted">(payment date + 1 day, set automatically)</small></div></div>
    <p class="note span">A UPI order is created with ${E(db.settings.upi.provider)} (${E(db.settings.upi.mode)}). The student scans the QR with Google Pay or any UPI app. The payment becomes Success only when the gateway's verified webhook arrives — never from this screen.</p>
    <div class="actions span"><button class="btn primary big">Create UPI request · show QR</button></div></form>`}
-  if(!ui.exp||ui.exp.sid!==s.id)ui.exp={sid:s.id,rows:[{amount:'',reason:'',doc:null}]};
-  return`<form data-form="collect" data-mode="EXPENSE" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}
-   <fieldset class="fs span expbox"><legend>Expense details</legend><p class="note" style="margin:0 0 8px">Where did this fee money go? Add one line per bill. Amount and reason are required; a bill photo or PDF is optional. <b>The lines must add up exactly to the fee amount.</b></p>
-    <div id="expRows">${expRowsHtml()}</div><div class="actions"><button type="button" class="btn sm" data-act="expAdd">+ Add another line</button></div><div id="expTotal" class="exptotal">${expTotalHtml()}</div></fieldset>
-   <p class="note span">By Expense: this student's fee was used directly for a college expense. The fee counts as paid: a receipt is issued and the due goes down. It shows as Expense in Receipts, Audit and the Dashboard. The student only sees the receipt, not the mode.</p>
-   <div class="actions span"><button class="btn primary big">Save fee by expense · issue receipt</button></div></form>`;
+  return'';
 }
+/* change 4: under By Cash, two optional parts that do not go to the bank.
+   Expense now = spent at once (one line per bill). Cash in hand = kept in the college (see Cash in hand). The rest goes to the bank. */
+function splitBox(){const sp=ui.split||{};
+  return`<fieldset class="fs splitbox"><legend>Part of this cash not going to the bank (optional)</legend>
+   <label class="chk"><input type="checkbox" data-change="splitExp" ${sp.exp?'checked':''}> <span><b>Expense now</b><small class="muted" style="display:block">Spent at once for the college. One line per bill: amount, reason, bill photo or PDF.</small></span></label>
+   ${sp.exp?`<div class="expbox"><div id="expRows">${expRowsHtml()}</div><div class="actions"><button type="button" class="btn sm" data-act="expAdd">+ Add another line</button></div></div>`:''}
+   <label class="chk"><input type="checkbox" data-change="splitCih" ${sp.cih?'checked':''}> <span><b>Cash in hand</b><small class="muted" style="display:block">Kept in the college for small expenses later. It is linked to this student until it is spent or deposited.</small></span></label>
+   ${sp.cih?`<div class="field cihf"><label class="label" for="f_cih">Cash in hand amount (₹) *</label><input id="f_cih" inputmode="decimal" value="${E(sp.cihAmt||'')}" data-live="cihAmt" required></div>`:''}
+   <div id="expTotal">${splitSumHtml()}</div></fieldset>`}
+const reSplit=()=>{const w=$('#splitWrap');if(w)w.innerHTML=splitBox()};
+const splitExpTotal=()=>ui.split&&ui.split.exp&&ui.exp?ui.exp.rows.reduce((a,r)=>a+(toPaise(r.amount)||0),0):0;
+const splitCihTotal=()=>ui.split&&ui.split.cih?(toPaise(ui.split.cihAmt)||0):0;
+function splitSumHtml(){const f=$('#f_amount');const fee=toPaise(f?f.value:0)||0;const ex=splitExpTotal(),ch=splitCihTotal(),bank=fee-ex-ch;
+  const c=(l,v,cls='')=>`<div class="sp3 ${cls}"><span>${l}</span><b>${inr(v)}</b></div>`;
+  return`<div class="split3" aria-live="polite">${c('Fee received',fee)}<i aria-hidden="true">=</i>${c('Expense now',ex)}<i aria-hidden="true">+</i>${c('Cash in hand',ch)}<i aria-hidden="true">+</i>${c('To bank',Math.max(0,bank),bank<0?'bad':'bank')}</div>
+   ${bank<0?`<p class="err" style="margin:6px 0 0">Expense + cash in hand is ${inr(-bank)} more than the fee received.</p>`:''}`}
+CHG.splitExp=el=>{ui.split.exp=el.checked;if(el.checked&&(!ui.exp||!ui.exp.rows.length))ui.exp={sid:ui.split.sid,ctx:'split',rows:[{amount:'',reason:'',doc:null}]};reSplit();if(el.checked){const i=$('#ea0');if(i)i.focus()}};
+CHG.splitCih=el=>{ui.split.cih=el.checked;reSplit();if(el.checked){const i=$('#f_cih');if(i)i.focus()}};
+LIVE.cihAmt=el=>{ui.split.cihAmt=el.value;expTot()};
 /* expense lines: amount + reason + optional bill (image or PDF) */
 const EXP_DOC_MAX=700*1024;
 function expRowsHtml(){return ui.exp.rows.map((r,i)=>`<div class="exprow" data-i="${i}"><div class="field"><label class="label" for="ea${i}">Amount (₹) *</label><input id="ea${i}" inputmode="decimal" value="${E(r.amount)}" data-live="expAmt" data-i="${i}" required></div>
   <div class="field"><label class="label" for="er${i}">Reason *</label><input id="er${i}" maxlength="120" value="${E(r.reason)}" data-live="expReason" data-i="${i}" placeholder="e.g. University exam form fees" required></div>
   <div class="field"><span class="label">Bill / document (optional)</span><div class="actions nowrap">${r.doc?`<button type="button" class="btn sm" data-act="expView" data-i="${i}">📎 ${E(r.doc.name.slice(0,22))}</button><button type="button" class="btn sm" data-act="expDocDel" data-i="${i}" aria-label="Remove document">✕</button>`:`<label class="btn sm"><input type="file" class="sr" accept="image/*,application/pdf" data-change="expDoc" data-i="${i}"> Upload</label>`}
   ${ui.exp.rows.length>1?`<button type="button" class="btn sm danger" data-act="expDel" data-i="${i}">Remove line</button>`:''}</div></div></div>`).join('')}
-function expTotalHtml(){const f=$('#f_amount');const want=toPaise(f?f.value:0)||0;const got=ui.exp.rows.reduce((a,r)=>a+(toPaise(r.amount)||0),0);const ok=want>0&&got===want;
-  return`<span>Lines total <b>${inr(got)}</b> of fee amount <b>${inr(want)}</b></span>${ok?pill('Matches','good'):pill(got<want?`${inr(want-got)} still to add`:`${inr(got-want)} too much`,'bad')}`}
+/* the summary under the expense lines: the cash split on the Collect form, or the cash-in-hand check on an expense from cash in hand */
+function expTotalHtml(){return ui.exp&&ui.exp.ctx==='spend'&&typeof spendSumHtml==='function'?spendSumHtml():splitSumHtml()}
+/* expense lines typed on a form -> [{amount, reason, doc}], with the same checks everywhere */
+function readExpItems(rows){return rows.map((r,i)=>{const a=toPaise(r.amount);if(!(a>0))throw new Error(`Expense line ${i+1}: enter the amount`);const rs=capText(r.reason,`Expense line ${i+1} reason`,120);if(rs.length<3)throw new Error(`Expense line ${i+1}: write the reason`);return{amount:a,reason:rs,doc:r.doc||null}})}
 const reExp=()=>{const r=$('#expRows');if(r)r.innerHTML=expRowsHtml();expTot()};
 const expTot=()=>{const t=$('#expTotal');if(t)t.innerHTML=expTotalHtml()};
 LIVE.expAmt=el=>{ui.exp.rows[+el.dataset.i].amount=el.value;expTot()};
@@ -2526,23 +2610,25 @@ ACT.expDocOpen=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)retu
 LIVE.colAmt=()=>expTot();
 ACT.colSem=el=>{ui.col.sem=+el.dataset.sem;reCol()};
 CHG.colMode=el=>{if(!MODE_OK(el.value))throw new Error('You do not have access to this mode');ui.col.mode=el.value;reCol();const a=$('#f_amount');if(a)a.focus()};
-ACT.collectFor=el=>{if(!canAny('fees.collect','expenses.manage'))throw new Error('You do not have access to collect fees');openCollect(el.dataset.id,+el.dataset.sem||0)};
+ACT.collectFor=el=>{if(!can('fees.collect'))throw new Error('You do not have access to collect fees');openCollect(el.dataset.id,+el.dataset.sem||0)};
 function amountOf(d,m){const a=toPaise(d.amount);if(!(a>0))throw new Error('Enter the amount');if(a>m.due)throw new Error(`Amount is more than the semester ${m.sem} due (${inr(m.due)})`);return a}
 FORM.collect=(f,d)=>{
-  const mode=f.dataset.mode;if(mode==='EXPENSE')need('expenses.manage','add expenses');else need('fees.collect','collect fees');
+  const mode=f.dataset.mode;if(!PAY_MODES.includes(mode))throw new Error('Choose Cash, Cheque or UPI');need('fees.collect','collect fees');
   const c=ui.col;const s=stu(c.sid);if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');guardStudent(s.id);const m=semSummary(s,c.sem);
   const o={sem:c.sem,mode,amount:amountOf(d,m),batch:cleanBatch(d.batch),invoiceDate:d.invoiceDate,note:capText(d.note,'Note',120)};
-  if(mode==='EXPENSE'){if(!validIso(o.invoiceDate))throw new Error('Choose a valid invoice date');const rows=(ui.exp&&ui.exp.sid===s.id?ui.exp.rows:[]);if(!rows.length)throw new Error('Add the expense details');
-    const items=rows.map((r,i)=>{const a=toPaise(r.amount);if(!(a>0))throw new Error(`Expense line ${i+1}: enter the amount`);const rs=capText(r.reason,`Expense line ${i+1} reason`,120);if(rs.length<3)throw new Error(`Expense line ${i+1}: write the reason`);return{amount:a,reason:rs,doc:r.doc||null}});
-    const tot=items.reduce((a,x)=>a+x.amount,0);if(tot!==o.amount)throw new Error(`Expense lines add up to ${inr(tot)} but the fee amount is ${inr(o.amount)}. They must match exactly.`);
-    o.expenseItems=items;o.reason=items.map(x=>x.reason).join('; ').slice(0,300)}
+  /* change 4: the optional expense / cash-in-hand parts of a cash fee */
+  const sp=mode==='CASH'&&ui.split&&ui.split.sid===s.id?ui.split:null;
+  if(sp&&(sp.exp||sp.cih)){need('expenses.manage','keep part of a cash fee as expense or cash in hand');
+    if(sp.exp){const items=readExpItems(ui.exp&&ui.exp.sid===s.id?ui.exp.rows:[]);if(!items.length)throw new Error('Add the expense details');o.expenseItems=items;o.reason=items.map(x=>x.reason).join('; ').slice(0,300)}
+    if(sp.cih){const a=toPaise(sp.cihAmt);if(!(a>0))throw new Error('Enter the cash in hand amount');o.cih=a}
+    const kept=sum(o.expenseItems||[],x=>x.amount)+(o.cih||0);if(kept>o.amount)throw new Error(`Expense + cash in hand (${inr(kept)}) is more than the fee received (${inr(o.amount)})`)}
   if(mode==='CHEQUE'){o.chequeNo=String(d.chequeNo||'').trim();if(!/^\d{6}$/.test(o.chequeNo))throw new Error('Cheque no. must be 6 digits');o.bank=capText(d.bank,'Bank',60);if(!o.bank)throw new Error('Enter the bank name');if(!validIso(d.chequeDate))throw new Error('Enter the cheque date');o.chequeDate=d.chequeDate;
     if(db.payments.some(p=>p.status==='SUCCESS'&&p.mode==='CHEQUE'&&p.chequeNo===o.chequeNo&&p.bank.toLowerCase()===o.bank.toLowerCase()))throw new Error('This cheque no. of this bank is already entered')}
   if(o.invoiceDate>addDays(today(),0))throw new Error('Invoice date cannot be in the future');
-  const p=recordPayment(s,o);if(o.expenseItems)p.expenseItems=o.expenseItems;
+  const p=recordPayment(s,o);
   if(!save()){db.payments.splice(db.payments.indexOf(p),1);if(db.audit[0]&&db.audit[0].entityId===p.rc)db.audit.shift();db.college.nextReceipt--;save();throw new Error('Not enough browser storage for these documents. Use smaller photos or fewer documents.')}
   afterPayment(p);save();
-  if(mode==='EXPENSE')ui.exp=null;closeLayer();renderPage();showReceipt(p,true);
+  ui.exp=null;ui.split=null;closeLayer();renderPage();showReceipt(p,true);
 };
 /* everything that happens after a successful payment (spec §5.2): receipt no + PDF, email, notification to the student, live update for staff */
 function afterPayment(p){
@@ -2657,7 +2743,9 @@ ACT.ppDecline=el=>{handleUpiWebhook(gwEvent(el.dataset.id,'failed'));save();rend
 function receiptHtml(p){
   const sv=isStudentUser(cur());const I=rcptInfo(p,sv),{s,R,cancelled}=I;
   const img=k=>typeof RCPT_IMG!=='undefined'&&RCPT_IMG[k]?`data:image/jpeg;base64,${RCPT_IMG[k].jpg}`:'';
-  const exp=!sv&&p.mode==='EXPENSE'&&(p.expenseItems||[]).length?`<div class="inv-exp"><b>Expense details</b>${p.expenseItems.map((x,i)=>`<div class="rline"><span>${E(x.reason)}${x.doc?` <button class="lnk" data-act="expDocOpen" data-id="${E(p.id)}" data-i="${i}">📎 bill</button>`:''}</span><span>${inr(x.amount)}</span></div>`).join('')}</div>`:'';
+  /* office copy only: where this cash went (change 4). The student copy never shows it. */
+  const exp=!sv&&(payExp(p)||payCih(p))?`<div class="inv-exp"><b>Where this cash went</b>${(p.expenseItems||[]).map((x,i)=>`<div class="rline"><span>Expense: ${E(x.reason)}${x.doc?` <button class="lnk" data-act="expDocOpen" data-id="${E(p.id)}" data-i="${i}">📎 bill</button>`:''}</span><span>${inr(x.amount)}</span></div>`).join('')}
+    ${payCih(p)?`<div class="rline"><span>Cash in hand${p.status==='SUCCESS'?` <small class="muted">(${inr(cihLeft(p))} not used yet)</small>`:''}</span><span>${inr(payCih(p))}</span></div>`:''}<div class="rline"><span><b>To bank</b></span><b>${inr(payToBank(p))}</b></div></div>`:'';
   const row=(k,v,cls='')=>`<div class="inv-r ${cls}"><span>${k}</span><b>${amt2(v)}</b></div>`;
   return`<article class="inv ${cancelled?'cancelled':''}" aria-label="Fee invoice ${E(p.rc)}">
    <div class="inv-band" aria-hidden="true">${img('logo')?`<span class="inv-logo"><img src="${img('logo')}" alt=""></span>`:''}<span class="inv-word">NPCTE</span></div>
@@ -2696,8 +2784,8 @@ FORM.cancelReceipt=(f,d)=>{const p=db.payments.find(x=>x.id===f.dataset.id);canc
   notify('cancel',`Receipt cancelled · ${s.name}`,`${p.rc} · ${inr(p.amount)} · ${p.cancelReason}`,{sid:s.id,roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
   save();closeDialog();closeLayer();renderPage();toast('Receipt cancelled')};
 
-/* an inline date editor for Cash / Cheque / Expense rows; UPI and cancelled rows show plain text */
-function dateCell(kind,rec,iso){const editable=can('fees.editdate')&&rec.mode!=='UPI'&&rec.status==='SUCCESS';
+/* an inline date editor for Cash / Cheque rows; UPI, cancelled rows and cash whose cash in hand is already used show plain text */
+function dateCell(kind,rec,iso){const editable=can('fees.editdate')&&rec.mode!=='UPI'&&rec.status==='SUCCESS'&&!(kind==='p'&&cihLocked(rec));
   return editable?`<input type="date" class="inl" value="${E(iso)}" max="${today()}" required aria-label="Invoice date of ${E(kind==='x'?rec.ref:rec.rc)}" data-change="invDate" data-kind="${kind}" data-id="${E(rec.id)}">`:`<span>${fmtD(iso)}</span>${kind==='p'&&rec.mode==='UPI'?' <small class="muted" title="Payment date + 1 day">auto</small>':''}`}
 CHG.invDate=el=>{const kind=el.dataset.kind;const rec=db.payments.find(x=>x.id===el.dataset.id);
   if(!rec)throw new Error('Not found');const v=el.value;if(!validIso(v)){el.value=rec.invoiceDate;throw new Error('Choose a valid invoice date')}if(v>today())throw new Error('Invoice date cannot be in the future');
@@ -2747,12 +2835,12 @@ function receiptsFiltered(){const f=rcFilter();const q=f.q.toLowerCase();
 function feeReceipts(){
   const f=rcFilter();const sc='fees.receipts';const l=receiptsFiltered();const pg=pageRows(f,l);
   return`<div class="panel"><h2>Receipts ${pill(inr(sum(l.filter(p=>p.status==='SUCCESS'),p=>p.amount))+' successful','good')}<button class="btn exp-btn" data-act="expOpen" data-key="fees.receipts">Export</button></h2>
-   <div class="filters"><input type="search" placeholder="Receipt no, name, batch, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI'],['EXPENSE','Expense']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}
+   <div class="filters"><input type="search" placeholder="Receipt no, name, batch, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}
     <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label></div>
    <div class="tablewrap"><table><thead><tr>${sortTh(sc,'rc','Receipt')}${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entered')}${sortTh(sc,'name','Student')}<th>Batch</th><th>Sem</th><th>Mode</th>${sortTh(sc,'amount','Amount',1)}<th>Status</th><th></th></tr></thead><tbody>
-   ${pg.map(p=>{const s=stu(p.studentId);return`<tr><td class="mono">${E(p.rc)}</td><td>${dateCell('p',p,p.invoiceDate)}</td><td><small>${fmtT(p.entryAt)}</small></td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}">${E(s.name)}</button></td><td class="mono">${E(batchOf(p))}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}</td><td>${payPill(p.status)}${p.depositId?' '+pill('Deposited'):''}</td>
+   ${pg.map(p=>{const s=stu(p.studentId);return`<tr><td class="mono">${E(p.rc)}</td><td>${dateCell('p',p,p.invoiceDate)}</td><td><small>${fmtT(p.entryAt)}</small></td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}">${E(s.name)}</button></td><td class="mono">${E(batchOf(p))}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}${splitLine(p)}</td><td>${payPill(p.status)}${p.depositId?' '+pill('Deposited'):''}</td>
     <td><div class="actions nowrap"><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button>${p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn sm danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="10" class="empty">No receipts for these filters.</td></tr>'}</tbody></table></div>${pager(sc,l.length)}
-   <p class="note">Change the invoice date of a Cash, Cheque or Expense receipt right in the table: the receipt PDF is regenerated and the change is logged (old → new). UPI dates are fixed. A payment is never deleted; cancel it with a reason.</p></div>`;
+   <p class="note">Change the invoice date of a Cash or Cheque receipt right in the table: the receipt PDF is regenerated and the change is logged (old → new). UPI dates are fixed. A payment is never deleted; cancel it with a reason.</p></div>`;
 }
 
 /* ---------- 5. fee setup ---------- */
@@ -2882,7 +2970,7 @@ function rcptInfo(p,studentCopy){
   if(!studentCopy){
     if(p.mode==='CHEQUE'&&(p.bank||p.chequeDate))notes.push(`Cheque${p.chequeNo?' No. '+p.chequeNo:''}${p.bank?', '+p.bank:''}${p.chequeDate?', dated '+fmtD(p.chequeDate):''}.`);
     if(p.mode==='UPI'&&p.upiRef)notes.push('UPI reference '+p.upiRef+(p.paidAt&&!p.imported?', paid '+fmtT(p.paidAt):'')+'.');
-    if(p.mode==='EXPENSE'&&!(p.expenseItems||[]).length&&p.reason&&!(p.note||'').includes(p.reason))notes.push('Used for (expense): '+p.reason);
+    if(payExp(p)||payCih(p))notes.push(`Cash split: expense Rs. ${amt2(payExp(p))} · cash in hand Rs. ${amt2(payCih(p))} · to bank Rs. ${amt2(payToBank(p))}.`);
     if(p.note)notes.push('Office note: '+p.note);
     notes.push(`Entered by ${p.by||'-'} on ${fmtT(p.entryAt)}.`)}
   if((p.dateEdits||[]).length)notes.push('Invoice date changed: '+p.dateEdits.map(x=>`${fmtD(x.from)} → ${fmtD(x.to)} (${x.by})`).join('; ')+'.');
@@ -2934,7 +3022,7 @@ function receiptPdf(p,studentCopy){if(studentCopy===undefined)studentCopy=isStud
     /* notes */
     let ny=Math.max(646.2,y+50);g.text(L,ny,'Notes',{size:9,bold:true,color:INK});ny+=16.3;
     const notes=I.notes.slice();
-    if(!studentCopy&&p.mode==='EXPENSE'&&(p.expenseItems||[]).length)notes.splice(notes.length-1,0,'Expense details: '+p.expenseItems.map(x=>`${x.reason} Rs. ${amt2(x.amount)}${x.doc?' (bill attached)':''}`).join('; ')+'.');
+    if(!studentCopy&&(p.expenseItems||[]).length)notes.splice(notes.length-1,0,'Expense details: '+p.expenseItems.map(x=>`${x.reason} Rs. ${amt2(x.amount)}${x.doc?' (bill attached)':''}`).join('; ')+'.');
     notes.forEach(t=>{if(ny>782)return;g.rect(L+0.5,ny-4.2,2.6,2.6,MUT);ny=g.wrap(L+10.4,ny,t,W-10.4,{size:8.5,color:MUT,lead:4.5})});
     /* signature and footer */
     const sy=Math.max(711.5,ny+16);
@@ -3061,6 +3149,163 @@ const mailLine=p=>`<div class="maillive" data-mailpay="${E(p.id)}" style="margin
 function refreshMailUi(){$$('.maillive').forEach(el=>{const p=db.payments.find(x=>x.id===el.dataset.mailpay);if(p)el.innerHTML=mailLineHtml(p)})}
 ACT.emailReceipt=el=>{need('fees.view');const p=db.payments.find(x=>x.id===el.dataset.id);const s=stu(p.studentId);const r=queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Fee receipt ${p.rc} - ${db.college.short}`});save();refreshMailUi();toast(r.status==='Skipped'?'No email address on file':'Receipt is being emailed to '+s.email,r.status==='Skipped')};
 /* =====================================================================
+   Cash in hand (change 4, 21-11-2026; spec §5.6)
+   Money kept in the college from cash fees, one pool per course (B.Ed, M.Ed …).
+   In  : the "cash in hand" part of a cash receipt (Collect fee → By Cash).
+   Out : expenses paid from it (amount + reason + bill, like any expense), taken from the OLDEST student money first,
+         and deposits to the bank, made student by student, so what is left is banked in that student's name.
+   Core numbers (cihLeft, cihAllocate …) live in p1_core.js.
+   ===================================================================== */
+const CASH_TABS=[['lots','Students'],['register','Register'],['spends','Expenses'],['deposits','Bank deposits']];
+const CIH_OLD_DAYS=180; /* money older than this shows "deposit it" */
+const cashCourses=()=>scopeCourses().filter(c=>mayCourse(c.id));
+const isBoss=()=>['Super Admin','Principal'].includes((cur()||{}).role);
+const payById=id=>db.payments.find(p=>p.id===id);
+const lotWho=p=>{const s=stu(p.studentId);return s?s.name:'—'};
+const cashCids=f=>{const cs=cashCourses().map(c=>c.id);return f.course&&cs.includes(f.course)?[f.course]:cs};
+function cashSummary(cid){const lots=cihLots(cid);return{in:sum(lots,payCih),spent:sum(cashbox().spends.filter(x=>x.course===cid&&x.status==='ACTIVE'),x=>x.amount),
+  dep:sum(cashbox().deposits.filter(x=>x.course===cid),x=>x.total),bal:sum(lots,cihLeft),old:sum(lots.filter(p=>cihLeft(p)>0&&diffDays(today(),p.invoiceDate)>CIH_OLD_DAYS),cihLeft)}}
+const cashF=k=>ui.f['cash.'+k]=Object.assign({course:'',q:'',st:k==='lots'?'open':'',from:'',to:'',page:0},ui.f['cash.'+k]||{});
+const courseSel=k=>cashCourses().length>1?sel('cash.'+k,'course','Course',[['','All courses'],...cashCourses().map(c=>[c.id,c.name])]):'';
+const dateFilters=k=>{const f=cashF(k);return`<label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="cash.${k}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="cash.${k}" data-k="to"></label>`};
+
+function viewCash(){
+  need('cash.view','cash in hand');const cs=cashCourses();
+  let t=ui.tab.cash||'lots';if(!CASH_TABS.some(x=>x[0]===t))t='lots';ui.tab.cash=t;
+  const acts=`${can('cash.spend')?'<button class="btn" data-act="cashSpend">Add expense</button>':''}${can('cash.deposit')?'<button class="btn primary" data-act="cashDeposit">Deposit to bank</button>':''}`;
+  const cards=cs.map(c=>{const m=cashSummary(c.id);return`<div class="kpi cih-card"><span class="label">${E(c.name)} · cash in hand</span><div class="v">${inr(m.bal)}</div>
+    <div class="s">In ${inr(m.in)} · spent ${inr(m.spent)} · to bank ${inr(m.dep)}</div>${m.old?`<div class="s t-warn">${inr(m.old)} is older than 6 months. Deposit it.</div>`:''}</div>`}).join('');
+  return head('Cash in hand','Cash kept in the college from cash fees. Expenses use the oldest student money first; what is left goes to the bank in that student\'s name.',acts)+
+   `<div class="cih-kpis">${cards}</div>`+tabsBar('cash',CASH_TABS,t)+({lots:cashLots,register:cashRegister,spends:cashSpends,deposits:cashDeps}[t])();
+}
+
+/* ---------- 1. students: every cash receipt that kept cash in hand, and what happened to it ---------- */
+function cashLotRows(){const f=cashF('lots');const q=f.q.trim().toLowerCase();
+  return cashCids(f).flatMap(cid=>cihLots(cid)).filter(p=>(f.st!=='open'||cihLeft(p)>0)&&(!q||[lotWho(p),stu(p.studentId).enrol,p.rc].some(v=>String(v).toLowerCase().includes(q)))).sort(lotOrder)}
+function cashLots(){const f=cashF('lots');const l=cashLotRows();const pg=pageRows(f,l);const multi=cashCourses().length>1;
+  return`<div class="panel"><h2>Students' cash in hand ${pill(inr(sum(l,cihLeft))+' left','acc')}<button class="btn exp-btn" data-act="expOpen" data-key="cash.lots">Export</button></h2>
+   <div class="filters"><input type="search" placeholder="Student, enrolment no. or receipt" aria-label="Search" data-live="sq" data-scope="cash.lots" value="${E(f.q)}">${courseSel('lots')}${sel('cash.lots','st','Show',[['open','Money still left'],['','All, also used up']])}</div>
+   <div class="tablewrap"><table><thead><tr><th>Received</th><th>Student</th><th>Receipt</th>${multi?'<th>Course</th>':''}<th class="num">Kept</th><th class="num">Used</th><th class="num">To bank</th><th class="num">Left</th><th></th></tr></thead><tbody>
+   ${pg.map(p=>{const s=stu(p.studentId),left=cihLeft(p),age=diffDays(today(),p.invoiceDate);return`<tr><td>${fmtD(p.invoiceDate)}${left&&age>CIH_OLD_DAYS?' '+pill(Math.floor(age/30)+' months','warn'):''}</td>
+    <td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}"><b>${E(s.name)}</b></button><small class="muted mono" style="display:block">${E(s.enrol)}</small></td><td class="mono"><button class="lnk mono" data-act="viewReceipt" data-id="${E(p.id)}">${E(p.rc)}</button></td>${multi?`<td>${E(course(s.course).name)}</td>`:''}
+    <td class="num amt">${inr(payCih(p))}</td><td class="num amt">${inr(cihUsed(p))}</td><td class="num amt">${inr(cihDeposited(p))}</td><td class="num amt"><b>${left?inr(left):'—'}</b>${left?'':` ${pill(cihDeposited(p)?'Done':'Used up','good')}`}</td>
+    <td><button class="btn sm" data-act="cihTrail" data-id="${E(p.id)}">Where it went</button></td></tr>`}).join('')||`<tr><td colspan="${multi?9:8}" class="empty">${f.st==='open'?'No cash in hand left. Turn on "All" to see used-up money.':'No cash in hand yet. Keep cash in hand from Collect fee → By Cash.'}</td></tr>`}</tbody></table></div>${pager('cash.lots',l.length)}
+   <p class="note">Expenses are taken from the oldest money first (received date, then entry time). The receipt of a student whose cash in hand is already used or deposited cannot be cancelled or re-dated.</p></div>`}
+ACT.cihTrail=el=>{need('cash.view');const p=payById(el.dataset.id);if(!p)throw new Error('Receipt not found');guardStudent(p.studentId);
+  const sp=cashbox().spends.filter(x=>x.alloc.some(a=>a.pid===p.id)),dp=cashbox().deposits.filter(d=>d.lines.some(a=>a.pid===p.id));const part=(l,id)=>sum(l.filter(a=>a.pid===id),a=>a.amount);
+  dialog(`<h3>${E(lotWho(p))} · cash in hand</h3><p class="muted" style="margin:0 0 10px">Receipt ${E(p.rc)} · ${fmtD(p.invoiceDate)} · kept ${inr(payCih(p))}</p><div class="list">
+   ${sp.map(x=>`<div class="li"><div><b>${E(x.ref)} · ${E(x.items.map(i=>i.reason).join('; '))}</b><small>Expense on ${fmtD(x.date)} by ${E(x.by)}${x.status==='CANCELLED'?' · cancelled, money returned':''}</small></div><span class="amt ${x.status==='CANCELLED'?'muted':''}">${inr(part(x.alloc,p.id))}</span></div>`).join('')}
+   ${dp.map(d=>`<div class="li"><div><b>${E(d.ref)} · deposited to bank</b><small>${fmtD(d.depositedOn)} · ${E(d.bankRef)} · by ${E(d.by)}</small></div><span class="amt">${inr(part(d.lines,p.id))}</span></div>`).join('')}
+   <div class="li"><div><b>Still in cash in hand</b></div><b class="amt">${inr(cihLeft(p))}</b></div></div>
+   <div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn primary" data-act="closeDialog">Close</button></div>`,'Where it went')};
+
+/* ---------- 2. register: a passbook (in, out, running balance) with opening and closing balance ---------- */
+function cashEvents(cids){const ev=[];
+  db.payments.filter(p=>p.status==='SUCCESS'&&payCih(p)>0&&cids.includes(payCourse(p))).forEach(p=>{const s=stu(p.studentId);ev.push({date:p.invoiceDate,at:p.entryAt||0,kind:'In',ref:p.rc,text:`Fee of ${s.name} (${s.enrol})`,inA:payCih(p),outA:0,course:payCourse(p)})});
+  cashbox().spends.filter(x=>x.status==='ACTIVE'&&cids.includes(x.course)).forEach(x=>ev.push({date:x.date,at:x.at,kind:'Expense',ref:x.ref,text:x.items.map(i=>i.reason).join('; '),inA:0,outA:x.amount,course:x.course}));
+  cashbox().deposits.filter(d=>cids.includes(d.course)).forEach(d=>ev.push({date:d.depositedOn,at:d.at,kind:'To bank',ref:d.ref,text:`Deposited · ${d.bankRef} · ${d.lines.length} student${d.lines.length===1?'':'s'}`,inA:0,outA:d.total,course:d.course}));
+  ev.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.at-b.at);let bal=0;ev.forEach(e=>{bal+=e.inA-e.outA;e.bal=bal});return ev}
+function cashRegRows(){const f=cashF('register');const ev=cashEvents(cashCids(f));return ev.filter(e=>(!f.from||e.date>=f.from)&&(!f.to||e.date<=f.to))}
+function cashRegister(){const f=cashF('register');const all=cashEvents(cashCids(f));const l=cashRegRows();const pg=pageRows(f,l);const multi=cashCourses().length>1&&!f.course;
+  const before=f.from?all.filter(e=>e.date<f.from):[];const open=before.length?before.at(-1).bal:0;const close=l.length?l.at(-1).bal:open;
+  return`<div class="panel"><h2>Register<span style="flex:1"></span><button class="btn" data-act="cashRegPrint">Print</button><button class="btn exp-btn" data-act="expOpen" data-key="cash.register">Export</button></h2>
+   <div class="filters">${courseSel('register')}${dateFilters('register')}</div>
+   <div class="totals four"><div class="tt"><span>Opening balance</span><b>${inr(open)}</b></div><div class="tt m-cash"><span>In</span><b>${inr(sum(l,e=>e.inA))}</b></div><div class="tt m-exp"><span>Out (expense + bank)</span><b>${inr(sum(l,e=>e.outA))}</b></div><div class="tt sum"><span>Closing balance</span><b>${inr(close)}</b></div></div>
+   <div class="tablewrap"><table><thead><tr><th>Date</th><th>Type</th><th>Ref</th><th>Details</th>${multi?'<th>Course</th>':''}<th class="num">In</th><th class="num">Out</th><th class="num">Balance</th></tr></thead><tbody>
+   ${pg.map(e=>`<tr><td>${fmtD(e.date)}</td><td>${e.kind==='In'?pill('In','good'):e.kind==='Expense'?pill('Expense','warn'):pill('To bank','acc')}</td><td class="mono">${E(e.ref)}</td><td>${E(e.text)}</td>${multi?`<td>${E(course(e.course).name)}</td>`:''}<td class="num amt">${e.inA?inr(e.inA):''}</td><td class="num amt">${e.outA?inr(e.outA):''}</td><td class="num amt"><b>${inr(e.bal)}</b></td></tr>`).join('')||`<tr><td colspan="${multi?8:7}" class="empty">Nothing in this period.</td></tr>`}</tbody></table></div>${pager('cash.register',l.length)}</div>`}
+ACT.cashRegPrint=()=>{need('cash.view');const f=cashF('register');const l=cashRegRows();const all=cashEvents(cashCids(f));const before=f.from?all.filter(e=>e.date<f.from):[];const open=before.length?before.at(-1).bal:0;
+  printReport('Cash in hand register',`${cashCids(f).map(id=>course(id).name).join(' + ')} · ${f.from?fmtD(f.from):'Start'} to ${f.to?fmtD(f.to):fmtD(today())}`,['Date','Type','Ref','Details','In','Out','Balance'],
+   [['','','','Opening balance','','',inr(open)],...l.map(e=>[fmtD(e.date),e.kind,e.ref,e.text,e.inA?inr(e.inA):'',e.outA?inr(e.outA):'',inr(e.bal)])],
+   `<p class="pt">Closing balance ${inr(l.length?l.at(-1).bal:open)}</p><p class="pt">Prepared by: ____________________ &nbsp; Checked by: ____________________</p>`);log('Cash in hand register printed','Cash in hand','')};
+
+/* ---------- 3. expenses paid from cash in hand ---------- */
+function cashSpendRows(){const f=cashF('spends');const cids=cashCids(f);return cashbox().spends.filter(x=>cids.includes(x.course)&&(!f.st||x.status===f.st)&&(!f.from||x.date>=f.from)&&(!f.to||x.date<=f.to)).sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:b.at-a.at)}
+const allocText=x=>x.alloc.map(a=>{const p=payById(a.pid);return p?`${lotWho(p)} ${inr(a.amount)}`:inr(a.amount)}).join(', ');
+function cashSpends(){const f=cashF('spends');const l=cashSpendRows();const pg=pageRows(f,l);const multi=cashCourses().length>1;
+  return`<div class="panel"><h2>Expenses from cash in hand ${pill(inr(sum(l.filter(x=>x.status==='ACTIVE'),x=>x.amount)),'warn')}<button class="btn exp-btn" data-act="expOpen" data-key="cash.spends">Export</button></h2>
+   <div class="filters">${courseSel('spends')}${sel('cash.spends','st','Status',[['','All'],['ACTIVE','Active'],['CANCELLED','Cancelled']])}${dateFilters('spends')}</div>
+   <div class="tablewrap"><table><thead><tr><th>Ref</th><th>Date</th>${multi?'<th>Course</th>':''}<th>Details</th><th class="num">Amount</th><th>Taken from</th><th>By</th><th></th></tr></thead><tbody>
+   ${pg.map(x=>`<tr class="${x.status==='CANCELLED'?'muted':''}"><td class="mono">${E(x.ref)}</td><td>${fmtD(x.date)}</td>${multi?`<td>${E(course(x.course).name)}</td>`:''}
+    <td>${x.items.map((i,k)=>`<div>${E(i.reason)} <small class="muted">${inr(i.amount)}</small>${i.doc?` <button class="lnk" data-act="cashDoc" data-id="${E(x.id)}" data-i="${k}">📎 bill</button>`:''}</div>`).join('')}${x.status==='CANCELLED'?`<small class="t-bad">Cancelled: ${E(x.cancelReason)}</small>`:''}</td>
+    <td class="num amt">${inr(x.amount)}</td><td><small>${E(allocText(x))}</small></td><td><small>${E(x.by)}</small></td>
+    <td>${x.status==='ACTIVE'&&isBoss()?`<button class="btn sm danger" data-act="cashSpendCancel" data-id="${E(x.id)}">Cancel</button>`:x.status==='CANCELLED'?pill('Cancelled','bad'):''}</td></tr>`).join('')||`<tr><td colspan="${multi?8:7}" class="empty">No expenses from cash in hand for these filters.</td></tr>`}</tbody></table></div>${pager('cash.spends',l.length)}
+   <p class="note">Only the Principal can cancel an expense; its money goes back to the same students' cash in hand.</p></div>`}
+ACT.cashDoc=el=>{need('cash.view');const x=cashbox().spends.find(s=>s.id===el.dataset.id);if(!x||!mayCourse(x.course))throw new Error('Not found');docOpen((x.items[+el.dataset.i]||{}).doc)};
+
+/* add an expense: same lines as everywhere (amount, reason, bill). It shows live which students' money it will use. */
+function spendFormHtml(){const cs=cashCourses();const sp=ui.spend;const T=today();
+  return`<button class="btn x" data-act="close">Close</button><h2>Expense from cash in hand</h2><p class="muted" style="margin:4px 0 0">Paid from the cash kept in the college. It uses the oldest student money first.</p>
+   <form data-form="cashSpend" class="form" style="margin-top:12px">
+    ${cs.length>1?F('course','Whose cash in hand',{val:sp.course,opts:cs.map(c=>[c.id,c.name]),req:true,attrs:'data-change="spendCtx"'}):''}
+    ${F('date','Expense date',{type:'date',val:sp.date,req:true,attrs:`max="${T}" data-change="spendCtx"`})}
+    <fieldset class="fs span expbox"><legend>Expense details</legend><p class="note" style="margin:0 0 8px">One line per bill. Amount and reason are required; a bill photo or PDF is optional.</p>
+     <div id="expRows">${expRowsHtml()}</div><div class="actions"><button type="button" class="btn sm" data-act="expAdd">+ Add another line</button></div><div id="expTotal">${spendSumHtml()}</div></fieldset>
+    <div class="actions span"><button class="btn primary big">Save expense</button><button type="button" class="btn" data-act="close">Cancel</button></div></form>`}
+function spendSumHtml(){const sp=ui.spend||{};const tot=ui.exp?ui.exp.rows.reduce((a,r)=>a+(toPaise(r.amount)||0),0):0;const date=validIso(sp.date)?sp.date:today();const avail=sp.course?cihBalance(sp.course,date):0;
+  let plan='';if(tot>0&&tot<=avail){try{plan=cihAllocate(sp.course,date,tot).map(a=>{const p=payById(a.pid);return`<li><span>${E(lotWho(p))} <small class="muted mono">${E(p.rc)} · ${fmtD(p.invoiceDate)}</small></span><b>${inr(a.amount)}</b></li>`}).join('')}catch(e){}}
+  return`<div class="exptotal"><span>Total <b>${inr(tot)}</b> · cash in hand on ${fmtD(date)}: <b>${inr(avail)}</b></span>${tot>avail?pill(`${inr(tot-avail)} more than cash in hand`,'bad'):tot?pill('OK','good'):''}</div>
+   ${plan?`<div class="alloc"><span class="label">Will be taken from (oldest first)</span><ul>${plan}</ul></div>`:''}`}
+ACT.cashSpend=()=>{need('cash.spend','add expenses from cash in hand');const cs=cashCourses();if(!cs.length)throw new Error('No course to manage');
+  const want=(ui.f['cash.lots']||{}).course;ui.spend={course:cs.some(c=>c.id===want)?want:cs[0].id,date:today()};ui.exp={sid:'cash',ctx:'spend',rows:[{amount:'',reason:'',doc:null}]};
+  drawer(spendFormHtml(),true,'Expense from cash in hand');const i=$('#ea0');if(i)i.focus()};
+CHG.spendCtx=el=>{if(el.name==='course')ui.spend.course=el.value;if(el.name==='date')ui.spend.date=el.value;expTot()};
+FORM.cashSpend=(f,d)=>{need('cash.spend','add expenses from cash in hand');const cs=cashCourses();const cid=cs.length>1?d.course:cs[0].id;if(!cs.some(c=>c.id===cid))throw new Error('Choose a course you manage');
+  if(!validIso(d.date)||d.date>today())throw new Error('Choose the expense date (not in the future)');
+  const items=readExpItems(ui.exp&&ui.exp.ctx==='spend'?ui.exp.rows:[]);if(!items.length)throw new Error('Add the expense details');const amount=sum(items,x=>x.amount);
+  const alloc=cihAllocate(cid,d.date,amount);const u=cur();
+  const x={id:uid('x'),ref:nextCashRef('EXP'),course:cid,date:d.date,items,amount,alloc,by:u.name,byId:u.id,at:Date.now(),status:'ACTIVE'};cashbox().spends.push(x);
+  if(!save()){cashbox().spends.pop();db.counters.cashEXP--;save();throw new Error('Not enough browser storage for these documents. Use smaller photos or fewer documents.')}
+  log('Cash in hand expense','Cash in hand',x.ref,null,{course:course(cid).name,date:fmtD(x.date),amount:inr(amount),reason:items.map(i=>i.reason).join('; ').slice(0,150),from:alloc.map(a=>{const p=payById(a.pid);return stu(p.studentId).enrol+' '+inr(a.amount)}).join(', ')});
+  ui.exp=null;save();closeLayer();ui.tab.cash='spends';renderPage();toast(`${x.ref} saved · ${inr(amount)} from cash in hand`)};
+ACT.cashSpendCancel=el=>{if(!isBoss())throw new Error('Only the Principal can cancel an expense');const x=cashbox().spends.find(s=>s.id===el.dataset.id);if(!x||!mayCourse(x.course))throw new Error('Not found');
+  dialog(`<h3>Cancel ${E(x.ref)}?</h3><p class="muted" style="margin:0 0 10px">${inr(x.amount)} · ${E(x.items.map(i=>i.reason).join('; '))}. The money goes back to the cash in hand of the same students. The expense stays in the records as cancelled.</p>
+   <form data-form="cashSpendCancel" data-id="${E(x.id)}" class="grid" style="gap:10px">${F('reason','Reason (required)',{type:'textarea',req:true,rows:2,attrs:'maxlength="200" minlength="4"'})}
+   <div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Keep expense</button><button class="btn danger">Cancel expense</button></div></form>`,'Cancel expense');$('#f_reason').focus()};
+FORM.cashSpendCancel=(f,d)=>{if(!isBoss())throw new Error('Only the Principal can cancel an expense');const x=cashbox().spends.find(s=>s.id===f.dataset.id);if(!x||!mayCourse(x.course))throw new Error('Not found');if(x.status!=='ACTIVE')throw new Error('Already cancelled');
+  const r=capText(d.reason,'Reason',200);if(r.length<4)throw new Error('Write the reason (at least 4 characters)');
+  x.status='CANCELLED';x.cancelReason=r;x.cancelledBy=cur().name;x.cancelledAt=Date.now();log('Cash in hand expense cancelled','Cash in hand',x.ref,{status:'ACTIVE'},{status:'CANCELLED',reason:r});
+  save();closeDialog();renderPage();toast(`${x.ref} cancelled · ${inr(x.amount)} back in cash in hand`)};
+
+/* ---------- 4. deposits: money left in cash in hand goes to the bank, student by student ---------- */
+function cashDepRows(){const f=cashF('deposits');const cids=cashCids(f);return cashbox().deposits.filter(d=>cids.includes(d.course)&&(!f.from||d.depositedOn>=f.from)&&(!f.to||d.depositedOn<=f.to)).sort((a,b)=>b.at-a.at)}
+function cashDeps(){const f=cashF('deposits');const l=cashDepRows();const pg=pageRows(f,l);const multi=cashCourses().length>1;
+  return`<div class="panel"><h2>Cash in hand deposited to the bank ${pill(inr(sum(l,d=>d.total)),'acc')}<button class="btn exp-btn" data-act="expOpen" data-key="cash.deposits">Export</button></h2>
+   <div class="filters">${courseSel('deposits')}${dateFilters('deposits')}</div>
+   <div class="tablewrap"><table><thead><tr><th>Ref</th><th>Deposited on</th>${multi?'<th>Course</th>':''}<th>Students</th><th class="num">Total</th><th>Bank ref</th><th>By</th><th></th></tr></thead><tbody>
+   ${pg.map(d=>`<tr><td class="mono">${E(d.ref)}</td><td>${fmtD(d.depositedOn)}</td>${multi?`<td>${E(course(d.course).name)}</td>`:''}<td><small>${E(d.lines.map(a=>{const p=payById(a.pid);return p?`${lotWho(p)} ${inr(a.amount)}`:''}).join(', '))}</small></td><td class="num amt">${inr(d.total)}</td><td>${E(d.bankRef)}</td><td><small>${E(d.by)}</small></td>
+    <td><div class="actions nowrap"><button class="btn sm" data-act="cashDepPrint" data-id="${E(d.id)}">Print</button>${isBoss()?`<button class="btn sm" data-act="cashDepUndo" data-id="${E(d.id)}">Undo</button>`:''}</div></td></tr>`).join('')||`<tr><td colspan="${multi?8:7}" class="empty">No cash in hand deposited yet.</td></tr>`}</tbody></table></div>${pager('cash.deposits',l.length)}
+   <p class="note">Each line is that student's own money, so the bank deposit counts as that student's fee. Only the Principal can undo a deposit.</p></div>`}
+function cdepFormHtml(){const cs=cashCourses();const cid=ui.cdep.course;const lots=cihLots(cid).filter(p=>cihLeft(p)>0);
+  return`<button class="btn x" data-act="close">Close</button><h2>Deposit cash in hand to the bank</h2><p class="muted" style="margin:4px 0 0">Each student's money that is left is deposited as that student's fee. Untick a student to keep their money in cash in hand.</p>
+   <form data-form="cashDeposit" class="form" style="margin-top:12px">
+    ${cs.length>1?F('course','Whose cash in hand',{val:cid,opts:cs.map(c=>[c.id,c.name]),req:true,attrs:'data-change="cdepCourse"'}):''}
+    <div class="span tablewrap"><table><thead><tr><th><input type="checkbox" checked data-change="cdepAll" aria-label="Select all students"></th><th>Student</th><th>Receipt</th><th>Received</th><th class="num">Left</th></tr></thead><tbody>
+    ${lots.map(p=>`<tr><td><input type="checkbox" name="lot" value="${E(p.id)}" checked data-change="cdepCount" aria-label="Deposit ${E(lotWho(p))}"></td><td>${E(lotWho(p))} <small class="muted mono">${E(stu(p.studentId).enrol)}</small></td><td class="mono">${E(p.rc)}</td><td>${fmtD(p.invoiceDate)}</td><td class="num amt">${inr(cihLeft(p))}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">No cash in hand left for this course.</td></tr>'}</tbody></table></div>
+    ${lots.length?`<div class="field span"><b id="cdepSum">Selected: ${lots.length} · ${inr(sum(lots,cihLeft))}</b></div>
+    ${F('depositedOn','Deposited on',{type:'date',val:today(),req:true,attrs:`max="${today()}"`})}${F('bankRef','Bank slip / reference',{req:true,attrs:'maxlength="60"'})}
+    <div class="actions span"><button class="btn primary big">Mark as deposited</button><button type="button" class="btn" data-act="close">Cancel</button></div>`:''}</form>`}
+ACT.cashDeposit=()=>{need('cash.deposit','deposit cash in hand');const cs=cashCourses();if(!cs.length)throw new Error('No course to manage');const want=(ui.f['cash.lots']||{}).course;
+  ui.cdep={course:cs.some(c=>c.id===want)?want:(cs.find(c=>cihBalance(c.id)>0)||cs[0]).id};drawer(cdepFormHtml(),true,'Deposit cash in hand')};
+CHG.cdepCourse=el=>{ui.cdep.course=el.value;drawer(cdepFormHtml(),true,'Deposit cash in hand')};
+/* ticked students (d.lots = comma list of receipt ids is accepted too, for tests and a future API) */
+const cdepChecked=d=>(d&&d.lots?String(d.lots).split(','):$$('input[name=lot]:checked').map(i=>i.value)).map(payById).filter(Boolean);
+CHG.cdepCount=()=>{const l=cdepChecked();const s=$('#cdepSum');if(s)s.textContent=`Selected: ${l.length} · ${inr(sum(l,cihLeft))}`};
+CHG.cdepAll=el=>{$$('input[name=lot]').forEach(i=>i.checked=el.checked);CHG.cdepCount()};
+FORM.cashDeposit=(f,d)=>{need('cash.deposit','deposit cash in hand');const cs=cashCourses();const cid=cs.length>1?d.course:cs[0].id;if(!cs.some(c=>c.id===cid))throw new Error('Choose a course you manage');
+  const l=cdepChecked(d).filter(p=>payCourse(p)===cid&&cihLeft(p)>0);if(!l.length)throw new Error('Tick at least one student');
+  if(!validIso(d.depositedOn)||d.depositedOn>today())throw new Error('Choose the deposit date');const late=l.find(p=>p.invoiceDate>d.depositedOn);if(late)throw new Error(`${lotWho(late)}'s money came on ${fmtD(late.invoiceDate)}, after the deposit date`);
+  const ref=capText(d.bankRef,'Bank reference',60);if(ref.length<2)throw new Error('Enter the bank slip / reference');
+  const lines=l.map(p=>({pid:p.id,amount:cihLeft(p)}));const u=cur();
+  const dp={id:uid('cd'),ref:nextCashRef('DEP'),course:cid,depositedOn:d.depositedOn,bankRef:ref,lines,total:sum(lines,a=>a.amount),by:u.name,byId:u.id,at:Date.now()};cashbox().deposits.push(dp);
+  log('Cash in hand deposited','Cash in hand',dp.ref,null,{course:course(cid).name,total:inr(dp.total),students:lines.map(a=>stu(payById(a.pid).studentId).enrol+' '+inr(a.amount)).join(', '),bankRef:ref,on:fmtD(dp.depositedOn)});
+  save();closeLayer();ui.tab.cash='deposits';renderPage();toast(`${inr(dp.total)} marked as deposited · ${dp.ref}`)};
+ACT.cashDepUndo=el=>{if(!isBoss())throw new Error('Only the Principal can undo a deposit');const dp=cashbox().deposits.find(x=>x.id===el.dataset.id);if(!dp||!mayCourse(dp.course))throw new Error('Not found');
+  confirmBox('Undo deposit',`${dp.ref}: ${inr(dp.total)} of ${dp.lines.length} student${dp.lines.length===1?'':'s'} goes back to cash in hand.`,'Undo',()=>{cashbox().deposits=cashbox().deposits.filter(x=>x!==dp);log('Cash in hand deposit undone','Cash in hand',dp.ref,{total:inr(dp.total)},null);save();renderPage();toast('Deposit undone')},true)};
+ACT.cashDepPrint=el=>{need('cash.view');const dp=cashbox().deposits.find(x=>x.id===el.dataset.id);if(!dp||!mayCourse(dp.course))throw new Error('Not found');
+  printReport('Cash in hand deposit '+dp.ref,`${course(dp.course).name} · deposited ${fmtD(dp.depositedOn)} · ${dp.bankRef}`,['Student','Enrolment no','Fee receipt','Received on','Amount'],
+   dp.lines.map(a=>{const p=payById(a.pid),s=stu(p.studentId);return[s.name,s.enrol,p.rc,fmtD(p.invoiceDate),inr(a.amount)]}),
+   `<p class="pt">Total ${inr(dp.total)} · ${dp.lines.length} students · marked by ${E(dp.by)}</p><p class="pt">Deposited by: ____________________ &nbsp; Checked by: ____________________</p>`)};
+/* =====================================================================
    Notice Board (§8) · Audit (§7) · Settings, Roles & Permissions (§2, §11)
    ===================================================================== */
 
@@ -3129,35 +3374,35 @@ function txAll(){
   return vPayments().map(p=>{const s=stu(p.studentId);return{kind:'p',id:p.id,date:p.invoiceDate,entry:p.entryAt,s,sem:p.sem,mode:p.mode,amount:p.amount,ref:p.rc,status:p.status,by:p.by,rec:p,reason:p.reason||'',batch:batchOf(p)}})
    ;
 }
-function txFilter(){return ui.f['audit.tx']=Object.assign({q:'',modes:[],from:'',to:'',course:'',sem:'',cat:'',fund:'',status:'',by:'',min:'',max:'',sort:'date',dir:-1,page:0},ui.f['audit.tx']||{})}
+function txFilter(){return ui.f['audit.tx']=Object.assign({q:'',modes:[],split:'',from:'',to:'',course:'',sem:'',cat:'',fund:'',status:'',by:'',min:'',max:'',sort:'date',dir:-1,page:0},ui.f['audit.tx']||{})}
 function txFiltered(){
   const f=txFilter();const q=f.q.toLowerCase();const mn=f.min!==''?toPaise(f.min):null,mx=f.max!==''?toPaise(f.max):null;
   let l=txAll().filter(r=>(!f.modes.length||f.modes.includes(r.mode))&&(!f.from||r.date>=f.from)&&(!f.to||r.date<=f.to)&&(!f.course||(r.s&&r.s.course===f.course))&&(!f.sem||r.sem===+f.sem)
-   &&(!f.cat||(r.s&&r.s.category===f.cat))&&(!f.fund||(r.s&&r.s.funding===f.fund))&&(!f.status||r.status===f.status)&&(!f.by||r.by===f.by)&&(mn===null||r.amount>=mn)&&(mx===null||r.amount<=mx)
+   &&(!f.cat||(r.s&&r.s.category===f.cat))&&(!f.fund||(r.s&&r.s.funding===f.fund))&&(!f.status||r.status===f.status)&&(!f.split||(f.split==='exp'?payExp(r.rec)>0:f.split==='cih'?payCih(r.rec)>0:f.split==='any'?payExp(r.rec)+payCih(r.rec)>0:true))&&(!f.by||r.by===f.by)&&(mn===null||r.amount>=mn)&&(mx===null||r.amount<=mx)
    &&(!q||[r.ref,r.s&&r.s.name,r.s&&r.s.enrol,r.reason,r.batch,r.rec.chequeNo,r.rec.upiRef].some(v=>String(v||'').toLowerCase().includes(q))));
   const k={date:r=>r.date+String(r.entry).padStart(14,'0'),entry:r=>r.entry,name:r=>r.s?r.s.name:'~',course:r=>r.s?r.s.course:'~',sem:r=>r.sem||0,cat:r=>r.s?r.s.category:'~',fund:r=>r.s?r.s.funding:'~',mode:r=>r.mode,amount:r=>r.amount,ref:r=>r.ref,status:r=>r.status,by:r=>r.by}[f.sort]||(r=>r.date);
   l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l;
 }
-const txTotals=l=>{const ok=l.filter(r=>r.status==='SUCCESS');const o={};['CASH','CHEQUE','UPI','EXPENSE'].forEach(m=>o[m]=sum(ok.filter(r=>r.mode===m),r=>r.amount));o.income=o.CASH+o.CHEQUE+o.UPI;return o};
+const txTotals=l=>{const ok=l.filter(r=>r.status==='SUCCESS');const o={};PAY_MODES.forEach(m=>o[m]=sum(ok.filter(r=>r.mode===m),r=>r.amount));o.income=o.CASH+o.CHEQUE+o.UPI;o.EXP=sum(ok,r=>payExp(r.rec));o.CIH=sum(ok,r=>payCih(r.rec));o.BANK=sum(ok,r=>payToBank(r.rec));return o};
 function auditTx(){
   const f=txFilter();const sc='audit.tx';const l=txFiltered();const pg=pageRows(f,l);const t=txTotals(l);const bys=[...new Set(txAll().map(r=>r.by))];
-  return`<div class="totals">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)}</span><b>${inr(t[m])}</b></div>`).join('')}<div class="tt sum"><span>Cash + Cheque + UPI</span><b>${inr(t.income)}</b></div></div>
+  return`<div class="totals">${PAY_MODES.map(m=>`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)}</span><b>${inr(t[m])}</b>${m==='CASH'&&(t.EXP||t.CIH)?`<small>expense ${inr(t.EXP)} · cash in hand ${inr(t.CIH)}</small>`:''}</div>`).join('')}<div class="tt sum"><span>Cash + Cheque + UPI</span><b>${inr(t.income)}</b></div></div>
   <div class="panel"><div class="filters"><input type="search" placeholder="Search receipt, name, cheque, UTR, reason" aria-label="Search transactions" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
-   <div class="chips" role="group" aria-label="Mode">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<button type="button" class="chip ${MODE_TONE[m]}" aria-pressed="${f.modes.includes(m)}" data-act="txMode" data-m="${m}">${modeName(m)}</button>`).join('')}</div>
+   <div class="chips" role="group" aria-label="Mode">${PAY_MODES.map(m=>`<button type="button" class="chip ${MODE_TONE[m]}" aria-pressed="${f.modes.includes(m)}" data-act="txMode" data-m="${m}">${modeName(m)}</button>`).join('')}</div>
    <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label>
-   ${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'sem','Semester',SEM_OPTS_())}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled'],['FAILED','Failed']])}${sel(sc,'by','Entered by',[['','Anyone'],...bys.map(b=>[b,b])])}
+   ${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'sem','Semester',SEM_OPTS_())}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'split','Cash split',[['','Cash split: any'],['any','Has expense or cash in hand'],['exp','Has expense now'],['cih','Has cash in hand']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled'],['FAILED','Failed']])}${sel(sc,'by','Entered by',[['','Anyone'],...bys.map(b=>[b,b])])}
    <input class="numin" placeholder="Min ₹" aria-label="Minimum amount" value="${E(f.min)}" data-change="sf" data-scope="${sc}" data-k="min" inputmode="decimal"><input class="numin" placeholder="Max ₹" aria-label="Maximum amount" value="${E(f.max)}" data-change="sf" data-scope="${sc}" data-k="max" inputmode="decimal">
    <button class="btn sm" data-act="txClear">Clear</button></div>
   <div class="actions" style="margin-bottom:10px"><span class="muted">${l.length} rows</span><span style="flex:1"></span><button class="btn exp-btn" data-act="expOpen" data-key="audit.tx">Export</button></div>
   <div class="tablewrap"><table class="dense"><thead><tr>${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entry time')}${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course')}<th>Batch</th>${sortTh(sc,'sem','Sem')}${sortTh(sc,'cat','Category')}${sortTh(sc,'fund','Funding')}${sortTh(sc,'mode','Mode')}${sortTh(sc,'amount','Amount',1)}${sortTh(sc,'ref','Receipt / ref')}${sortTh(sc,'status','Status')}${sortTh(sc,'by','Entered by')}</tr></thead><tbody>
-  ${pg.map(r=>`<tr><td>${fmtD(r.date)}</td><td><small>${fmtT(r.entry)}</small></td><td>${r.s?`<button class="lnk" data-act="openStudent" data-id="${E(r.s.id)}">${E(r.s.name)}</button>`:`<span class="muted">${E(r.reason||'—')}</span>`}</td><td>${r.s?E(course(r.s.course).name):'—'}</td><td class="mono">${E(r.batch||'—')}</td><td>${r.sem||'—'}</td><td>${r.s?E(r.s.category):'—'}</td><td>${r.s?E(fundLabel(r.s.funding)):'—'}</td><td>${modePill(r.mode)}</td><td class="num amt">${inr(r.amount)}</td><td class="mono">${r.kind==='p'?`<button class="lnk mono" data-act="viewReceipt" data-id="${E(r.id)}">${E(r.ref)}</button>`:E(r.ref)}</td><td>${payPill(r.status)}</td><td>${E(r.by)}</td></tr>`).join('')||'<tr><td colspan="13" class="empty">No transactions for these filters.</td></tr>'}
+  ${pg.map(r=>`<tr><td>${fmtD(r.date)}</td><td><small>${fmtT(r.entry)}</small></td><td>${r.s?`<button class="lnk" data-act="openStudent" data-id="${E(r.s.id)}">${E(r.s.name)}</button>`:`<span class="muted">${E(r.reason||'—')}</span>`}</td><td>${r.s?E(course(r.s.course).name):'—'}</td><td class="mono">${E(r.batch||'—')}</td><td>${r.sem||'—'}</td><td>${r.s?E(r.s.category):'—'}</td><td>${r.s?E(fundLabel(r.s.funding)):'—'}</td><td>${modePill(r.mode)}</td><td class="num amt">${inr(r.amount)}${splitLine(r.rec)}</td><td class="mono">${r.kind==='p'?`<button class="lnk mono" data-act="viewReceipt" data-id="${E(r.id)}">${E(r.ref)}</button>`:E(r.ref)}</td><td>${payPill(r.status)}</td><td>${E(r.by)}</td></tr>`).join('')||'<tr><td colspan="13" class="empty">No transactions for these filters.</td></tr>'}
   </tbody></table></div>${pager(sc,l.length)}</div>`;
 }
 ACT.txMode=el=>{const f=txFilter();const m=el.dataset.m;f.modes=f.modes.includes(m)?f.modes.filter(x=>x!==m):[...f.modes,m];f.page=0;renderPage()};
 ACT.txClear=()=>{const f=txFilter();ui.f['audit.tx']={sort:f.sort,dir:f.dir,page:0};renderPage()};
-const txCols=['Invoice date','Entry time','Student','Enrolment no','Course','Batch','Sem','Category','Funding','Mode','Amount (₹)','Receipt / ref','Status','Entered by','Cheque no','Bank','UPI ref','Reason'];
-const txRow=r=>[fmtD(r.date),fmtT(r.entry),r.s?r.s.name:'',r.s?r.s.enrol:'',r.s?course(r.s.course).name:'',r.batch||'',r.sem||'',r.s?r.s.category:'',r.s?fundLabel(r.s.funding):'',modeName(r.mode),r.amount/100,r.ref,r.status,r.by,r.rec.chequeNo||'',r.rec.bank||'',r.rec.upiRef||'',r.reason||r.rec.cancelReason||''];
-ACT.txCsv=()=>{need('audit.view');const l=txFiltered();const t=txTotals(l);showCsv('NPCTE transactions',txCols,[...l.map(txRow),[],['Totals (successful)','','','','','','','','','Cash',t.CASH/100],['','','','','','','','','','Cheque',t.CHEQUE/100],['','','','','','','','','','UPI',t.UPI/100],['','','','','','','','','','Expense',t.EXPENSE/100]]);log('Audit exported','Audit','',null,{rows:l.length,format:'Excel'})};
+const txCols=['Invoice date','Entry time','Student','Enrolment no','Course','Batch','Sem','Category','Funding','Mode','Amount (₹)','Expense now (₹)','Cash in hand (₹)','To bank (₹)','Receipt / ref','Status','Entered by','Cheque no','Bank','UPI ref','Reason'];
+const txRow=r=>[fmtD(r.date),fmtT(r.entry),r.s?r.s.name:'',r.s?r.s.enrol:'',r.s?course(r.s.course).name:'',r.batch||'',r.sem||'',r.s?r.s.category:'',r.s?fundLabel(r.s.funding):'',modeName(r.mode),r.amount/100,payExp(r.rec)/100,payCih(r.rec)/100,payToBank(r.rec)/100,r.ref,r.status,r.by,r.rec.chequeNo||'',r.rec.bank||'',r.rec.upiRef||'',r.reason||r.rec.cancelReason||''];
+ACT.txCsv=()=>{need('audit.view');const l=txFiltered();const t=txTotals(l);showCsv('NPCTE transactions',txCols,[...l.map(txRow),[],['Totals (successful)','','','','','','','','','Cash',t.CASH/100],['','','','','','','','','','Cheque',t.CHEQUE/100],['','','','','','','','','','UPI',t.UPI/100],['','','','','','','','','','Of cash: expense now',t.EXP/100],['','','','','','','','','','Of cash: cash in hand',t.CIH/100]]);log('Audit exported','Audit','',null,{rows:l.length,format:'Excel'})};
 /* printable report with the college header: the browser's "Save as PDF" makes the PDF */
 function printReport(title,sub,cols,rows,foot){
   const c=db.college;const w=$('#printArea')||document.body.appendChild(Object.assign(document.createElement('div'),{id:'printArea'}));
@@ -3168,7 +3413,7 @@ function printReport(title,sub,cols,rows,foot){
 ACT.txPrint=()=>{need('audit.view');const f=txFilter();const l=txFiltered();const t=txTotals(l);
   printReport('Transactions audit',`${f.from?fmtD(f.from):'Start'} to ${f.to?fmtD(f.to):fmtD(today())}${f.modes.length?' · '+f.modes.map(modeName).join(', '):''}`,['Invoice date','Student','Course','Sem','Category','Funding','Mode','Amount','Receipt','Status','By'],
    l.map(r=>[fmtD(r.date),r.s?r.s.name+' ('+r.s.enrol+')':r.reason,r.s?course(r.s.course).name:'',r.sem||'',r.s?r.s.category:'',r.s?fundLabel(r.s.funding):'',modeName(r.mode),inr(r.amount),r.ref,r.status,r.by]),
-   `<p class="pt">Cash ${inr(t.CASH)} · Cheque ${inr(t.CHEQUE)} · UPI ${inr(t.UPI)} · Expense ${inr(t.EXPENSE)} · Fees received ${inr(t.income)} · ${l.length} rows</p>`);log('Audit exported','Audit','',null,{rows:l.length,format:'PDF'})};
+   `<p class="pt">Cash ${inr(t.CASH)} (expense ${inr(t.EXP)}, cash in hand ${inr(t.CIH)}) · Cheque ${inr(t.CHEQUE)} · UPI ${inr(t.UPI)} · Fees received ${inr(t.income)} · ${l.length} rows</p>`);log('Audit exported','Audit','',null,{rows:l.length,format:'PDF'})};
 
 /* deposit report (§7A) */
 function weekStart(iso){const d=parseD(iso);const k=(d.getDay()+6)%7;return addDays(iso,-k)}
@@ -3178,38 +3423,42 @@ function depPeriod(){const f=ui.f.dep=Object.assign({p:'week',from:'',to:''},ui.
   if(f.p==='lastmonth'){const d=new Date(+T.slice(0,4),+T.slice(5,7)-2,1);return{from:isoOf(d),to:addDays(isoOf(new Date(d.getFullYear(),d.getMonth()+1,1)),-1),f}}
   return{from:f.from||addDays(T,-30),to:f.to||T,f}}
 /* cash and cheque of the chosen period that are not yet marked as deposited (oldest first) */
-function depPending(){const{from,to}=depPeriod();return vPayments().filter(p=>p.invoiceDate>=from&&p.invoiceDate<=to&&p.status==='SUCCESS'&&(p.mode==='CASH'||p.mode==='CHEQUE')&&!p.depositId).sort((a,b)=>a.invoiceDate<b.invoiceDate?-1:1)}
+/* change 4: only the "to bank" part of a cash fee is deposited here; expense now and cash in hand are kept out (cash in hand goes to the bank from Cash in hand) */
+function depPending(){const{from,to}=depPeriod();return vPayments().filter(p=>p.invoiceDate>=from&&p.invoiceDate<=to&&p.status==='SUCCESS'&&payToBank(p)>0&&!p.depositId).sort((a,b)=>a.invoiceDate<b.invoiceDate?-1:1)}
 function auditDeposit(){
   const{from,to,f}=depPeriod();const inP=p=>p.invoiceDate>=from&&p.invoiceDate<=to&&p.status==='SUCCESS';
-  const pays=vPayments().filter(inP);const und=depPending();const ex=pays.filter(p=>p.mode==='EXPENSE');
-  const col=m=>{const l=m==='EXPENSE'?ex:pays.filter(p=>p.mode===m);return{t:sum(l,x=>x.amount),n:l.length,und:m==='CASH'||m==='CHEQUE'?sum(l.filter(p=>!p.depositId),p=>p.amount):null}};
-  const sc=can('audit.deposit');
+  const pays=vPayments().filter(inP);const und=depPending();const cash=pays.filter(p=>p.mode==='CASH');
+  const col=m=>{const l=pays.filter(p=>p.mode===m);return{t:sum(l,x=>x.amount),n:l.length,bank:sum(l,payToBank),und:m==='CASH'||m==='CHEQUE'?sum(l.filter(p=>!p.depositId),payToBank):null}};
+  const sc=can('audit.deposit');const c=col('CASH'),ch=col('CHEQUE'),u=col('UPI');const ex=sum(cash,payExp),ci=sum(cash,payCih);
   return`<div class="panel"><h2>Cash & cheque deposit report</h2>
    <div class="filters"><div class="chips" role="group" aria-label="Period">${[['week','This week'],['lastweek','Last week'],['month','This month'],['lastmonth','Last month'],['custom','Custom']].map(([k,l])=>`<button type="button" class="chip" aria-pressed="${f.p===k}" data-act="depP" data-p="${k}">${l}</button>`).join('')}</div>
     ${f.p==='custom'?`<label class="dl">From <input type="date" value="${E(from)}" data-change="sf" data-scope="dep" data-k="from"></label><label class="dl">To <input type="date" value="${E(to)}" data-change="sf" data-scope="dep" data-k="to"></label>`:`<span class="muted">${fmtD(from)} to ${fmtD(to)}</span>`}</div>
-   <div class="totals four">${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>{const c=col(m);return`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)} · ${c.n}</span><b>${inr(c.t)}</b>${c.und!==null?`<small>${c.und?inr(c.und)+' not deposited':'all deposited'}</small>`:`<small>${m==='UPI'?'goes to bank by gateway':'fee used for college expense'}</small>`}</div>`}).join('')}</div>
-   <h3>Not yet deposited · ${und.length} entries · ${inr(sum(und,p=>p.amount))}<button class="btn exp-btn" data-act="expOpen" data-key="audit.dep">Export</button></h3>
-   <div class="tablewrap"><table><thead><tr>${sc?`<th><input type="checkbox" aria-label="Select all" data-change="depAll" checked></th>`:''}<th>Invoice date</th><th>Receipt</th><th>Student</th><th>Mode</th><th>Cheque</th><th class="num">Amount</th></tr></thead><tbody>
-   ${und.sort((a,b)=>a.invoiceDate<b.invoiceDate?-1:1).map(p=>`<tr>${sc?`<td><input type="checkbox" name="dep" value="${E(p.id)}" checked aria-label="Include ${E(p.rc)}" data-change="depCount"></td>`:''}<td>${fmtD(p.invoiceDate)}</td><td class="mono">${E(p.rc)}</td><td>${E(stu(p.studentId).name)}</td><td>${modePill(p.mode)}</td><td>${p.mode==='CHEQUE'?E(p.chequeNo+' · '+p.bank):'—'}</td><td class="num amt">${inr(p.amount)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nothing waiting to be deposited in this period.</td></tr>'}</tbody></table></div>
-   ${sc&&und.length?`<form data-form="deposit" class="form" style="margin-top:14px"><div class="field span"><b id="depSum">Selected: ${und.length} · ${inr(sum(und,p=>p.amount))}</b></div>${F('depositedOn','Deposited on',{type:'date',val:today(),req:true,attrs:`max="${today()}"`})}${F('bankRef','Bank slip / reference',{req:true,attrs:'maxlength="60"'})}<div class="actions span"><button class="btn primary big">Mark as deposited</button><button type="button" class="btn" data-act="depPrint">Print report</button></div></form>`:`<div class="actions" style="margin-top:12px"><button class="btn" data-act="depPrint">Print report</button></div>`}
+   <div class="totals four"><div class="tt m-cash"><span>Cash · ${c.n}</span><b>${inr(c.t)}</b><small>${inr(c.bank)} to bank · ${c.und?inr(c.und)+' not deposited':'all deposited'}</small></div>
+    <div class="tt m-cheque"><span>Cheque · ${ch.n}</span><b>${inr(ch.t)}</b><small>${ch.und?inr(ch.und)+' not deposited':'all deposited'}</small></div>
+    <div class="tt m-upi"><span>UPI · ${u.n}</span><b>${inr(u.t)}</b><small>goes to bank by gateway</small></div>
+    <div class="tt m-exp"><span>Kept from cash</span><b>${inr(ex+ci)}</b><small>expense now ${inr(ex)} · cash in hand ${inr(ci)}</small></div></div>
+   <h3>Not yet deposited · ${und.length} entries · ${inr(sum(und,payToBank))}<button class="btn exp-btn" data-act="expOpen" data-key="audit.dep">Export</button></h3>
+   <div class="tablewrap"><table><thead><tr>${sc?`<th><input type="checkbox" aria-label="Select all" data-change="depAll" checked></th>`:''}<th>Invoice date</th><th>Receipt</th><th>Student</th><th>Mode</th><th>Cheque</th><th class="num">To deposit</th></tr></thead><tbody>
+   ${und.sort((a,b)=>a.invoiceDate<b.invoiceDate?-1:1).map(p=>`<tr>${sc?`<td><input type="checkbox" name="dep" value="${E(p.id)}" checked aria-label="Include ${E(p.rc)}" data-change="depCount"></td>`:''}<td>${fmtD(p.invoiceDate)}</td><td class="mono">${E(p.rc)}</td><td>${E(stu(p.studentId).name)}</td><td>${modePill(p.mode)}</td><td>${p.mode==='CHEQUE'?E(p.chequeNo+' · '+p.bank):'—'}</td><td class="num amt">${inr(payToBank(p))}${payToBank(p)!==p.amount?`<small class="muted split-line">of ${inr(p.amount)}</small>`:''}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nothing waiting to be deposited in this period.</td></tr>'}</tbody></table></div>
+   ${sc&&und.length?`<form data-form="deposit" class="form" style="margin-top:14px"><div class="field span"><b id="depSum">Selected: ${und.length} · ${inr(sum(und,payToBank))}</b></div>${F('depositedOn','Deposited on',{type:'date',val:today(),req:true,attrs:`max="${today()}"`})}${F('bankRef','Bank slip / reference',{req:true,attrs:'maxlength="60"'})}<div class="actions span"><button class="btn primary big">Mark as deposited</button><button type="button" class="btn" data-act="depPrint">Print report</button></div></form>`:`<div class="actions" style="margin-top:12px"><button class="btn" data-act="depPrint">Print report</button></div>`}
   </div>
   <div class="panel" style="margin-top:16px"><h2>Deposits made<button class="btn exp-btn" data-act="expOpen" data-key="audit.depmade">Export</button></h2><div class="tablewrap"><table><thead><tr><th>Deposited on</th><th>Period</th><th>Entries</th><th class="num">Total</th><th>Bank ref</th><th>By</th><th></th></tr></thead><tbody>
    ${pageRows(ui.f.depmade=ui.f.depmade||{},db.deposits.slice().sort((a,b)=>b.at-a.at)).map(d=>`<tr><td>${fmtD(d.depositedOn)}</td><td>${fmtD(d.periodFrom)} – ${fmtD(d.periodTo)}</td><td>${d.count}</td><td class="num amt">${inr(d.total)}</td><td>${E(d.bankRef)}</td><td>${E(d.by)}</td><td>${['Super Admin','Principal'].includes(cur().role)?`<button class="btn sm" data-act="depUndo" data-id="${E(d.id)}">Undo</button>`:''}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">No deposits yet.</td></tr>'}</tbody></table></div>${pager('depmade',db.deposits.length)}</div>`;
 }
 ACT.depP=el=>{depPeriod().f.p=el.dataset.p;renderPage()};
 const depChecked=()=>$$('input[name=dep]:checked').map(i=>db.payments.find(p=>p.id===i.value)).filter(Boolean);
-CHG.depCount=()=>{const l=depChecked();const s=$('#depSum');if(s)s.textContent=`Selected: ${l.length} · ${inr(sum(l,p=>p.amount))}`};
+CHG.depCount=()=>{const l=depChecked();const s=$('#depSum');if(s)s.textContent=`Selected: ${l.length} · ${inr(sum(l,payToBank))}`};
 CHG.depAll=el=>{$$('input[name=dep]').forEach(i=>i.checked=el.checked);CHG.depCount()};
-FORM.deposit=(f,d)=>{need('audit.deposit','mark deposits');const l=depChecked().filter(p=>p.status==='SUCCESS'&&!p.depositId&&(p.mode==='CASH'||p.mode==='CHEQUE'));if(!l.length)throw new Error('Select at least one entry');
+FORM.deposit=(f,d)=>{need('audit.deposit','mark deposits');const l=depChecked().filter(p=>p.status==='SUCCESS'&&!p.depositId&&payToBank(p)>0);if(!l.length)throw new Error('Select at least one entry');
   if(!validIso(d.depositedOn)||d.depositedOn>today())throw new Error('Choose the deposit date');const ref=capText(d.bankRef,'Bank reference',60);if(ref.length<2)throw new Error('Enter the bank slip / reference');
   const{from,to}=depPeriod();const types=[...new Set(l.map(p=>p.mode))];
-  const dp={id:uid('d'),type:types.join('+'),periodFrom:from,periodTo:to,total:sum(l,p=>p.amount),depositedOn:d.depositedOn,bankRef:ref,by:cur().name,at:Date.now(),count:l.length};
+  const dp={id:uid('d'),type:types.join('+'),periodFrom:from,periodTo:to,total:sum(l,payToBank),depositedOn:d.depositedOn,bankRef:ref,by:cur().name,at:Date.now(),count:l.length};
   db.deposits.push(dp);l.forEach(p=>p.depositId=dp.id);log('Marked as deposited','Deposit',dp.id,null,{total:inr(dp.total),entries:dp.count,bankRef:ref,on:fmtD(dp.depositedOn)});save();renderPage();toast(`${inr(dp.total)} marked as deposited`)};
 ACT.depUndo=el=>{if(!['Super Admin','Principal'].includes(cur().role))throw new Error('Only the Principal can undo a deposit');const dp=db.deposits.find(x=>x.id===el.dataset.id);
   confirmBox('Undo deposit',`${dp.count} entries (${inr(dp.total)}) go back to "not deposited".`,'Undo',()=>{db.payments.forEach(p=>{if(p.depositId===dp.id)p.depositId=''});db.deposits=db.deposits.filter(x=>x!==dp);log('Deposit undone','Deposit',dp.id,{total:inr(dp.total)},null);save();renderPage();toast('Deposit undone')},true)};
-ACT.depPrint=()=>{const{from,to}=depPeriod();const l=vPayments().filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&(p.mode==='CASH'||p.mode==='CHEQUE'));const t=m=>inr(sum(db.payments.filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&p.mode===m),p=>p.amount));
-  printReport('Cash & cheque deposit report',`${fmtD(from)} to ${fmtD(to)}`,['Invoice date','Receipt','Student','Mode','Cheque','Amount','Deposited'],l.map(p=>[fmtD(p.invoiceDate),p.rc,stu(p.studentId).name,modeName(p.mode),p.mode==='CHEQUE'?p.chequeNo+' '+p.bank:'',inr(p.amount),p.depositId?'Yes':'No']),
-   `<p class="pt">Cash ${t('CASH')} · Cheque ${t('CHEQUE')} · UPI ${t('UPI')} · Expense ${t('EXPENSE')} · Not deposited ${inr(sum(l.filter(p=>!p.depositId),p=>p.amount))}</p><p class="pt">Deposited by: ____________________ &nbsp; Checked by: ____________________</p>`)};
+ACT.depPrint=()=>{const{from,to}=depPeriod();const l=vPayments().filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&payToBank(p)>0);const inP=vPayments().filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to);const t=m=>inr(sum(inP.filter(p=>p.mode===m),p=>p.amount));
+  printReport('Cash & cheque deposit report',`${fmtD(from)} to ${fmtD(to)}`,['Invoice date','Receipt','Student','Mode','Cheque','Fee','To bank','Deposited'],l.map(p=>[fmtD(p.invoiceDate),p.rc,stu(p.studentId).name,modeName(p.mode),p.mode==='CHEQUE'?p.chequeNo+' '+p.bank:'',inr(p.amount),inr(payToBank(p)),p.depositId?'Yes':'No']),
+   `<p class="pt">Cash ${t('CASH')} (expense now ${inr(sum(inP,payExp))}, cash in hand ${inr(sum(inP,payCih))}) · Cheque ${t('CHEQUE')} · UPI ${t('UPI')} · Not deposited ${inr(sum(l.filter(p=>!p.depositId),payToBank))}</p><p class="pt">Deposited by: ____________________ &nbsp; Checked by: ____________________</p>`)};
 
 /* activity log (§7B): read-only, Principal and Super Admin */
 function actFiltered(){const f=ui.f.act=Object.assign({q:'',role:'',from:'',to:'',page:0},ui.f.act||{});const q=f.q.toLowerCase();
@@ -3542,9 +3791,9 @@ function donut(parts){/* [label,value,cls,link] */
 }
 function viewDashboard(){
   need('dashboard.view');const u=cur(),T=today(),M=T.slice(0,7);const L=live();
-  const allP=okP();const pays=allP.filter(p=>p.mode!=='EXPENSE');const today_=sum(pays.filter(p=>p.invoiceDate===T),p=>p.amount);const month=sum(pays.filter(p=>p.invoiceDate.slice(0,7)===M),p=>p.amount);
+  const allP=okP();const pays=allP;const today_=sum(pays.filter(p=>p.invoiceDate===T),p=>p.amount);const month=sum(pays.filter(p=>p.invoiceDate.slice(0,7)===M),p=>p.amount);
   const dl=L.map(s=>({s,sm:feeSum(s)})).filter(x=>x.sm.payable>0).sort((a,b)=>b.sm.payable-a.sm.payable);const outst=sum(dl,x=>x.sm.payable);
-  const expPM=allP.filter(p=>p.mode==='EXPENSE'&&p.invoiceDate.slice(0,7)===M);const expM=sum(expPM,p=>p.amount);const sch=L.filter(s=>s.funding==='SCHOLARSHIP').length;
+  /* change 4: expenses of this month = expense parts of cash fees + expenses paid from cash in hand */const expM=sum(allP.filter(p=>p.invoiceDate.slice(0,7)===M),payExp)+sum(cashbox().spends.filter(x=>x.status==='ACTIVE'&&x.date.slice(0,7)===M&&inScope(x.course)),x=>x.amount);const cihNow=sum(scopeCourses(),c=>cihBalance(c.id));const sch=L.filter(s=>s.funding==='SCHOLARSHIP').length;
   const clerk=u.role==='Clerk';const mF={from:M+'-01',to:monthEnd(M),modes:['CASH','CHEQUE','UPI'],status:'SUCCESS'};
   const k=[
     !clerk&&kpi('Students',L.length,`${L.filter(s=>s.course==='BED').length} B.Ed · ${L.filter(s=>s.course==='MED').length} M.Ed`,'students',null,{status:'ACTIVE'}),
@@ -3552,11 +3801,11 @@ function viewDashboard(){
     kpi('Collected this month',inr(month),MON[+M.slice(5)-1]+' '+M.slice(0,4),'audit','tx',mF),
     kpi('Total outstanding',inr(outst),dl.length+' students · '+dl.filter(x=>x.sm.overdue).length+' overdue','fees','dues',{},'warn'),
     !clerk&&kpi('Scholarship students',sch,'SC / ST · by scholarship','students',null,{fund:'SCHOLARSHIP',status:'ACTIVE'}),
-    kpi('Fees used as expense',inr(expM),expPM.length+(expPM.length===1?' receipt':' receipts')+' this month','audit','tx',{from:M+'-01',to:monthEnd(M),modes:['EXPENSE'],status:'SUCCESS'})].filter(Boolean);
+    can('cash.view')?kpi('Cash in hand',inr(cihNow),'Expenses this month '+inr(expM),'cash','lots',null):kpi('Expenses this month',inr(expM),'from cash fees and cash in hand','audit','tx',{from:M+'-01',to:monthEnd(M),split:'exp',status:'SUCCESS'})].filter(Boolean);
   const keys=monthKeys(12);const vals=keys.map(m=>sum(pays.filter(p=>p.invoiceDate.slice(0,7)===m),p=>p.amount));
   const yFrom=keys[0]+'-01';const inY=allP.filter(p=>p.invoiceDate>=yFrom);
   const modeParts=[['Cash',sum(inY.filter(p=>p.mode==='CASH'),p=>p.amount),'d-cash',{to:'audit',sub:'tx',f:{from:yFrom,modes:['CASH']}}],['Cheque',sum(inY.filter(p=>p.mode==='CHEQUE'),p=>p.amount),'d-cheque',{to:'audit',sub:'tx',f:{from:yFrom,modes:['CHEQUE']}}],
-    ['UPI',sum(inY.filter(p=>p.mode==='UPI'),p=>p.amount),'d-upi',{to:'audit',sub:'tx',f:{from:yFrom,modes:['UPI']}}],['Expense',sum(inY.filter(p=>p.mode==='EXPENSE'),p=>p.amount),'d-exp',{to:'audit',sub:'tx',f:{from:yFrom,modes:['EXPENSE']}}]];
+    ['UPI',sum(inY.filter(p=>p.mode==='UPI'),p=>p.amount),'d-upi',{to:'audit',sub:'tx',f:{from:yFrom,modes:['UPI']}}]];
   const catBars=CATS.map(c=>[c,L.filter(s=>s.category===c).length,'cat-'+c,{to:'students',f:{cat:c,status:'ACTIVE'}}]);
   const fundBars=[['By Cash',L.filter(s=>s.funding==='CASH').length,'c-cash',{to:'students',f:{fund:'CASH',status:'ACTIVE'}}],['By Scholarship',sch,'c-sch',{to:'students',f:{fund:'SCHOLARSHIP',status:'ACTIVE'}}]];
   const hr=+new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hour:'2-digit',hour12:false}).format(Date.now());const greet=hr<12?'Good morning':hr<17?'Good afternoon':'Good evening';
@@ -3604,18 +3853,27 @@ const payCols=g=>[XC('rc','Receipt no','text',p=>p.rc,1,'Invoice'),XC('date','In
   XC('name','Student name','text',p=>stu(p.studentId).name,1,'Student'),XC('enrol','Enrolment no','text',p=>stu(p.studentId).enrol,1,'Student'),XC('course','Course','text',p=>course(stu(p.studentId).course).name,1,'Course'),
   XC('batch','Batch','text',p=>batchOf(p),1,'Course'),XC('sem','Semester','int',p=>p.sem,1,'Course'),XC('cat','Category','text',p=>stu(p.studentId).category,0,'Student'),XC('fund','Funding','text',p=>fundLabel(stu(p.studentId).funding),0,'Student'),
   XC('ref','Admission reference','text',p=>stu(p.studentId).ref||'',0,'Student'),
-  XC('mode','Mode','text',p=>modeName(p.mode),1,'Payment'),XC('amount','Amount','money',p=>p.amount,1,'Payment'),XC('status','Status','text',p=>({SUCCESS:'Success',CANCELLED:'Cancelled',FAILED:'Failed'}[p.status]||p.status),1,'Payment'),
-  XC('dep','Deposited','text',p=>p.mode==='CASH'||p.mode==='CHEQUE'?yesNo(p.depositId):'',0,'Payment'),XC('chq','Cheque no','text',p=>p.chequeNo||'',0,'Payment'),XC('bank','Bank','text',p=>p.bank||'',0,'Payment'),
+  XC('mode','Mode','text',p=>modeName(p.mode),1,'Payment'),XC('amount','Amount','money',p=>p.amount,1,'Payment'),XC('exp','Expense now','money',p=>payExp(p),0,'Payment'),XC('cih','Cash in hand','money',p=>payCih(p),0,'Payment'),XC('tobank','To bank','money',p=>payToBank(p),0,'Payment'),XC('status','Status','text',p=>({SUCCESS:'Success',CANCELLED:'Cancelled',FAILED:'Failed'}[p.status]||p.status),1,'Payment'),
+  XC('dep','Deposited','text',p=>payToBank(p)>0?yesNo(p.depositId):'',0,'Payment'),XC('chq','Cheque no','text',p=>p.chequeNo||'',0,'Payment'),XC('bank','Bank','text',p=>p.bank||'',0,'Payment'),
   XC('chqd','Cheque date','date',p=>p.chequeDate||'',0,'Payment'),XC('upi','UPI ref','text',p=>p.upiRef||'',0,'Payment'),XC('reason','Expense / reason','text',p=>p.reason||'',0,'Payment'),
   XC('note','Office note','text',p=>p.note||'',0,'Payment'),XC('by','Entered by','text',p=>p.by||'',0,'Payment'),XC('cancel','Cancel reason','text',p=>p.cancelReason||'',0,'Payment')];
-const modeTotals=(l,get)=>['CASH','CHEQUE','UPI','EXPENSE'].map(m=>[modeName(m)+' (successful)',sum(l.filter(x=>get(x).status==='SUCCESS'&&get(x).mode===m),x=>get(x).amount)]);
+const modeTotals=(l,get)=>{const ok=l.filter(x=>get(x).status==='SUCCESS');return[...PAY_MODES.map(m=>[modeName(m)+' (successful)',sum(ok.filter(x=>get(x).mode===m),x=>get(x).amount)]),['Of cash: expense now',sum(ok,x=>payExp(get(x)))],['Of cash: cash in hand',sum(ok,x=>payCih(get(x)))]]};
 EXPORTS['fees.receipts']={title:'Receipts',perm:'fees.view',rows:()=>receiptsFiltered(),cols:()=>payCols(),okRow:p=>p.status==='SUCCESS',summary:l=>modeTotals(l,p=>p)};
 EXPORTS['audit.tx']={title:'Transactions audit',perm:'audit.view',rows:()=>txFiltered().map(r=>r.rec),cols:()=>payCols(),okRow:p=>p.status==='SUCCESS',summary:l=>modeTotals(l,p=>p),
   sub:()=>{const f=txFilter();return`${f.from?fmtD(f.from):'Start'} to ${f.to?fmtD(f.to):fmtD(today())}${f.modes.length?' · '+f.modes.map(modeName).join(', '):''}`}};
-EXPORTS['audit.dep']={title:'Not yet deposited',perm:'audit.view',rows:()=>depPending(),cols:()=>payCols().filter(c=>['rc','date','name','enrol','course','batch','sem','mode','amount','chq','bank','chqd','by'].includes(c.k)).map(c=>({...c,def:['rc','date','name','course','mode','amount','chq'].includes(c.k)})),
+EXPORTS['audit.dep']={title:'Not yet deposited',perm:'audit.view',rows:()=>depPending(),cols:()=>payCols().filter(c=>['rc','date','name','enrol','course','batch','sem','mode','amount','tobank','chq','bank','chqd','by'].includes(c.k)).map(c=>({...c,def:['rc','date','name','course','mode','tobank','chq'].includes(c.k)})),
   sub:()=>{const{from,to}=depPeriod();return`${fmtD(from)} to ${fmtD(to)}`}};
 EXPORTS['audit.depmade']={title:'Deposits made',perm:'audit.view',rows:()=>db.deposits.slice().sort((a,b)=>b.at-a.at),cols:()=>[XC('on','Deposited on','date',d=>d.depositedOn,1,'Deposit'),XC('from','Period from','date',d=>d.periodFrom,1,'Deposit'),
   XC('to','Period to','date',d=>d.periodTo,1,'Deposit'),XC('n','Entries','int',d=>d.count,1,'Deposit'),XC('total','Total','money',d=>d.total,1,'Deposit'),XC('ref','Bank ref','text',d=>d.bankRef,1,'Deposit'),XC('by','Marked by','text',d=>d.by,1,'Deposit'),XC('at','Marked on','datetime',d=>d.at,0,'Deposit')]};
+/* change 4: cash in hand lists */
+EXPORTS['cash.lots']={title:'Cash in hand by student',perm:'cash.view',rows:()=>cashLotRows(),cols:()=>[XC('date','Received','date',p=>p.invoiceDate,1,'Receipt'),XC('rc','Receipt no','text',p=>p.rc,1,'Receipt'),XC('name','Student name','text',p=>stu(p.studentId).name,1,'Student'),XC('enrol','Enrolment no','text',p=>stu(p.studentId).enrol,1,'Student'),XC('course','Course','text',p=>course(payCourse(p)).name,1,'Student'),
+  XC('kept','Kept','money',p=>payCih(p),1,'Cash in hand'),XC('used','Used for expenses','money',p=>cihUsed(p),1,'Cash in hand'),XC('dep','Deposited to bank','money',p=>cihDeposited(p),1,'Cash in hand'),XC('left','Left','money',p=>cihLeft(p),1,'Cash in hand')]};
+EXPORTS['cash.register']={title:'Cash in hand register',perm:'cash.view',rows:()=>cashRegRows(),cols:()=>[XC('date','Date','date',e=>e.date,1,'Entry'),XC('kind','Type','text',e=>e.kind,1,'Entry'),XC('ref','Ref','text',e=>e.ref,1,'Entry'),XC('text','Details','text',e=>e.text,1,'Entry'),XC('course','Course','text',e=>course(e.course).name,0,'Entry'),
+  XC('in','In','money',e=>e.inA,1,'Amount'),XC('out','Out','money',e=>e.outA,1,'Amount'),XC('bal','Balance','money',e=>e.bal,1,'Amount')]};
+EXPORTS['cash.spends']={title:'Expenses from cash in hand',perm:'cash.view',rows:()=>cashSpendRows(),cols:()=>[XC('ref','Ref','text',x=>x.ref,1,'Expense'),XC('date','Date','date',x=>x.date,1,'Expense'),XC('course','Course','text',x=>course(x.course).name,0,'Expense'),XC('reason','Details','text',x=>x.items.map(i=>i.reason+' '+inr(i.amount)).join('; '),1,'Expense'),
+  XC('amount','Amount','money',x=>x.amount,1,'Expense'),XC('from','Taken from','text',x=>allocText(x),1,'Expense'),XC('bills','Bills attached','int',x=>x.items.filter(i=>i.doc).length,0,'Expense'),XC('by','Entered by','text',x=>x.by,1,'Expense'),XC('status','Status','text',x=>x.status==='ACTIVE'?'Active':'Cancelled: '+(x.cancelReason||''),1,'Expense')]};
+EXPORTS['cash.deposits']={title:'Cash in hand deposited',perm:'cash.view',rows:()=>cashDepRows(),cols:()=>[XC('ref','Ref','text',d=>d.ref,1,'Deposit'),XC('on','Deposited on','date',d=>d.depositedOn,1,'Deposit'),XC('course','Course','text',d=>course(d.course).name,0,'Deposit'),
+  XC('who','Students','text',d=>d.lines.map(a=>{const p=payById(a.pid);return p?stu(p.studentId).name+' '+inr(a.amount):''}).join('; '),1,'Deposit'),XC('total','Total','money',d=>d.total,1,'Deposit'),XC('bank','Bank ref','text',d=>d.bankRef,1,'Deposit'),XC('by','Marked by','text',d=>d.by,1,'Deposit')]};
 EXPORTS.activity={title:'Activity log',perm:'activity.view',rows:()=>actFiltered(),cols:()=>[XC('at','Time','datetime',a=>a.at,1,'Who'),XC('who','Who','text',a=>a.actor,1,'Who'),XC('role','Role','text',a=>a.role,1,'Who'),
   XC('action','Action','text',a=>a.action,1,'What'),XC('entity','Entity','text',a=>a.entity,0,'What'),XC('rec','Record','text',a=>a.entityId,1,'What'),XC('change','Before → after','text',a=>diffText(a.before,a.after),1,'What'),
   XC('detail','Detail','text',a=>a.detail,0,'What'),XC('ip','IP','text',a=>a.ip,0,'Device'),XC('dev','Device','text',a=>a.device,0,'Device')]};

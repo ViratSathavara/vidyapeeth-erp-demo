@@ -1,8 +1,12 @@
 /* =====================================================================
    Fee Collection (spec §5): Collect fee (every student, semester-wise) · Pending dues · Receipts · Fee setup
-   Modes in one dropdown: Cash / Cheque / UPI / Expense. Only tuition fee is collected.
+   Modes in one dropdown: Cash / Cheque / UPI (change 4: "By Expense" is gone; a cash fee can keep an expense part and a
+   cash-in-hand part instead). Only tuition fee is collected.
    ===================================================================== */
-const MODES=[['CASH','By Cash'],['CHEQUE','By Cheque'],['UPI','By UPI'],['EXPENSE','By Expense']];
+const MODES=[['CASH','By Cash'],['CHEQUE','By Cheque'],['UPI','By UPI']];
+const PAY_MODES=['CASH','CHEQUE','UPI'];
+/* "Exp ₹5,000 · Cash in hand ₹5,000 · Bank ₹20,000" under a cash amount (office screens only) */
+const splitLine=p=>{if(!payExp(p)&&!payCih(p))return'';const l=[];if(payExp(p))l.push('Expense '+inr(payExp(p)));if(payCih(p)){const left=cihLeft(p);l.push('Cash in hand '+inr(payCih(p))+(p.status==='SUCCESS'&&left!==payCih(p)?` (${inr(left)} left)`:''))}l.push('Bank '+inr(payToBank(p)));return`<small class="muted split-line">${E(l.join(' · '))}</small>`};
 const modeName=m=>({CASH:'Cash',CHEQUE:'Cheque',UPI:'UPI',EXPENSE:'Expense'}[m]||m);
 const MODE_TONE={CASH:'m-cash',CHEQUE:'m-cheque',UPI:'m-upi',EXPENSE:'m-exp'};
 const modePill=m=>`<span class="pill ${MODE_TONE[m]||''}">${E(modeName(m))}</span>`;
@@ -18,7 +22,7 @@ function viewFees(){
 /* ---------- 1. collect fee: every student, semester by semester ----------
    One row per student (cards on a phone). "Collect" opens a panel: pick the semester, pick the mode
    from a dropdown (Cash / Cheque / UPI / Expense), pick the batch, save -> receipt. */
-const MODE_OK=k=>k==='EXPENSE'?can('expenses.manage'):can('fees.collect');
+const MODE_OK=k=>PAY_MODES.includes(k)&&can('fees.collect');
 function colFilter(){return ui.f['fees.collect']=Object.assign({q:'',course:'',sem:'',batch:'',st:'',sort:'name',dir:1,page:0},ui.f['fees.collect']||{})}
 function colRows(){const f=colFilter();const q=f.q.trim().toLowerCase();
   let l=vStudents().filter(s=>s.status==='ACTIVE').map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.batch||defaultBatch(s)===f.batch)
@@ -35,7 +39,7 @@ function feeCollect(){
   const bats=[...new Set(vStudents().map(defaultBatch))].sort().reverse();
   const tot={fee:sum(l,x=>x.sm.total),paid:sum(l,x=>x.sm.paid),due:sum(l,x=>x.sm.payable)};
   return`<div class="kpis k4 kpis-sm"><div class="kpi "><span class="label">Students</span><div class="v">${l.length}</div></div><div class="kpi "><span class="label">Total tuition fee</span><div class="v">${inr(tot.fee)}</div></div><div class="kpi good"><span class="label">Paid</span><div class="v">${inr(tot.paid)}</div></div><div class="kpi bad"><span class="label">Due now</span><div class="v">${inr(tot.due)}</div></div></div>
-   <div class="today-strip"><b>Today</b>${['CASH','CHEQUE','UPI','EXPENSE'].map(m=>`<span>${modePill(m)} ${inr(sum(ok.filter(p=>p.mode===m),p=>p.amount))}</span>`).join('')}</div>
+   <div class="today-strip"><b>Today</b>${PAY_MODES.map(m=>`<span>${modePill(m)} ${inr(sum(ok.filter(p=>p.mode===m),p=>p.amount))}</span>`).join('')}${sum(ok,p=>payExp(p)+payCih(p))?`<span class="muted">of cash: expense ${inr(sum(ok,payExp))} · cash in hand ${inr(sum(ok,payCih))}</span>`:''}</div>
    <div class="panel"><h2>Students and their fees<button class="btn exp-btn" data-act="expOpen" data-key="fees.collect">Export</button></h2>
    <div class="filters"><input type="search" placeholder="Name, enrolment no. or mobile" aria-label="Search students" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
     ${scopeCourses().length>1?sel(sc,'course','Course',COURSE_OPTS()):''}${sel(sc,'batch','Batch',[['','All batches'],...bats.map(b=>[b,b])])}${sel(sc,'sem','Semester',[['','All semesters'],...SEMS.map(n=>[n,'Semester '+n])])}
@@ -53,6 +57,7 @@ function openCollect(sid,sem){
   const s=stu(sid);if(!s)throw new Error('Student not found');guardStudent(sid);if(s.status!=='ACTIVE')throw new Error('This student is not active');
   const sm=feeSum(s);if(!sem){const fs=sm.sems.find(x=>x.started&&x.due>0)||sm.sems.find(x=>x.due>0);sem=fs?fs.sem:0}
   const prev=ui.col&&ui.col.mode;ui.col={sid,sem,mode:prev&&MODE_OK(prev)?prev:(MODES.map(m=>m[0]).find(MODE_OK)||'CASH')};
+  ui.split={sid,exp:false,cih:false,cihAmt:''};ui.exp={sid,ctx:'split',rows:[{amount:'',reason:'',doc:null}]};
   drawer(`<button class="btn x" data-act="close">Close</button><h2>Collect fee</h2><div id="colBox" style="margin-top:12px">${collectBox()}</div>`,true,'Collect fee');
 }
 function collectBox(){
@@ -67,27 +72,45 @@ function batchField(s){const b=defaultBatch(s);const opts=batchOptions(s.course)
 function collectForm(s,m,mode){
   const T=today();const amt=F('amount','Tuition fee amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}" data-live="colAmt"`})+batchField(s);
   if(mode==='CASH')return`<form data-form="collect" data-mode="CASH" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}${F('note','Note (optional)',{span:1,attrs:'maxlength="120"'})}
-   <p class="note span">Invoice date = the date you enter here (default today). The receipt uses this date. You can change it later in Receipts.</p><div class="actions span"><button class="btn primary big">Save cash payment · issue receipt</button></div></form>`;
+   <p class="note span">Invoice date = the date you enter here (default today). The receipt uses this date. You can change it later in Receipts.</p>
+   ${can('expenses.manage')?`<div class="span" id="splitWrap">${splitBox()}</div>`:''}
+   <div class="actions span"><button class="btn primary big">Save cash payment · issue receipt</button></div></form>`;
   if(mode==='CHEQUE')return`<form data-form="collect" data-mode="CHEQUE" class="form">${amt}${F('chequeNo','Cheque no.',{req:true,attrs:'inputmode="numeric" maxlength="10"'})}${F('bank','Bank',{req:true,attrs:'maxlength="60" list="banks"'})}<datalist id="banks"><option>State Bank of India</option><option>Bank of Baroda</option><option>Mehsana Urban Co-op Bank</option><option>HDFC Bank</option><option>ICICI Bank</option></datalist>
    ${F('chequeDate','Cheque date',{type:'date',val:T,req:true})}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}<div class="actions span"><button class="btn primary big">Save cheque payment · issue receipt</button></div></form>`;
   if(mode==='UPI'){const pv=upiInvoiceDate(Date.now());return`<form data-form="upiPay" class="form">${amt}<div class="field"><span class="label">Invoice date</span><div class="ro">${fmtD(pv)} <small class="muted">(payment date + 1 day, set automatically)</small></div></div>
    <p class="note span">A UPI order is created with ${E(db.settings.upi.provider)} (${E(db.settings.upi.mode)}). The student scans the QR with Google Pay or any UPI app. The payment becomes Success only when the gateway's verified webhook arrives — never from this screen.</p>
    <div class="actions span"><button class="btn primary big">Create UPI request · show QR</button></div></form>`}
-  if(!ui.exp||ui.exp.sid!==s.id)ui.exp={sid:s.id,rows:[{amount:'',reason:'',doc:null}]};
-  return`<form data-form="collect" data-mode="EXPENSE" class="form">${amt}${F('invoiceDate','Invoice date',{type:'date',val:T,req:true,attrs:`max="${T}"`})}
-   <fieldset class="fs span expbox"><legend>Expense details</legend><p class="note" style="margin:0 0 8px">Where did this fee money go? Add one line per bill. Amount and reason are required; a bill photo or PDF is optional. <b>The lines must add up exactly to the fee amount.</b></p>
-    <div id="expRows">${expRowsHtml()}</div><div class="actions"><button type="button" class="btn sm" data-act="expAdd">+ Add another line</button></div><div id="expTotal" class="exptotal">${expTotalHtml()}</div></fieldset>
-   <p class="note span">By Expense: this student's fee was used directly for a college expense. The fee counts as paid: a receipt is issued and the due goes down. It shows as Expense in Receipts, Audit and the Dashboard. The student only sees the receipt, not the mode.</p>
-   <div class="actions span"><button class="btn primary big">Save fee by expense · issue receipt</button></div></form>`;
+  return'';
 }
+/* change 4: under By Cash, two optional parts that do not go to the bank.
+   Expense now = spent at once (one line per bill). Cash in hand = kept in the college (see Cash in hand). The rest goes to the bank. */
+function splitBox(){const sp=ui.split||{};
+  return`<fieldset class="fs splitbox"><legend>Part of this cash not going to the bank (optional)</legend>
+   <label class="chk"><input type="checkbox" data-change="splitExp" ${sp.exp?'checked':''}> <span><b>Expense now</b><small class="muted" style="display:block">Spent at once for the college. One line per bill: amount, reason, bill photo or PDF.</small></span></label>
+   ${sp.exp?`<div class="expbox"><div id="expRows">${expRowsHtml()}</div><div class="actions"><button type="button" class="btn sm" data-act="expAdd">+ Add another line</button></div></div>`:''}
+   <label class="chk"><input type="checkbox" data-change="splitCih" ${sp.cih?'checked':''}> <span><b>Cash in hand</b><small class="muted" style="display:block">Kept in the college for small expenses later. It is linked to this student until it is spent or deposited.</small></span></label>
+   ${sp.cih?`<div class="field cihf"><label class="label" for="f_cih">Cash in hand amount (₹) *</label><input id="f_cih" inputmode="decimal" value="${E(sp.cihAmt||'')}" data-live="cihAmt" required></div>`:''}
+   <div id="expTotal">${splitSumHtml()}</div></fieldset>`}
+const reSplit=()=>{const w=$('#splitWrap');if(w)w.innerHTML=splitBox()};
+const splitExpTotal=()=>ui.split&&ui.split.exp&&ui.exp?ui.exp.rows.reduce((a,r)=>a+(toPaise(r.amount)||0),0):0;
+const splitCihTotal=()=>ui.split&&ui.split.cih?(toPaise(ui.split.cihAmt)||0):0;
+function splitSumHtml(){const f=$('#f_amount');const fee=toPaise(f?f.value:0)||0;const ex=splitExpTotal(),ch=splitCihTotal(),bank=fee-ex-ch;
+  const c=(l,v,cls='')=>`<div class="sp3 ${cls}"><span>${l}</span><b>${inr(v)}</b></div>`;
+  return`<div class="split3" aria-live="polite">${c('Fee received',fee)}<i aria-hidden="true">=</i>${c('Expense now',ex)}<i aria-hidden="true">+</i>${c('Cash in hand',ch)}<i aria-hidden="true">+</i>${c('To bank',Math.max(0,bank),bank<0?'bad':'bank')}</div>
+   ${bank<0?`<p class="err" style="margin:6px 0 0">Expense + cash in hand is ${inr(-bank)} more than the fee received.</p>`:''}`}
+CHG.splitExp=el=>{ui.split.exp=el.checked;if(el.checked&&(!ui.exp||!ui.exp.rows.length))ui.exp={sid:ui.split.sid,ctx:'split',rows:[{amount:'',reason:'',doc:null}]};reSplit();if(el.checked){const i=$('#ea0');if(i)i.focus()}};
+CHG.splitCih=el=>{ui.split.cih=el.checked;reSplit();if(el.checked){const i=$('#f_cih');if(i)i.focus()}};
+LIVE.cihAmt=el=>{ui.split.cihAmt=el.value;expTot()};
 /* expense lines: amount + reason + optional bill (image or PDF) */
 const EXP_DOC_MAX=700*1024;
 function expRowsHtml(){return ui.exp.rows.map((r,i)=>`<div class="exprow" data-i="${i}"><div class="field"><label class="label" for="ea${i}">Amount (₹) *</label><input id="ea${i}" inputmode="decimal" value="${E(r.amount)}" data-live="expAmt" data-i="${i}" required></div>
   <div class="field"><label class="label" for="er${i}">Reason *</label><input id="er${i}" maxlength="120" value="${E(r.reason)}" data-live="expReason" data-i="${i}" placeholder="e.g. University exam form fees" required></div>
   <div class="field"><span class="label">Bill / document (optional)</span><div class="actions nowrap">${r.doc?`<button type="button" class="btn sm" data-act="expView" data-i="${i}">📎 ${E(r.doc.name.slice(0,22))}</button><button type="button" class="btn sm" data-act="expDocDel" data-i="${i}" aria-label="Remove document">✕</button>`:`<label class="btn sm"><input type="file" class="sr" accept="image/*,application/pdf" data-change="expDoc" data-i="${i}"> Upload</label>`}
   ${ui.exp.rows.length>1?`<button type="button" class="btn sm danger" data-act="expDel" data-i="${i}">Remove line</button>`:''}</div></div></div>`).join('')}
-function expTotalHtml(){const f=$('#f_amount');const want=toPaise(f?f.value:0)||0;const got=ui.exp.rows.reduce((a,r)=>a+(toPaise(r.amount)||0),0);const ok=want>0&&got===want;
-  return`<span>Lines total <b>${inr(got)}</b> of fee amount <b>${inr(want)}</b></span>${ok?pill('Matches','good'):pill(got<want?`${inr(want-got)} still to add`:`${inr(got-want)} too much`,'bad')}`}
+/* the summary under the expense lines: the cash split on the Collect form, or the cash-in-hand check on an expense from cash in hand */
+function expTotalHtml(){return ui.exp&&ui.exp.ctx==='spend'&&typeof spendSumHtml==='function'?spendSumHtml():splitSumHtml()}
+/* expense lines typed on a form -> [{amount, reason, doc}], with the same checks everywhere */
+function readExpItems(rows){return rows.map((r,i)=>{const a=toPaise(r.amount);if(!(a>0))throw new Error(`Expense line ${i+1}: enter the amount`);const rs=capText(r.reason,`Expense line ${i+1} reason`,120);if(rs.length<3)throw new Error(`Expense line ${i+1}: write the reason`);return{amount:a,reason:rs,doc:r.doc||null}})}
 const reExp=()=>{const r=$('#expRows');if(r)r.innerHTML=expRowsHtml();expTot()};
 const expTot=()=>{const t=$('#expTotal');if(t)t.innerHTML=expTotalHtml()};
 LIVE.expAmt=el=>{ui.exp.rows[+el.dataset.i].amount=el.value;expTot()};
@@ -108,23 +131,25 @@ ACT.expDocOpen=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)retu
 LIVE.colAmt=()=>expTot();
 ACT.colSem=el=>{ui.col.sem=+el.dataset.sem;reCol()};
 CHG.colMode=el=>{if(!MODE_OK(el.value))throw new Error('You do not have access to this mode');ui.col.mode=el.value;reCol();const a=$('#f_amount');if(a)a.focus()};
-ACT.collectFor=el=>{if(!canAny('fees.collect','expenses.manage'))throw new Error('You do not have access to collect fees');openCollect(el.dataset.id,+el.dataset.sem||0)};
+ACT.collectFor=el=>{if(!can('fees.collect'))throw new Error('You do not have access to collect fees');openCollect(el.dataset.id,+el.dataset.sem||0)};
 function amountOf(d,m){const a=toPaise(d.amount);if(!(a>0))throw new Error('Enter the amount');if(a>m.due)throw new Error(`Amount is more than the semester ${m.sem} due (${inr(m.due)})`);return a}
 FORM.collect=(f,d)=>{
-  const mode=f.dataset.mode;if(mode==='EXPENSE')need('expenses.manage','add expenses');else need('fees.collect','collect fees');
+  const mode=f.dataset.mode;if(!PAY_MODES.includes(mode))throw new Error('Choose Cash, Cheque or UPI');need('fees.collect','collect fees');
   const c=ui.col;const s=stu(c.sid);if(!s||s.status!=='ACTIVE')throw new Error('Choose an active student');guardStudent(s.id);const m=semSummary(s,c.sem);
   const o={sem:c.sem,mode,amount:amountOf(d,m),batch:cleanBatch(d.batch),invoiceDate:d.invoiceDate,note:capText(d.note,'Note',120)};
-  if(mode==='EXPENSE'){if(!validIso(o.invoiceDate))throw new Error('Choose a valid invoice date');const rows=(ui.exp&&ui.exp.sid===s.id?ui.exp.rows:[]);if(!rows.length)throw new Error('Add the expense details');
-    const items=rows.map((r,i)=>{const a=toPaise(r.amount);if(!(a>0))throw new Error(`Expense line ${i+1}: enter the amount`);const rs=capText(r.reason,`Expense line ${i+1} reason`,120);if(rs.length<3)throw new Error(`Expense line ${i+1}: write the reason`);return{amount:a,reason:rs,doc:r.doc||null}});
-    const tot=items.reduce((a,x)=>a+x.amount,0);if(tot!==o.amount)throw new Error(`Expense lines add up to ${inr(tot)} but the fee amount is ${inr(o.amount)}. They must match exactly.`);
-    o.expenseItems=items;o.reason=items.map(x=>x.reason).join('; ').slice(0,300)}
+  /* change 4: the optional expense / cash-in-hand parts of a cash fee */
+  const sp=mode==='CASH'&&ui.split&&ui.split.sid===s.id?ui.split:null;
+  if(sp&&(sp.exp||sp.cih)){need('expenses.manage','keep part of a cash fee as expense or cash in hand');
+    if(sp.exp){const items=readExpItems(ui.exp&&ui.exp.sid===s.id?ui.exp.rows:[]);if(!items.length)throw new Error('Add the expense details');o.expenseItems=items;o.reason=items.map(x=>x.reason).join('; ').slice(0,300)}
+    if(sp.cih){const a=toPaise(sp.cihAmt);if(!(a>0))throw new Error('Enter the cash in hand amount');o.cih=a}
+    const kept=sum(o.expenseItems||[],x=>x.amount)+(o.cih||0);if(kept>o.amount)throw new Error(`Expense + cash in hand (${inr(kept)}) is more than the fee received (${inr(o.amount)})`)}
   if(mode==='CHEQUE'){o.chequeNo=String(d.chequeNo||'').trim();if(!/^\d{6}$/.test(o.chequeNo))throw new Error('Cheque no. must be 6 digits');o.bank=capText(d.bank,'Bank',60);if(!o.bank)throw new Error('Enter the bank name');if(!validIso(d.chequeDate))throw new Error('Enter the cheque date');o.chequeDate=d.chequeDate;
     if(db.payments.some(p=>p.status==='SUCCESS'&&p.mode==='CHEQUE'&&p.chequeNo===o.chequeNo&&p.bank.toLowerCase()===o.bank.toLowerCase()))throw new Error('This cheque no. of this bank is already entered')}
   if(o.invoiceDate>addDays(today(),0))throw new Error('Invoice date cannot be in the future');
-  const p=recordPayment(s,o);if(o.expenseItems)p.expenseItems=o.expenseItems;
+  const p=recordPayment(s,o);
   if(!save()){db.payments.splice(db.payments.indexOf(p),1);if(db.audit[0]&&db.audit[0].entityId===p.rc)db.audit.shift();db.college.nextReceipt--;save();throw new Error('Not enough browser storage for these documents. Use smaller photos or fewer documents.')}
   afterPayment(p);save();
-  if(mode==='EXPENSE')ui.exp=null;closeLayer();renderPage();showReceipt(p,true);
+  ui.exp=null;ui.split=null;closeLayer();renderPage();showReceipt(p,true);
 };
 /* everything that happens after a successful payment (spec §5.2): receipt no + PDF, email, notification to the student, live update for staff */
 function afterPayment(p){
@@ -239,7 +264,9 @@ ACT.ppDecline=el=>{handleUpiWebhook(gwEvent(el.dataset.id,'failed'));save();rend
 function receiptHtml(p){
   const sv=isStudentUser(cur());const I=rcptInfo(p,sv),{s,R,cancelled}=I;
   const img=k=>typeof RCPT_IMG!=='undefined'&&RCPT_IMG[k]?`data:image/jpeg;base64,${RCPT_IMG[k].jpg}`:'';
-  const exp=!sv&&p.mode==='EXPENSE'&&(p.expenseItems||[]).length?`<div class="inv-exp"><b>Expense details</b>${p.expenseItems.map((x,i)=>`<div class="rline"><span>${E(x.reason)}${x.doc?` <button class="lnk" data-act="expDocOpen" data-id="${E(p.id)}" data-i="${i}">📎 bill</button>`:''}</span><span>${inr(x.amount)}</span></div>`).join('')}</div>`:'';
+  /* office copy only: where this cash went (change 4). The student copy never shows it. */
+  const exp=!sv&&(payExp(p)||payCih(p))?`<div class="inv-exp"><b>Where this cash went</b>${(p.expenseItems||[]).map((x,i)=>`<div class="rline"><span>Expense: ${E(x.reason)}${x.doc?` <button class="lnk" data-act="expDocOpen" data-id="${E(p.id)}" data-i="${i}">📎 bill</button>`:''}</span><span>${inr(x.amount)}</span></div>`).join('')}
+    ${payCih(p)?`<div class="rline"><span>Cash in hand${p.status==='SUCCESS'?` <small class="muted">(${inr(cihLeft(p))} not used yet)</small>`:''}</span><span>${inr(payCih(p))}</span></div>`:''}<div class="rline"><span><b>To bank</b></span><b>${inr(payToBank(p))}</b></div></div>`:'';
   const row=(k,v,cls='')=>`<div class="inv-r ${cls}"><span>${k}</span><b>${amt2(v)}</b></div>`;
   return`<article class="inv ${cancelled?'cancelled':''}" aria-label="Fee invoice ${E(p.rc)}">
    <div class="inv-band" aria-hidden="true">${img('logo')?`<span class="inv-logo"><img src="${img('logo')}" alt=""></span>`:''}<span class="inv-word">NPCTE</span></div>
@@ -278,8 +305,8 @@ FORM.cancelReceipt=(f,d)=>{const p=db.payments.find(x=>x.id===f.dataset.id);canc
   notify('cancel',`Receipt cancelled · ${s.name}`,`${p.rc} · ${inr(p.amount)} · ${p.cancelReason}`,{sid:s.id,roles:['Super Admin','Principal','Clerk'],staff:'fees',tab:'receipts',tone:'bad'});
   save();closeDialog();closeLayer();renderPage();toast('Receipt cancelled')};
 
-/* an inline date editor for Cash / Cheque / Expense rows; UPI and cancelled rows show plain text */
-function dateCell(kind,rec,iso){const editable=can('fees.editdate')&&rec.mode!=='UPI'&&rec.status==='SUCCESS';
+/* an inline date editor for Cash / Cheque rows; UPI, cancelled rows and cash whose cash in hand is already used show plain text */
+function dateCell(kind,rec,iso){const editable=can('fees.editdate')&&rec.mode!=='UPI'&&rec.status==='SUCCESS'&&!(kind==='p'&&cihLocked(rec));
   return editable?`<input type="date" class="inl" value="${E(iso)}" max="${today()}" required aria-label="Invoice date of ${E(kind==='x'?rec.ref:rec.rc)}" data-change="invDate" data-kind="${kind}" data-id="${E(rec.id)}">`:`<span>${fmtD(iso)}</span>${kind==='p'&&rec.mode==='UPI'?' <small class="muted" title="Payment date + 1 day">auto</small>':''}`}
 CHG.invDate=el=>{const kind=el.dataset.kind;const rec=db.payments.find(x=>x.id===el.dataset.id);
   if(!rec)throw new Error('Not found');const v=el.value;if(!validIso(v)){el.value=rec.invoiceDate;throw new Error('Choose a valid invoice date')}if(v>today())throw new Error('Invoice date cannot be in the future');
@@ -329,12 +356,12 @@ function receiptsFiltered(){const f=rcFilter();const q=f.q.toLowerCase();
 function feeReceipts(){
   const f=rcFilter();const sc='fees.receipts';const l=receiptsFiltered();const pg=pageRows(f,l);
   return`<div class="panel"><h2>Receipts ${pill(inr(sum(l.filter(p=>p.status==='SUCCESS'),p=>p.amount))+' successful','good')}<button class="btn exp-btn" data-act="expOpen" data-key="fees.receipts">Export</button></h2>
-   <div class="filters"><input type="search" placeholder="Receipt no, name, batch, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI'],['EXPENSE','Expense']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}
+   <div class="filters"><input type="search" placeholder="Receipt no, name, batch, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}
     <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label></div>
    <div class="tablewrap"><table><thead><tr>${sortTh(sc,'rc','Receipt')}${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entered')}${sortTh(sc,'name','Student')}<th>Batch</th><th>Sem</th><th>Mode</th>${sortTh(sc,'amount','Amount',1)}<th>Status</th><th></th></tr></thead><tbody>
-   ${pg.map(p=>{const s=stu(p.studentId);return`<tr><td class="mono">${E(p.rc)}</td><td>${dateCell('p',p,p.invoiceDate)}</td><td><small>${fmtT(p.entryAt)}</small></td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}">${E(s.name)}</button></td><td class="mono">${E(batchOf(p))}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}</td><td>${payPill(p.status)}${p.depositId?' '+pill('Deposited'):''}</td>
+   ${pg.map(p=>{const s=stu(p.studentId);return`<tr><td class="mono">${E(p.rc)}</td><td>${dateCell('p',p,p.invoiceDate)}</td><td><small>${fmtT(p.entryAt)}</small></td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}">${E(s.name)}</button></td><td class="mono">${E(batchOf(p))}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}${splitLine(p)}</td><td>${payPill(p.status)}${p.depositId?' '+pill('Deposited'):''}</td>
     <td><div class="actions nowrap"><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button>${p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn sm danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="10" class="empty">No receipts for these filters.</td></tr>'}</tbody></table></div>${pager(sc,l.length)}
-   <p class="note">Change the invoice date of a Cash, Cheque or Expense receipt right in the table: the receipt PDF is regenerated and the change is logged (old → new). UPI dates are fixed. A payment is never deleted; cancel it with a reason.</p></div>`;
+   <p class="note">Change the invoice date of a Cash or Cheque receipt right in the table: the receipt PDF is regenerated and the change is logged (old → new). UPI dates are fixed. A payment is never deleted; cancel it with a reason.</p></div>`;
 }
 
 /* ---------- 5. fee setup ---------- */

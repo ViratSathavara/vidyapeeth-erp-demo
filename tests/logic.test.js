@@ -55,17 +55,23 @@ for(const bad of ['','2025','25-27','2027-25','2025-2035','abcd-ef']){threw=fals
 login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).payable>=2000000);const m2=A.feeSum(s2).sems.find(x=>x.due>=1000000);
  A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'CASH'};const n0=db.payments.length;
  threw=false;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'1000',batch:'',invoiceDate:'2026-11-08'})}catch(e){threw=/batch/i.test(e.message)}ok(threw&&db.payments.length===n0,'cash without batch refused');
- A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'EXPENSE'};const due0=A.semSummary(s2,m2.sem).due;
- threw=false;A.ui.exp={sid:s2.id,rows:[{amount:'1000',reason:'',doc:null}]};try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'1000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){threw=true}ok(threw,'expense needs reason');
- A.ui.exp={sid:s2.id,rows:[{amount:'4000',reason:'Exam fees paid to university',doc:null},{amount:'5000',reason:'Teaching material',doc:null}]};threw=false;try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){threw=/match exactly/.test(e.message)}ok(threw,'expense lines must add up exactly');
- A.ui.exp.rows[1].amount='6000';
- A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'EXPENSE'};
- try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){if(!/showReceipt|not defined|drawer/.test(e.message))console.log('collect err',e.message)}
- const pe=db.payments.at(-1);ok(pe.mode==='EXPENSE'&&pe.batch==='2025-27'&&/Exam fees paid to university/.test(pe.reason)&&pe.expenseItems.length===2&&pe.invoiceDate==='2026-11-08','expense payment saved');
- ok(A.semSummary(s2,m2.sem).due===due0-1000000,'expense reduces due');ok(!A.db.expenses&&!A.feeTabs().some(t=>t[0]==='expenses'),'no separate expense section');
- ok(/2025-27/.test(A.receiptHtml(pe))&&/Exam fees/.test(A.receiptHtml(pe)),'receipt shows batch + reason');
- A.ui.f['audit.tx']={modes:['EXPENSE']};ok(A.txFiltered().some(r=>r.id===pe.id&&r.batch==='2025-27'),'audit has expense fee');
- ok(A.receiptPdf(pe).startsWith('%PDF'),'expense pdf');}
+ // change 4: no "By Expense" mode; By Cash can keep an expense part and a cash-in-hand part, the rest goes to the bank
+ const due0=A.semSummary(s2,m2.sem).due;const quiet=e=>{if(!/showReceipt|not defined|drawer|firstElementChild|null/.test(e.message))console.log('collect err',e.message)};
+ threw=false;try{A.FORM.collect({dataset:{mode:'EXPENSE'}},{amount:'1000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){threw=true}ok(threw&&db.payments.length===n0,'By Expense mode is refused');
+ ok(!/By Expense/.test(A.feeCollect())&&!A.viewFees().includes('value="EXPENSE"'),'no By Expense option');
+ A.ui.col={q:'',sid:s2.id,sem:m2.sem,mode:'CASH'};A.ui.split={sid:s2.id,exp:true,cih:false,cihAmt:''};A.ui.exp={sid:s2.id,ctx:'split',rows:[{amount:'1000',reason:'',doc:null}]};
+ threw=false;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){threw=/reason/.test(e.message)}ok(threw&&db.payments.length===n0,'expense line needs a reason');
+ A.ui.split={sid:s2.id,exp:true,cih:true,cihAmt:'7000'};A.ui.exp={sid:s2.id,ctx:'split',rows:[{amount:'4000',reason:'Exam fees paid to university',doc:null}]};
+ threw=false;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){threw=/more than/.test(e.message)}ok(threw&&db.payments.length===n0,'expense + cash in hand cannot be more than the fee');
+ A.ui.split={sid:s2.id,exp:true,cih:true,cihAmt:'3000'};A.ui.exp={sid:s2.id,ctx:'split',rows:[{amount:'4000',reason:'Exam fees paid to university',doc:null},{amount:'1000',reason:'Teaching material',doc:null}]};
+ try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08'})}catch(e){quiet(e)}
+ const pe=db.payments.at(-1);ok(pe.mode==='CASH'&&pe.batch==='2025-27'&&pe.expenseItems.length===2&&A.payExp(pe)===500000&&A.payCih(pe)===300000&&A.payToBank(pe)===200000,'cash split saved: 5,000 expense + 3,000 cash in hand + 2,000 bank');
+ ok(A.semSummary(s2,m2.sem).due===due0-1000000,'the whole fee counts as paid');ok(!A.db.expenses&&!A.feeTabs().some(t=>t[0]==='expenses'),'no separate expense section');
+ ok(/2025-27/.test(A.receiptHtml(pe))&&/Exam fees/.test(A.receiptHtml(pe))&&/Where this cash went/.test(A.receiptHtml(pe)),'office receipt shows where the cash went');
+ A.ui.f['audit.tx']={split:'cih'};ok(A.txFiltered().some(r=>r.id===pe.id&&r.batch==='2025-27'),'audit filter: has cash in hand');
+ A.ui.f.dep={p:'custom',from:'2026-11-01',to:'2026-11-30'};const dq=A.depPending().find(p=>p.id===pe.id);ok(dq&&A.payToBank(dq)===200000&&/Kept from cash/.test(A.auditDeposit()),'deposit report takes only the to-bank part');
+ ok(A.receiptPdf(pe).startsWith('%PDF'),'split pdf');
+ const su2=db.users.find(u=>u.studentId===s2.id);A.sesSet(su2.id);ok(!/Where this cash went|cash in hand/i.test(A.receiptHtml(pe)),'student receipt hides the split');login('clerk');}
 // ---- course scope (B.Ed / M.Ed principals, one clerk for both, Super Admin all) ----
 {const bed=db.students.filter(x=>x.course==='BED').length,med=db.students.filter(x=>x.course==='MED').length;
  login('principal');A.setPickedCourse('');ok(A.vStudents().length===bed&&A.vStudents().every(x=>x.course==='BED'),'B.Ed principal sees only B.Ed');
@@ -136,4 +142,39 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  ok(D.users.find(u=>u.id===u1.id).password==='Emailed#1','migration: emailed password untouched');
  ok(Array.isArray(D.refs)&&so2.refId&&D.refs.find(r=>r.id===so2.refId).name==='Old Ref','migration: references built from existing names');
  ok(D.roles.Principal.includes('students.password')&&!D.roles.Clerk.includes('students.password'),'migration: Principal gets reset permission, Clerk does not');}
+// ---- change 4: cash in hand, the worked example (5,000 + 10,000 + 15,000 kept; 20,000 spent; 10,000 of the third student banked) ----
+{const D=A.db;const login2=un=>{const u=D.users.find(x=>x.username===un);A.sesSet(u.id);return u};login2('clerk');A.setPickedCourse('');
+ const quiet=e=>{if(!/null|firstElementChild|innerHTML|not a function/.test(e.message))console.log('cash err',e.message)};
+ const three=D.students.filter(x=>x.course==='BED'&&x.status==='ACTIVE'&&A.feeSum(x).sems.some(m=>m.due>=1500000)).slice(0,3);ok(three.length===3,'three B.Ed students for the example');
+ const lots=three.map((s,i)=>{const m=A.feeSum(s).sems.find(x=>x.due>=1500000);return A.recordPayment(s,{sem:m.sem,mode:'CASH',amount:[500000,1000000,1500000][i],cih:[500000,1000000,1500000][i],invoiceDate:['2026-01-05','2026-01-10','2026-01-15'][i],batch:'2025-27'})});
+ ok(lots.every(p=>A.payToBank(p)===0)&&A.cihBalance('BED','2026-01-31')===3000000,'cash in hand on 31-01-2026 = 30,000 (5,000 + 10,000 + 15,000)');
+ let th=false;try{A.recordPayment(three[0],{sem:A.feeSum(three[0]).sems.find(m=>m.due>0).sem,mode:'CHEQUE',amount:100,cih:100,invoiceDate:'2026-01-05',chequeNo:'123456',bank:'SBI'})}catch(e){th=/only for cash/.test(e.message)}ok(th,'cash in hand only for cash');
+ // 20,000 of expenses over 6 months, entered as two expenses
+ A.ui.exp={sid:'cash',ctx:'spend',rows:[{amount:'12000',reason:'Annual function decoration',doc:null}]};try{A.FORM.cashSpend({},{course:'BED',date:'2026-03-10'})}catch(e){quiet(e)}
+ A.ui.exp={sid:'cash',ctx:'spend',rows:[{amount:'5000',reason:'Water cooler repair',doc:null},{amount:'3000',reason:'Stationery',doc:null}]};try{A.FORM.cashSpend({},{course:'BED',date:'2026-06-30'})}catch(e){quiet(e)}
+ const sp=D.cashbox.spends.filter(x=>x.date==='2026-03-10'||x.date==='2026-06-30');ok(sp.length===2&&sp[1].amount===800000&&/^EXP-\d{4}$/.test(sp[0].ref),'two expenses saved with refs');
+ ok(A.cihUsed(lots[0])===500000&&A.cihLeft(lots[0])===0,'student 1: 5,000 fully used (oldest first)');
+ ok(A.cihUsed(lots[1])===1000000&&A.cihLeft(lots[1])===0,'student 2: 10,000 fully used');
+ ok(A.cihUsed(lots[2])===500000&&A.cihLeft(lots[2])===1000000,'student 3 (Virat in the example): 5,000 used, 10,000 left');
+ ok(sp[0].alloc.length===2&&sp[0].alloc[0].pid===lots[0].id&&sp[0].alloc[1].pid===lots[1].id&&sp[0].alloc[1].amount===700000,'first expense 12,000 = 5,000 of student 1 + 7,000 of student 2');
+ // money that came later cannot pay an earlier expense; more than the balance is refused
+ A.ui.exp={sid:'cash',ctx:'spend',rows:[{amount:'500',reason:'Early bill',doc:null}]};th=false;try{A.FORM.cashSpend({},{course:'BED',date:'2026-01-04'})}catch(e){th=/less than/.test(e.message)}ok(th,'expense before any money came in is refused');
+ A.ui.exp={sid:'cash',ctx:'spend',rows:[{amount:'10001',reason:'Too big',doc:null}]};th=false;try{A.FORM.cashSpend({},{course:'BED',date:'2026-07-01'})}catch(e){th=/less than/.test(e.message)}ok(th,'expense more than cash in hand is refused');
+ // a receipt whose cash in hand is used cannot be cancelled
+ th=false;try{A.cancelPayment(lots[0],'Entered by mistake')}catch(e){th=/already used/.test(e.message)}ok(th&&lots[0].status==='SUCCESS','receipt with used cash in hand cannot be cancelled');
+ // deposit the 10,000 left, in the student's own name
+ try{A.FORM.cashDeposit({},{course:'BED',lots:lots[2].id,depositedOn:'2026-07-15',bankRef:'SBI slip 777'})}catch(e){quiet(e)}
+ const dp=D.cashbox.deposits.find(d=>d.bankRef==='SBI slip 777');ok(dp&&dp.total===1000000&&dp.lines.length===1&&dp.lines[0].pid===lots[2].id&&A.cihLeft(lots[2])===0&&/^DEP-\d{4}$/.test(dp.ref),'10,000 deposited to the bank in student 3\'s name');
+ const ex=A.cashEvents(['BED']).filter(e=>['2026-01-05','2026-01-10','2026-01-15','2026-03-10','2026-06-30','2026-07-15'].includes(e.date));ok(ex.length===6&&ex.at(-1).kind==='To bank','register lists in, expenses and the deposit in date order');
+ ok(lots.reduce((a,p)=>a+A.cihUsed(p)+A.cihDeposited(p),0)===3000000,'every rupee of the 30,000 is accounted for (20,000 spent + 10,000 banked)');
+ // only the Principal cancels an expense; the money goes back to the same students
+ th=false;try{A.FORM.cashSpendCancel({dataset:{id:sp[1].id}},{reason:'Wrong bill'})}catch(e){th=/Principal/.test(e.message)}ok(th&&sp[1].status==='ACTIVE','clerk cannot cancel an expense');
+ login2('principal');try{A.FORM.cashSpendCancel({dataset:{id:sp[1].id}},{reason:'Wrong bill'})}catch(e){quiet(e)}
+ ok(sp[1].status==='CANCELLED'&&A.cihLeft(lots[1])===300000&&A.cihLeft(lots[2])===500000,'cancelled expense: 3,000 back to student 2, 5,000 back to student 3');
+ for(const t of ['lots','register','spends','deposits']){A.ui.tab.cash=t;try{ok(A.viewCash().length>200,'cash in hand tab '+t)}catch(e){fail++;console.log('THROW cash',t,e.message,e.stack.split('\n')[1])}}
+ login2('clerk');ok(/Cash in hand/.test(A.viewDashboard()),'dashboard shows cash in hand');
+ // old data: a "By Expense" receipt becomes Cash with the whole amount as expense
+ const old=D.payments.find(p=>p.status==='SUCCESS'&&p.mode==='CASH'&&!A.payExp(p)&&!A.payCih(p)&&!p.depositId);old.mode='EXPENSE';old.reason='Old expense';delete D.mig.cash;A.save();A.load();
+ const o2=A.db.payments.find(p=>p.id===old.id);ok(o2.mode==='CASH'&&A.payExp(o2)===o2.amount&&A.payToBank(o2)===0&&o2.expenseItems[0].reason==='Old expense','migration: By Expense receipt → Cash, whole amount as expense');
+ ok(A.db.roles.Clerk.includes('cash.spend')&&A.db.roles.Principal.includes('cash.deposit'),'migration: cash in hand permissions added');}
 console.log('pass',pass,'fail',fail);
