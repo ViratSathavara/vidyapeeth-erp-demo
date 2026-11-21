@@ -1,5 +1,14 @@
 const A=require('./harness.js');let pass=0,fail=0;const ok=(c,m)=>{if(c){pass++}else{fail++;console.log('FAIL',m)}};
 A.load();const db=A.db;
+// change 5: example cash in hand in the seed data
+{const L=db.payments.filter(p=>p.demoSplit);const cb=db.cashbox;
+ ok(L.length>=4&&L.every(p=>p.mode==='CASH'&&p.cih>0&&!p.depositId&&A.payExp(p)+A.payCih(p)<=p.amount),'example: cash receipts with cash in hand (never already banked)');
+ ok(L.some(p=>(p.expenseItems||[]).length),'example: some also have an expense-now part');
+ ok(cb.spends.length>=2&&cb.spends.every(x=>x.status==='ACTIVE'&&x.amount===x.alloc.reduce((a,b)=>a+b.amount,0)&&x.alloc.every(a=>{const p=db.payments.find(y=>y.id===a.pid);return p&&p.invoiceDate<=x.date})),'example: expenses paid from cash in hand, only from money received before the expense date');
+ ok(cb.deposits.length>=1&&cb.deposits.every(d=>d.lines.length===1&&d.total>0),'example: a bank deposit in one student\'s name');
+ ok(L.every(p=>A.cihUsed(p)+A.cihDeposited(p)+A.cihLeft(p)===p.cih)&&L.some(p=>A.cihLeft(p)>0),'example: every rupee accounted, some money still in hand');
+ ok(db.payments.filter(p=>p.depositId).every(p=>!p.cih),'example: receipts already deposited are untouched');
+ console.log('  example data:',L.length,'receipts ·',cb.spends.length,'expenses ·',cb.deposits.length,'deposits ·',db.courses.map(c=>c.id+' left '+A.inr(A.cihBalance(c.id))).join(', '));}
 // login as clerk
 const login=un=>{const u=db.users.find(x=>x.username===un);A.sesSet(u.id);return u};
 login('clerk');
@@ -174,7 +183,12 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  for(const t of ['lots','register','spends','deposits']){A.ui.tab.cash=t;try{ok(A.viewCash().length>200,'cash in hand tab '+t)}catch(e){fail++;console.log('THROW cash',t,e.message,e.stack.split('\n')[1])}}
  login2('clerk');ok(/Cash in hand/.test(A.viewDashboard()),'dashboard shows cash in hand');
  // old data: a "By Expense" receipt becomes Cash with the whole amount as expense
- const old=D.payments.find(p=>p.status==='SUCCESS'&&p.mode==='CASH'&&!A.payExp(p)&&!A.payCih(p)&&!p.depositId);old.mode='EXPENSE';old.reason='Old expense';delete D.mig.cash;A.save();A.load();
+ const so=D.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).sems.some(m=>m.due>=100000));const old=A.recordPayment(so,{sem:A.feeSum(so).sems.find(m=>m.due>=100000).sem,mode:'CASH',amount:100000,invoiceDate:'2026-11-02',batch:'2025-27'});old.mode='EXPENSE';old.reason='Old expense';delete D.mig.cash;A.save();A.load();
  const o2=A.db.payments.find(p=>p.id===old.id);ok(o2.mode==='CASH'&&A.payExp(o2)===o2.amount&&A.payToBank(o2)===0&&o2.expenseItems[0].reason==='Old expense','migration: By Expense receipt → Cash, whole amount as expense');
- ok(A.db.roles.Clerk.includes('cash.spend')&&A.db.roles.Principal.includes('cash.deposit'),'migration: cash in hand permissions added');}
+ ok(A.db.roles.Clerk.includes('cash.spend')&&A.db.roles.Principal.includes('cash.deposit'),'migration: cash in hand permissions added');
+ // a browser that already uses cash in hand does not get example data again
+ const nS=A.db.cashbox.spends.length;delete A.db.mig.cashDemo;A.save();A.load();ok(A.db.cashbox.spends.length===nS,'example data not added twice');
+ // a browser with old data and no cash in hand gets it once
+ const B=A.db;B.payments.forEach(p=>{delete p.cih;delete p.demoSplit});B.cashbox={spends:[],deposits:[]};delete B.mig.cashDemo;A.save();A.load();
+ ok(A.db.payments.some(p=>p.demoSplit)&&A.db.cashbox.spends.length>0&&A.db.audit.some(a=>a.action==='Sample cash in hand data added'),'existing browser gets the example data once');}
 console.log('pass',pass,'fail',fail);

@@ -270,7 +270,7 @@ Same website, installable like the ABCD learning app:
 - **Security:** bcrypt passwords, JWT httpOnly + secure cookies, CSRF protection, rate-limit login, server-side permission checks on every route, input validation (zod), no secrets in frontend, Helmet, CORS locked to the app domain, daily DB backup.
 - **Performance:** paginated tables (server-side), indexes on studentId, invoiceDate, mode, collegeId.
 - **Accessibility:** keyboard navigation, labels on inputs, focus states, sufficient contrast.
-- **Seed data:** 1 Super Admin, 1 Principal, 1 Clerk, ~20 students across B.Ed/M.Ed, mixed categories, payments in all 3 modes (some cash with expense / cash in hand), one expense from cash in hand, a few notices.
+- **Seed data:** 1 Super Admin, 1 Principal, 1 Clerk, ~20 students across B.Ed/M.Ed, mixed categories, payments in all 3 modes, a few notices. **Cash in hand example (change 5):** per course up to 6 cash receipts with cash in hand (2 also with expense now), several expenses paid from it (oldest money first), one bank deposit in a student's name, the rest still in hand. Only receipts not yet deposited are used; the demo marks them `demoSplit`.
 
 ---
 

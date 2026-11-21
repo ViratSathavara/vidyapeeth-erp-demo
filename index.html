@@ -1167,6 +1167,8 @@ function migrate(){
     db.payments.forEach(p=>{if(p.mode!=='EXPENSE')return;p.mode='CASH';p.wasExpenseMode=true;if(!(p.expenseItems||[]).length)p.expenseItems=[{amount:p.amount,reason:p.reason||'College expense',doc:null}]});
     STAFF_ROLES.forEach(r=>{const l=db.roles[r]=db.roles[r]||[];['cash.view','cash.spend','cash.deposit'].forEach(k=>{if(!l.includes(k))l.push(k)})})}
   cashbox();
+  /* change 5: example cash-in-hand data, once, only if nothing of the kind exists yet (a browser that already uses cash in hand is left alone) */
+  if(!db.mig.cashDemo){db.mig.cashDemo=1;if(!db.payments.some(p=>payCih(p)>0)&&!cashbox().spends.length&&!cashbox().deposits.length){const n=seedCashDemo();if(n)log('Sample cash in hand data added','System','',null,null,n+' cash receipts with cash in hand, with expenses and a bank deposit')}}
 }
 const NAME_MAX=80;
 const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)throw new Error(`${label} is too long (${v.length} characters; the limit is ${max}).`);return v};
@@ -1437,6 +1439,41 @@ function seedReal(R){
     db.deposits.push(dp);l.forEach(p=>p.depositId=dp.id)});
 }
 
+/* ---------- change 5: example cash in hand, so the screens show how it works ----------
+   The fee registers have no cash-in-hand column, so for the demo a few cash receipts per course get one, in a fixed,
+   repeatable way (marked demoSplit:true): up to 6 students per course, spread over the dates; 2 of them also have an
+   "expense now" part. Then expenses are paid from cash in hand (oldest student money first) and one student's money
+   left is deposited to the bank in that student's name; the rest stays in cash in hand.
+   Only cash receipts not yet marked as deposited are used, so bank deposits already made do not change. Bills: none. */
+const DEMO_CIH=[500000,1000000,1500000,300000,800000,500000];
+const DEMO_EXP_NOW={1:'Practical file printing for the class',4:'University exam form fees'};
+const DEMO_SPENDS=[[['Stationery and printing for the office',350000]],[['Water cooler repair',400000],['Electrician charges',200000]],
+  [['Annual function decoration',450000]],[['Guest lecture: tea and refreshments',250000]],[['Exam hall arrangements: seating charts and bell',300000]]];
+function seedCashDemo(){
+  const by=db.users.find(u=>u.id==='u_clerk')||db.users.find(u=>u.role==='Clerk')||{name:'Accounts Clerk',id:''};const T=today();let count=0;
+  const at=d=>Date.parse(d+'T15:30:00+05:30');
+  db.courses.forEach(c=>{
+    const seen=new Set();
+    const cands=db.payments.filter(p=>p.status==='SUCCESS'&&p.mode==='CASH'&&payCourse(p)===c.id&&!(p.expenseItems||[]).length&&!p.cih&&!p.depositId&&p.amount>=1000000&&p.invoiceDate<=T)
+      .sort(lotOrder).filter(p=>!seen.has(p.studentId)&&seen.add(p.studentId));
+    if(cands.length<2)return;
+    const k=Math.min(DEMO_CIH.length,cands.length);const picks=[...Array(k).keys()].map(i=>cands[Math.floor(i*cands.length/k)]);
+    picks.forEach((p,i)=>{const exp=DEMO_EXP_NOW[i]?200000:0;
+      if(exp){p.expenseItems=[{amount:exp,reason:DEMO_EXP_NOW[i],doc:null}];if(!p.reason)p.reason=DEMO_EXP_NOW[i]}
+      p.cih=Math.min(DEMO_CIH[i],p.amount-exp);p.demoSplit=true;count++});
+    /* expenses: each one a couple of days after a later receipt, never more than what is in hand on that date */
+    DEMO_SPENDS.forEach((lines,j)=>{const lot=picks[Math.min(j+1,picks.length-1)];let d=addDays(lot.invoiceDate,2+j);if(d>T)d=T;
+      const want=sum(lines,l=>l[1]);const have=cihBalance(c.id,d);if(have<want)return;
+      const spent=sum(cashbox().spends.filter(x=>x.course===c.id),x=>x.amount);if(spent+want>sum(picks,payCih)*(picks.length>=5?.6:.4))return; /* keep enough in hand (two students) so a deposit can be shown */
+      cashbox().spends.push({id:uid('x'),ref:nextCashRef('EXP'),course:c.id,date:d,items:lines.map(([reason,amount])=>({amount,reason,doc:null})),amount:want,alloc:cihAllocate(c.id,d,want),by:by.name,byId:by.id,at:at(d),status:'ACTIVE',demo:true})});
+    /* one bank deposit: the whole money left of the second-newest student, in that student's name */
+    const open=picks.filter(p=>cihLeft(p)>0).sort(lotOrder);const dl=open.length>1?open[open.length-2]:null;
+    if(dl){let d=addDays(dl.invoiceDate,7);if(d>T)d=T;const spentAfter=cashbox().spends.filter(x=>x.course===c.id).map(x=>x.date).sort().pop();if(spentAfter&&d<spentAfter)d=spentAfter;
+      cashbox().deposits.push({id:uid('cd'),ref:nextCashRef('DEP'),course:c.id,depositedOn:d,bankRef:'SBI slip '+(60100+count),lines:[{pid:dl.id,amount:cihLeft(dl)}],total:cihLeft(dl),by:by.name,byId:by.id,at:at(d)+3600e3,demo:true})}
+  });
+  return count;
+}
+
 /* ---------- sample data (spec §12: 1 Super Admin, 1 Principal, 1 Clerk, ~20 students, all 4 modes, a few notices) ---------- */
 function seed(){
   _seed=11;const T=today();const Y=+T.slice(0,4);const yNow=+T.slice(5,7)>=7?Y:Y-1;
@@ -1456,7 +1493,7 @@ function seed(){
       {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
     students:[],refs:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
-    cashbox:{spends:[],deposits:[]},counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1,cash:1}};
+    cashbox:{spends:[],deposits:[]},counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1,cash:1,cashDemo:1}};
   /* real college data (fee registers 2026-27), available only after the password gate has decrypted it */
   if(typeof REAL!=='undefined'&&REAL){seedReal(REAL)}else{
   /* sample names only (demo) */
@@ -1478,7 +1515,7 @@ function seed(){
   S.forEach((s,i)=>{
     const f1=semFee(s,1).amount;
     if(i%5===0)mk(s,1,'UPI',f1,2+i);
-    else if(i%5===1)mk(s,1,'CASH',f1,3+i,{back:i%3,f:i%2?{cih:500000}:{}}); /* sample: some cash fees keep ₹5,000 as cash in hand */
+    else if(i%5===1)mk(s,1,'CASH',f1,3+i,{back:i%3});
     else if(i%5===2)mk(s,1,'CHEQUE',Math.round(f1/2),4+i,{f:{chequeNo:String(100200+i),bank:['SBI','Bank of Baroda','Mehsana Urban Co-op Bank'][i%3],chequeDate:addDays(today(),-6-i)}});
     else if(i%5===3)mk(s,1,'CASH',1500000,1+i);
     else if(i%10===4){const r=['Exam form fees paid to the university','Practice-teaching school material'][i%2];mk(s,1,'CASH',1000000,5+i,{f:{reason:r,expenseItems:[{amount:1000000,reason:r,doc:null}]}})}
@@ -1489,10 +1526,9 @@ function seed(){
   db.payments.forEach(p=>{if(p.mode==='UPI'){p.upiRef='UTR'+String(400000000000+Math.floor(rnd()*9e10));p.providerTxnId='pay_'+Math.floor(rnd()*1e12).toString(36)}});
   /* an older deposit so the report shows both deposited and pending money */
   const old=db.payments.filter(p=>p.status==='SUCCESS'&&payToBank(p)>0&&diffDays(today(),p.invoiceDate)>40);
-  /* sample: one expense paid from cash in hand two days ago (taken from the oldest receipts first) */
-  db.courses.forEach(c=>{const d=addDays(today(),-2);const amt=Math.min(300000,cihBalance(c.id,d));if(amt>0)cashbox().spends.push({id:uid('x'),ref:nextCashRef('EXP'),course:c.id,date:d,items:[{amount:amt,reason:'Stationery and printing for the office',doc:null}],amount:amt,alloc:cihAllocate(c.id,d,amt),by:by.name,byId:by.id,at:Date.now()-2*864e5,status:'ACTIVE'})});
   if(old.length){const dp={id:uid('d'),type:'CASH+CHEQUE',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,payToBank),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}
   }
+  seedCashDemo(); /* change 5: example cash in hand (both the real registers and the sample data) */
   /* notices */
   db.notices=[
     {id:uid('n'),title:'Semester 1 fee – last date',body:'All B.Ed and M.Ed Semester 1 students: please pay the semester fee at the accounts office or online (UPI) by the last date. Keep the receipt for your record.',audience:{type:'all'},isFeeAlert:true,isPublic:false,publishAt:Date.now()-3*864e5,createdBy:'Principal, NPCTE',attachment:null},
