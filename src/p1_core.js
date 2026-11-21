@@ -58,6 +58,11 @@ function migrate(){
   if(!db.college.rcpt&&typeof RCPT_DEFAULT==='function')db.college.rcpt=RCPT_DEFAULT();
   db.courses.forEach(c=>{if(!c.years)c.years=Math.max(1,Math.ceil((c.semesters||4)/2));if(c.active===undefined)c.active=true});
   db.users.forEach(u=>{if(STAFF_ROLES.includes(u.role)&&!Array.isArray(u.courses))u.courses=db.courses.map(c=>c.id)});
+  db.mig=db.mig||{};
+  /* change 1 (21-11-2026): student passwords are set by the office only; the Principal gets the new reset permission, the Clerk does not until it is ticked */
+  if(!db.mig.stuPw){db.mig.stuPw=1;const p=db.roles.Principal;if(p&&!p.includes('students.password'))p.push('students.password');db.users.forEach(u=>{if(u.role!=='Student')return;u.mustChange=false;const s=stu(u.studentId);if(s&&u.password==='student123')u.password=studentPwOf(s)})} /* only the old demo seed password moves to the rule; emailed ones stay */
+  /* change 2: admission references are saved records with an id */
+  if(!Array.isArray(db.refs))syncRefs();
 }
 const NAME_MAX=80;
 const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)throw new Error(`${label} is too long (${v.length} characters; the limit is ${max}).`);return v};
@@ -65,7 +70,7 @@ const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)th
 /* ---------- roles and permissions (checked in every handler; the real server must check the same) ---------- */
 const PERMS=[
  ['dashboard.view','See the dashboard'],
- ['students.view','View students'],['students.edit','Add and edit students, resend logins'],
+ ['students.view','View students'],['students.edit','Add and edit students'],['students.password','Reset student passwords and resend login details'],
  ['fees.view','Open Fee Collection'],['fees.collect','Collect payments (Cash, Cheque, UPI)'],['fees.cancel','Cancel a receipt (with reason)'],
  ['fees.editdate','Edit invoice date of Cash / Cheque / Expense'],['expenses.manage','Collect fee By Expense'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
  ['audit.view','Transactions audit and exports'],['audit.deposit','Mark cash / cheque as deposited'],['activity.view','Activity log (every action)'],
@@ -214,16 +219,42 @@ function tempPassword(){const A='ABCDEFGHJKLMNPQRSTUVWXYZ',a='abcdefghjkmnpqrstu
 function defaultDue(courseId,year,n){const d=db.settings.dueDates[courseId]||[];const md=d[n-1]||'';if(!/^\d{2}-\d{2}$/.test(md))return'';const [m,dd]=md.split('-').map(Number);const y=+year+Math.floor((n-1)/2)+(m<7?1:0);return`${y}-${pad(m)}-${pad(dd)}`}
 function makeStudent(d){
   const s={id:uid('s'),enrol:d.enrol||nextEnrol(d.course,d.admissionYear),name:d.name,gender:d.gender||'',dob:d.dob||'',phone:d.phone||'',email:d.email||'',address:d.address||'',photo:d.photo||'',
-    course:d.course,admissionYear:+d.admissionYear,sem:+d.sem||1,ref:d.ref||'',category:d.category||'General',funding:d.funding||'CASH',scholarshipNote:d.scholarshipNote||'',status:d.status||'ACTIVE',
+    course:d.course,admissionYear:+d.admissionYear,sem:+d.sem||1,ref:d.ref||'',refId:d.refId||'',category:d.category||'General',funding:d.funding||'CASH',scholarshipNote:d.scholarshipNote||'',status:d.status||'ACTIVE',
     createdBy:d.createdBy||'System',createdAt:d.createdAt||Date.now(),
     fees:semsOf(d.course).map(n=>({sem:n,amount:d.fees?d.fees[n-1]:(db.settings.feeDefault[d.course]||[])[n-1]||0,due:d.dues?d.dues[n-1]:defaultDue(d.course,d.admissionYear,n)}))};
   if(!fundingApplies(s.category))s.funding='CASH';
   return s;
 }
-function createStudentLogin(s,pw,must){
-  const u={id:uid('u'),role:'Student',name:s.name,username:s.enrol.toLowerCase(),email:s.email,phone:s.phone,password:pw,mustChange:must,active:true,studentId:s.id,lastLoginAt:0};
+/* student password rule (change 1): first 5 digits of the mobile + "@" + the year the batch starts.
+   Mobile 9429086515, batch 2026-28 -> 94290@2026. Students cannot change it; only staff with students.password can reset it. */
+const studentPassword=(phone,year)=>String(phone||'').replace(/\D/g,'').slice(0,5)+'@'+String(year||'').slice(0,4);
+const studentPwOf=s=>studentPassword(s.phone,s.admissionYear);
+function createStudentLogin(s,pw){
+  const u={id:uid('u'),role:'Student',name:s.name,username:s.enrol.toLowerCase(),email:s.email,phone:s.phone,password:pw||studentPwOf(s),mustChange:false,active:true,studentId:s.id,lastLoginAt:0};
   db.users.push(u);s.userId=u.id;return u;
 }
+/* enrolment no. is typed by the office (change 1): letters, numbers, - and /, unique among students and logins */
+function readEnrol(v,s){
+  const en=capText(v,'Enrolment no.',20).toUpperCase();if(!en)throw new Error('Enter the enrolment no.');
+  if(!/^[A-Z0-9][A-Z0-9\/-]{2,19}$/.test(en))throw new Error('Enrolment no.: 3 to 20 letters, numbers, - or /');
+  if(db.students.some(x=>x!==s&&x.enrol.toUpperCase()===en))throw new Error('This enrolment no. is already used by another student');
+  if(db.users.some(u=>u.username.toLowerCase()===en.toLowerCase()&&(!s||u.id!==s.userId)))throw new Error('This enrolment no. is already used as a login ID');
+  return en;
+}
+
+/* ---------- admission references (change 2): each name is saved once with an id and picked from a list next time ---------- */
+const refClean=n=>String(n||'').trim().replace(/\s+/g,' ');
+const refKey=n=>refClean(n).toLowerCase();
+const refById=id=>(db.refs||[]).find(r=>r.id===id);
+const refByName=n=>{const k=refKey(n);return k?(db.refs||[]).find(r=>refKey(r.name)===k):null};
+/* returns the saved reference for this name, creating it the first time the name is used */
+function refEnsure(name,by){
+  const n=refClean(name);if(!n)return null;let r=refByName(n);if(r)return r;
+  db.counters.ref=(db.counters.ref||0)+1;r={id:'REF'+pad(db.counters.ref,3),name:n,createdAt:Date.now(),createdBy:by||'System'};db.refs.push(r);return r;
+}
+/* builds the list from the names already on students (old data, seed) and links every student to its reference id */
+function syncRefs(){db.refs=Array.isArray(db.refs)?db.refs:[];db.students.forEach(s=>{const r=refEnsure(s.ref,s.createdBy||'Imported');s.refId=r?r.id:'';s.ref=r?r.name:''})}
+const refCount=id=>db.students.filter(s=>s.refId===id).length;
 
 /* ---------- real data from the college fee registers (tools/build_vault.py) ----------
    Every student of B.ED_2026-27.xlsx and M.ED_2026-27.xlsx with every receipt exactly as written there:
@@ -254,7 +285,7 @@ function seedReal(R){
     const cat=demoCategory(r),sch=(cat==='SC'||cat==='ST')&&nameHash(r.name)%10<6;
     const s=makeStudent({name:r.name,phone:r.phone,email:r.email,course:r.course,admissionYear:r.adm,sem:curSem(r.course,r.adm),category:cat,funding:sch?'SCHOLARSHIP':'CASH',
       scholarshipNote:sch?'Government post-matric scholarship (Digital Gujarat)':'',ref:r.ref,createdBy:'Imported from fee register 2026-27'});
-    db.students.push(s);createStudentLogin(s,'student123',false);return s});
+    db.students.push(s);createStudentLogin(s);return s});
   R.payments.forEach(x=>{const s=list[x.s];const ts=Date.parse(x.date+'T11:00:00+05:30');
     const p={id:uid('p'),studentId:s.id,sem:x.sem,mode:x.mode,amount:x.amt,invoiceDate:x.date,entryAt:ts,paidAt:ts,chequeNo:x.chq||'',bank:'',chequeDate:x.mode==='CHEQUE'?x.date:'',upiRef:'',providerTxnId:'',note:x.note||'',
       status:'SUCCESS',cancelReason:'',rc:x.rc,depositId:'',by:by?by.name:'Accounts Clerk',byId:by?by.id:'',dateEdits:[],batch:x.batch,reason:x.reason||'',category:'',imported:true};
@@ -287,8 +318,8 @@ function seed(){
       {id:'u_prin',role:'Principal',name:'Principal, B.Ed',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['BED']},
       {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
-    students:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
-    counters:{enrol:{},exp:1}};
+    students:[],refs:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
+    counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1}};
   /* real college data (fee registers 2026-27), available only after the password gate has decrypted it */
   if(typeof REAL!=='undefined'&&REAL){seedReal(REAL)}else{
   /* sample names only (demo) */
@@ -300,7 +331,7 @@ function seed(){
     const fees=[3000000,3000000,3000000,3000000];if(i===4)fees[1]=2500000;if(i===9)fees.fill(2000000);
     const s=makeStudent({name:n,gender:g,dob:`${2000+(i%5)}-${pad(1+i%12)}-${pad(3+i)}`,phone:'98'+String(25000000+i*7919).padStart(8,'0'),email:n.toLowerCase().replace(/\s+/g,'.')+'@example.com',address:['Mahesana','Visnagar','Unjha','Kadi','Patan'][i%5]+', Gujarat',
       course:c,admissionYear:yr,sem,category:cat,funding:(cat==='SC'||cat==='ST')&&i%2===0?'SCHOLARSHIP':'CASH',scholarshipNote:(cat==='SC'||cat==='ST')&&i%2===0?'Government post-matric scholarship':'',fees,createdBy:'System',createdAt:Date.now()-(40-i)*864e5});
-    db.students.push(s);createStudentLogin(s,'student123',false);
+    db.students.push(s);createStudentLogin(s);
     s.cred={status:'Sent (demo)',at:Date.now()-(40-i)*864e5,to:s.email};
   });
   /* payments in all 4 modes, dated in the last few weeks */
@@ -330,5 +361,6 @@ function seed(){
     {id:uid('n'),title:'Library timings',body:'The college library is open from 9:00 am to 5:00 pm on all working days.',audience:{type:'all'},isFeeAlert:false,isPublic:true,publishAt:Date.now()-10*864e5,createdBy:'Accounts Clerk',attachment:null}];
   if(typeof RCPT_DEFAULT==='function')db.college.rcpt=RCPT_DEFAULT();
   db.audit=[];log(REAL?'Fee registers imported':'Sample data loaded','System','',null,null,REAL?`${db.students.length} students, ${db.payments.length} payment records from ${REAL.source}`:'Demo data created');
+  syncRefs();
   if(typeof ntSeed==='function')ntSeed();
 }

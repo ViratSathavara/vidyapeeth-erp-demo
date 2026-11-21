@@ -439,6 +439,8 @@ html{scrollbar-gutter:stable;-webkit-text-size-adjust:100%}
    ===================================================================== */
 :root{--r:12px;--r-sm:8px;--shadow-md:0 4px 14px rgba(15,23,42,.08);--topbar-h:56px}
 .sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+[hidden]{display:none!important} /* the hidden attribute must win over display rules such as .field{display:flex} (Funding type for SC/ST only, reset-password box) */
+.field input.sr{width:1px} /* the hidden photo input must not take .field input's 100% width (it made the student drawer scroll sideways) */
 .app{--rail-w:256px;display:grid;grid-template-columns:var(--rail-w) minmax(0,1fr);min-height:100vh;transition:grid-template-columns .22s var(--ease)}
 .app>*{min-width:0}
 .rail{position:sticky;top:0;height:100vh;height:100dvh;min-height:0;display:flex;flex-direction:column;background:var(--rail);color:var(--rail-fg);border-right:1px solid var(--rail-line);z-index:30}
@@ -997,7 +999,26 @@ input[type=date]::-webkit-inner-spin-button{display:none}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .dp{box-shadow:0 12px 40px rgba(0,0,0,.55)}}
 @media (max-width:420px){.dp-day{height:40px}}
 input.inl[type=date]{width:152px;padding-right:28px;background-position:right 7px center;background-size:15px}
-</style>
+
+/* ---------- admission reference picker (change 2, 21-11-2026): same field look, list opens under the field ---------- */
+.cbx-box{position:relative}
+.cbx-box input{width:100%;padding-right:34px}
+.cbx-caret{position:absolute;right:13px;top:50%;width:7px;height:7px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:translateY(-70%) rotate(45deg);pointer-events:none;transition:transform .15s ease}
+.cbx-box input[aria-expanded="true"]~.cbx-caret{transform:translateY(-25%) rotate(-135deg)}
+.cbx-list{position:absolute;z-index:30;left:0;right:0;top:calc(100% + 4px);margin:0;padding:4px;list-style:none;max-height:min(264px,46vh);overflow:auto;overscroll-behavior:contain;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(10,15,30,.18),0 2px 6px rgba(10,15,30,.10);animation:cbxIn .14s ease-out}
+.cbx-opt{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:40px;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:14px}
+.cbx-opt span{min-width:0;overflow-wrap:anywhere}
+.cbx-opt small{flex:none;color:var(--muted);font:500 11.5px var(--mono);white-space:nowrap}
+.cbx-opt:hover,.cbx-opt.on{background:var(--accent-soft)}
+.cbx-opt.add{color:var(--accent);font-weight:600}
+.cbx-opt.add:not(:first-child){border-top:1px dashed var(--line);border-radius:0 0 8px 8px;margin-top:2px}
+.cbx-empty{padding:10px;color:var(--muted);font-size:13px}
+@keyframes cbxIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.cbx-list{animation:none}.cbx-caret{transition:none}}
+:root[data-theme="dark"] .cbx-list{box-shadow:0 12px 32px rgba(0,0,0,.55)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .cbx-list{box-shadow:0 12px 32px rgba(0,0,0,.55)}}
+@media (max-width:420px){.cbx-opt{flex-wrap:wrap;gap:2px 10px}.cbx-opt small{white-space:normal}}
+.pw-kind .chk{align-items:flex-start}.pw-kind .chk span{min-width:0;overflow-wrap:anywhere}</style>
 <div id="root"></div><div id="layer"></div><div id="dlg"></div>
 <script>
 /* Real NPCTE fee-register data (B.Ed + M.Ed 2026-27), ENCRYPTED. Built by tools/build_vault.py.
@@ -1116,6 +1137,11 @@ function migrate(){
   if(!db.college.rcpt&&typeof RCPT_DEFAULT==='function')db.college.rcpt=RCPT_DEFAULT();
   db.courses.forEach(c=>{if(!c.years)c.years=Math.max(1,Math.ceil((c.semesters||4)/2));if(c.active===undefined)c.active=true});
   db.users.forEach(u=>{if(STAFF_ROLES.includes(u.role)&&!Array.isArray(u.courses))u.courses=db.courses.map(c=>c.id)});
+  db.mig=db.mig||{};
+  /* change 1 (21-11-2026): student passwords are set by the office only; the Principal gets the new reset permission, the Clerk does not until it is ticked */
+  if(!db.mig.stuPw){db.mig.stuPw=1;const p=db.roles.Principal;if(p&&!p.includes('students.password'))p.push('students.password');db.users.forEach(u=>{if(u.role!=='Student')return;u.mustChange=false;const s=stu(u.studentId);if(s&&u.password==='student123')u.password=studentPwOf(s)})} /* only the old demo seed password moves to the rule; emailed ones stay */
+  /* change 2: admission references are saved records with an id */
+  if(!Array.isArray(db.refs))syncRefs();
 }
 const NAME_MAX=80;
 const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)throw new Error(`${label} is too long (${v.length} characters; the limit is ${max}).`);return v};
@@ -1123,7 +1149,7 @@ const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)th
 /* ---------- roles and permissions (checked in every handler; the real server must check the same) ---------- */
 const PERMS=[
  ['dashboard.view','See the dashboard'],
- ['students.view','View students'],['students.edit','Add and edit students, resend logins'],
+ ['students.view','View students'],['students.edit','Add and edit students'],['students.password','Reset student passwords and resend login details'],
  ['fees.view','Open Fee Collection'],['fees.collect','Collect payments (Cash, Cheque, UPI)'],['fees.cancel','Cancel a receipt (with reason)'],
  ['fees.editdate','Edit invoice date of Cash / Cheque / Expense'],['expenses.manage','Collect fee By Expense'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
  ['audit.view','Transactions audit and exports'],['audit.deposit','Mark cash / cheque as deposited'],['activity.view','Activity log (every action)'],
@@ -1272,16 +1298,42 @@ function tempPassword(){const A='ABCDEFGHJKLMNPQRSTUVWXYZ',a='abcdefghjkmnpqrstu
 function defaultDue(courseId,year,n){const d=db.settings.dueDates[courseId]||[];const md=d[n-1]||'';if(!/^\d{2}-\d{2}$/.test(md))return'';const [m,dd]=md.split('-').map(Number);const y=+year+Math.floor((n-1)/2)+(m<7?1:0);return`${y}-${pad(m)}-${pad(dd)}`}
 function makeStudent(d){
   const s={id:uid('s'),enrol:d.enrol||nextEnrol(d.course,d.admissionYear),name:d.name,gender:d.gender||'',dob:d.dob||'',phone:d.phone||'',email:d.email||'',address:d.address||'',photo:d.photo||'',
-    course:d.course,admissionYear:+d.admissionYear,sem:+d.sem||1,ref:d.ref||'',category:d.category||'General',funding:d.funding||'CASH',scholarshipNote:d.scholarshipNote||'',status:d.status||'ACTIVE',
+    course:d.course,admissionYear:+d.admissionYear,sem:+d.sem||1,ref:d.ref||'',refId:d.refId||'',category:d.category||'General',funding:d.funding||'CASH',scholarshipNote:d.scholarshipNote||'',status:d.status||'ACTIVE',
     createdBy:d.createdBy||'System',createdAt:d.createdAt||Date.now(),
     fees:semsOf(d.course).map(n=>({sem:n,amount:d.fees?d.fees[n-1]:(db.settings.feeDefault[d.course]||[])[n-1]||0,due:d.dues?d.dues[n-1]:defaultDue(d.course,d.admissionYear,n)}))};
   if(!fundingApplies(s.category))s.funding='CASH';
   return s;
 }
-function createStudentLogin(s,pw,must){
-  const u={id:uid('u'),role:'Student',name:s.name,username:s.enrol.toLowerCase(),email:s.email,phone:s.phone,password:pw,mustChange:must,active:true,studentId:s.id,lastLoginAt:0};
+/* student password rule (change 1): first 5 digits of the mobile + "@" + the year the batch starts.
+   Mobile 9429086515, batch 2026-28 -> 94290@2026. Students cannot change it; only staff with students.password can reset it. */
+const studentPassword=(phone,year)=>String(phone||'').replace(/\D/g,'').slice(0,5)+'@'+String(year||'').slice(0,4);
+const studentPwOf=s=>studentPassword(s.phone,s.admissionYear);
+function createStudentLogin(s,pw){
+  const u={id:uid('u'),role:'Student',name:s.name,username:s.enrol.toLowerCase(),email:s.email,phone:s.phone,password:pw||studentPwOf(s),mustChange:false,active:true,studentId:s.id,lastLoginAt:0};
   db.users.push(u);s.userId=u.id;return u;
 }
+/* enrolment no. is typed by the office (change 1): letters, numbers, - and /, unique among students and logins */
+function readEnrol(v,s){
+  const en=capText(v,'Enrolment no.',20).toUpperCase();if(!en)throw new Error('Enter the enrolment no.');
+  if(!/^[A-Z0-9][A-Z0-9\/-]{2,19}$/.test(en))throw new Error('Enrolment no.: 3 to 20 letters, numbers, - or /');
+  if(db.students.some(x=>x!==s&&x.enrol.toUpperCase()===en))throw new Error('This enrolment no. is already used by another student');
+  if(db.users.some(u=>u.username.toLowerCase()===en.toLowerCase()&&(!s||u.id!==s.userId)))throw new Error('This enrolment no. is already used as a login ID');
+  return en;
+}
+
+/* ---------- admission references (change 2): each name is saved once with an id and picked from a list next time ---------- */
+const refClean=n=>String(n||'').trim().replace(/\s+/g,' ');
+const refKey=n=>refClean(n).toLowerCase();
+const refById=id=>(db.refs||[]).find(r=>r.id===id);
+const refByName=n=>{const k=refKey(n);return k?(db.refs||[]).find(r=>refKey(r.name)===k):null};
+/* returns the saved reference for this name, creating it the first time the name is used */
+function refEnsure(name,by){
+  const n=refClean(name);if(!n)return null;let r=refByName(n);if(r)return r;
+  db.counters.ref=(db.counters.ref||0)+1;r={id:'REF'+pad(db.counters.ref,3),name:n,createdAt:Date.now(),createdBy:by||'System'};db.refs.push(r);return r;
+}
+/* builds the list from the names already on students (old data, seed) and links every student to its reference id */
+function syncRefs(){db.refs=Array.isArray(db.refs)?db.refs:[];db.students.forEach(s=>{const r=refEnsure(s.ref,s.createdBy||'Imported');s.refId=r?r.id:'';s.ref=r?r.name:''})}
+const refCount=id=>db.students.filter(s=>s.refId===id).length;
 
 /* ---------- real data from the college fee registers (tools/build_vault.py) ----------
    Every student of B.ED_2026-27.xlsx and M.ED_2026-27.xlsx with every receipt exactly as written there:
@@ -1312,7 +1364,7 @@ function seedReal(R){
     const cat=demoCategory(r),sch=(cat==='SC'||cat==='ST')&&nameHash(r.name)%10<6;
     const s=makeStudent({name:r.name,phone:r.phone,email:r.email,course:r.course,admissionYear:r.adm,sem:curSem(r.course,r.adm),category:cat,funding:sch?'SCHOLARSHIP':'CASH',
       scholarshipNote:sch?'Government post-matric scholarship (Digital Gujarat)':'',ref:r.ref,createdBy:'Imported from fee register 2026-27'});
-    db.students.push(s);createStudentLogin(s,'student123',false);return s});
+    db.students.push(s);createStudentLogin(s);return s});
   R.payments.forEach(x=>{const s=list[x.s];const ts=Date.parse(x.date+'T11:00:00+05:30');
     const p={id:uid('p'),studentId:s.id,sem:x.sem,mode:x.mode,amount:x.amt,invoiceDate:x.date,entryAt:ts,paidAt:ts,chequeNo:x.chq||'',bank:'',chequeDate:x.mode==='CHEQUE'?x.date:'',upiRef:'',providerTxnId:'',note:x.note||'',
       status:'SUCCESS',cancelReason:'',rc:x.rc,depositId:'',by:by?by.name:'Accounts Clerk',byId:by?by.id:'',dateEdits:[],batch:x.batch,reason:x.reason||'',category:'',imported:true};
@@ -1345,8 +1397,8 @@ function seed(){
       {id:'u_prin',role:'Principal',name:'Principal, B.Ed',username:'principal',email:'principal@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['BED']},
       {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
-    students:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
-    counters:{enrol:{},exp:1}};
+    students:[],refs:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
+    counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1}};
   /* real college data (fee registers 2026-27), available only after the password gate has decrypted it */
   if(typeof REAL!=='undefined'&&REAL){seedReal(REAL)}else{
   /* sample names only (demo) */
@@ -1358,7 +1410,7 @@ function seed(){
     const fees=[3000000,3000000,3000000,3000000];if(i===4)fees[1]=2500000;if(i===9)fees.fill(2000000);
     const s=makeStudent({name:n,gender:g,dob:`${2000+(i%5)}-${pad(1+i%12)}-${pad(3+i)}`,phone:'98'+String(25000000+i*7919).padStart(8,'0'),email:n.toLowerCase().replace(/\s+/g,'.')+'@example.com',address:['Mahesana','Visnagar','Unjha','Kadi','Patan'][i%5]+', Gujarat',
       course:c,admissionYear:yr,sem,category:cat,funding:(cat==='SC'||cat==='ST')&&i%2===0?'SCHOLARSHIP':'CASH',scholarshipNote:(cat==='SC'||cat==='ST')&&i%2===0?'Government post-matric scholarship':'',fees,createdBy:'System',createdAt:Date.now()-(40-i)*864e5});
-    db.students.push(s);createStudentLogin(s,'student123',false);
+    db.students.push(s);createStudentLogin(s);
     s.cred={status:'Sent (demo)',at:Date.now()-(40-i)*864e5,to:s.email};
   });
   /* payments in all 4 modes, dated in the last few weeks */
@@ -1388,6 +1440,7 @@ function seed(){
     {id:uid('n'),title:'Library timings',body:'The college library is open from 9:00 am to 5:00 pm on all working days.',audience:{type:'all'},isFeeAlert:false,isPublic:true,publishAt:Date.now()-10*864e5,createdBy:'Accounts Clerk',attachment:null}];
   if(typeof RCPT_DEFAULT==='function')db.college.rcpt=RCPT_DEFAULT();
   db.audit=[];log(REAL?'Fee registers imported':'Sample data loaded','System','',null,null,REAL?`${db.students.length} students, ${db.payments.length} payment records from ${REAL.source}`:'Demo data created');
+  syncRefs();
   if(typeof ntSeed==='function')ntSeed();
 }
 /* =====================================================================
@@ -1643,8 +1696,8 @@ function run(cat,label,detail,fn,...a){
   catch(err){toast(err.message||String(err),true);(err instanceof TypeError||err instanceof ReferenceError||err instanceof RangeError?console.error:console.warn)(err);ev(cat==='Form'?'Form':'Error',label,err.message||String(err),{status:'fail'});return false}
 }
 /* Submit-once guard for everything that moves money or cannot be undone. The first submit disables the buttons and any repeat (double-click, Enter held down, a click during the closing animation) is ignored until the action has finished. If the action is refused the buttons come back so the person can fix the form. The server must still enforce this itself (an Active-receipt check in cancelPayment, a "waiting" check on requests). */
-const ONCE_FORMS=new Set(['collect','cancelReceipt','addStudent','expense','deposit','notice','sendRemind','restore','upiPay']);
-const ONCE_ACTS=new Set(['gwOk','gwFail','resendCred','resetPw']);
+const ONCE_FORMS=new Set(['collect','cancelReceipt','addStudent','expense','deposit','notice','sendRemind','restore','upiPay','stuPwReset']);
+const ONCE_ACTS=new Set(['gwOk','gwFail','resendCred']);
 function lockOnce(root,on){
   const bs=root.matches&&root.matches('button')?[root]:$$('button:not([type=button])',root);
   bs.forEach(b=>{if(on){b.disabled=true;b.setAttribute('aria-busy','true')}else{b.disabled=false;b.removeAttribute('aria-busy')}});
@@ -1902,7 +1955,7 @@ function qrSvg(text){let M;try{M=QR.encode(String(text))}catch(e){return`<p clas
 /* =====================================================================
    Login, forced password change, app shell (sidebar, top bar, student bottom tabs)
    ===================================================================== */
-const DEMO_ACCTS=()=>{const s=db.students[0];return[['admin','admin123','Super Admin','Platform owner · everything'],['principal','principal123','Principal','B.Ed only'],['principalmed','principal123','Principal','M.Ed only'],['clerk','clerk123','Clerk / Accountant','B.Ed + M.Ed · fees, students'],[s?s.enrol.toLowerCase():'','student123','Student',s?s.name+' · own portal':'']]};
+const DEMO_ACCTS=()=>{const s=db.students[0];return[['admin','admin123','Super Admin','Platform owner · everything'],['principal','principal123','Principal','B.Ed only'],['principalmed','principal123','Principal','M.Ed only'],['clerk','clerk123','Clerk / Accountant','B.Ed + M.Ed · fees, students'],[s?s.enrol.toLowerCase():'',(s&&(db.users.find(u=>u.id===s.userId)||{}).password)||'','Student',s?s.name+' · own portal':'']]};
 const LOGO=()=>`<div class="seal" aria-hidden="true">N</div>`;
 function renderLogin(msg){
   document.body.classList.remove('rail-lock','portal');const c=db.college;document.title='Sign in · '+c.short+' ERP';
@@ -1914,7 +1967,8 @@ function renderLogin(msg){
    <form data-form="login" class="grid" style="gap:12px">${msg?`<div class="err" role="alert">${E(msg)}</div>`:''}
     <div class="field"><label class="label" for="lu">Username, enrolment no. or email</label><input id="lu" name="u" autocomplete="username" required autocapitalize="off" spellcheck="false"></div>
     <div class="field"><label class="label" for="lp">Password</label><input id="lp" name="p" type="password" autocomplete="current-password" required></div>
-    <button class="btn primary big">Sign in</button></form>
+    <button class="btn primary big">Sign in</button>
+    <p class="note" style="margin:0">Student and forgot your password? Contact the college office; only the office can reset it.</p></form>
    <div><span class="label">Demo accounts (tap to fill)</span><div class="demo-accts" style="margin-top:8px">${DEMO_ACCTS().map(a=>`<button class="acct" type="button" data-act="fillLogin" data-u="${E(a[0])}" data-p="${E(a[1])}"><b>${E(a[2])}</b><small>${E(a[0])} / ${E(a[1])}</small><small>${E(a[3])}</small></button>`).join('')}</div></div>
    <div class="actions"><button class="btn sm" data-act="theme" type="button">Dark mode</button><button class="btn sm danger" data-act="resetDemo" type="button">Reset demo data</button></div></section></div>`;
   if(typeof renderInstallUI==='function')renderInstallUI();
@@ -1932,6 +1986,7 @@ FORM.login=(f,d)=>{
     if(ex)log('Sign-in failed','User',ex.username,null,null,'Wrong password');ev('Auth','Sign-in failed',id,{status:'fail',who:id});save();renderLogin(ex&&!ex.active?'This account is switched off. Ask the office.':'Wrong login or password.');return}
   delete LOCK[id];sesSet(u.id);u.lastLoginAt=now;ui.route=u.role==='Student'?'shome':'dashboard';ui.tab={};ui.f={};
   log('Signed in','User',u.username,null,null,u.role);ev('Auth','Signed in',u.username+' · '+device());ntSync();save();
+  if(u.role==='Student'&&u.mustChange)u.mustChange=false; /* students never set their own password (change 1) */
   if(u.mustChange){renderForceChange();return}
   setTimeout(()=>{if(typeof askNotifyGently==='function'&&cur())askNotifyGently()},1200);
   try{document.activeElement&&document.activeElement.blur()}catch(e){}
@@ -1949,7 +2004,7 @@ function renderForceChange(msg){
   toTop();$('#f_p1').focus({preventScroll:true});
 }
 const pwOk=p=>p.length>=8&&/[A-Za-z]/.test(p)&&/\d/.test(p);
-FORM.forcePw=(f,d)=>{const u=cur();if(!pwOk(d.p1))return renderForceChange('Use at least 8 characters with a letter and a number.');if(d.p1!==d.p2)return renderForceChange('The two passwords are not the same.');if(d.p1===u.password)return renderForceChange('Choose a password different from the temporary one.');
+FORM.forcePw=(f,d)=>{const u=cur();if(isStudentUser(u))throw new Error('Only the college office can change a student password');if(!pwOk(d.p1))return renderForceChange('Use at least 8 characters with a letter and a number.');if(d.p1!==d.p2)return renderForceChange('The two passwords are not the same.');if(d.p1===u.password)return renderForceChange('Choose a password different from the temporary one.');
   u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();try{document.activeElement.blur()}catch(e){}renderApp();toTop();setTimeout(toTop,350);toast('Password saved. Welcome!');setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
 ACT.logout=()=>{const u=cur();if(u){log('Signed out','User',u.username);ev('Auth','Signed out',u.username)}save();sesDel();closeLayer();renderLogin();const h=$('.login-form h2');if(h){h.tabIndex=-1;softFocus(h)}};
 ACT.resetDemo=()=>{const u=cur();if(u&&u.role!=='Super Admin')throw new Error('Only the Super Admin can reset the data');confirmBox('Reset demo data','All students, payments and changes in this browser will be replaced by fresh sample data.','Reset',()=>{seed();save();sesDel();closeLayer();renderLogin();toast('Demo data reset')},true)};
@@ -2065,11 +2120,11 @@ const SEMS=[1,2,3,4];
 const fundLabel=f=>f==='SCHOLARSHIP'?'By Scholarship':'By Cash';
 const statusLabel={ACTIVE:'Active',LEFT:'Left',PASSED:'Passed'};
 const PAGE=25;
-function stuFilter(){return ui.f.students=Object.assign({q:'',course:'',sem:'',cat:'',fund:'',status:'ACTIVE',dues:'',sort:'name',dir:1,page:0},ui.f.students||{})}
+function stuFilter(){return ui.f.students=Object.assign({q:'',course:'',sem:'',cat:'',fund:'',ref:'',status:'ACTIVE',dues:'',sort:'name',dir:1,page:0},ui.f.students||{})}
 function studentsFiltered(){
   const f=stuFilter();const q=f.q.trim().toLowerCase();
-  let l=vStudents().map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.status||s.status===f.status)
-    &&(!f.dues||(f.dues==='yes'?sm.payable>0:sm.payable===0))&&(!q||[s.name,s.enrol,s.phone,s.email].some(v=>String(v).toLowerCase().includes(q))));
+  let l=vStudents().map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.status||s.status===f.status)&&(!f.ref||(f.ref==='__none'?!s.refId:s.refId===f.ref))
+    &&(!f.dues||(f.dues==='yes'?sm.payable>0:sm.payable===0))&&(!q||[s.name,s.enrol,s.phone,s.email,s.ref].some(v=>String(v||'').toLowerCase().includes(q))));
   const key={name:x=>x.s.name.toLowerCase(),enrol:x=>x.s.enrol,course:x=>x.s.course+x.s.sem,cat:x=>x.s.category,fund:x=>x.s.funding,due:x=>x.sm.payable,paid:x=>x.sm.paid}[f.sort]||(x=>x.s.name);
   l.sort((a,b)=>{const A=key(a),B=key(b);return(A<B?-1:A>B?1:0)*f.dir});
   return l;
@@ -2104,14 +2159,17 @@ const COURSE_OPTS=()=>[['','All courses'],...scopeCourses().map(c=>[c.id,c.name]
 const SEM_OPTS_=()=>[['','All semesters'],...SEMS_ALL().map(n=>[n,'Semester '+n])];
 const CAT_OPTS=[['','All categories'],...CATS.map(c=>[c,c])];
 const FUND_OPTS=[['','Cash + Scholarship'],['CASH','By Cash'],['SCHOLARSHIP','By Scholarship']];
+/* reference filter (change 2): only the references used by students this login can see, with the count */
+const REF_OPTS=()=>{const n={};vStudents().forEach(s=>{if(s.refId)n[s.refId]=(n[s.refId]||0)+1});
+  return[['','All references'],...(db.refs||[]).filter(r=>n[r.id]).sort((a,b)=>a.name.localeCompare(b.name)).map(r=>[r.id,`${r.name} (${n[r.id]})`]),['__none','No reference']]};
 
 function viewStudents(){
   const f=stuFilter();const l=studentsFiltered();const page=pageRows(f,l);
   const acts=`${can('students.edit')?`<button class="btn" data-act="importStudents">Import CSV</button>`:''}<button class="btn exp-btn" data-act="expOpen" data-key="students">Export</button>${can('students.edit')?'<button class="btn primary" data-act="newStudent">Add student</button>':''}`;
   const act=vStudents().filter(s=>s.status==='ACTIVE');
   return head('Students',`${act.length} active · ${act.filter(s=>s.course==='BED').length} B.Ed · ${act.filter(s=>s.course==='MED').length} M.Ed · ${act.filter(s=>s.funding==='SCHOLARSHIP').length} on scholarship`,acts)+
-  `<div class="panel"><div class="filters"><input type="search" placeholder="Search name, enrolment no, phone or email" aria-label="Search students" data-live="sq" data-scope="students" value="${E(f.q)}">
-    ${sel('students','course','Course',COURSE_OPTS())}${sel('students','sem','Semester',SEM_OPTS_())}${sel('students','cat','Category',CAT_OPTS)}${sel('students','fund','Funding type',FUND_OPTS)}
+  `<div class="panel"><div class="filters"><input type="search" placeholder="Search name, enrolment no, phone, email or reference" aria-label="Search students" data-live="sq" data-scope="students" value="${E(f.q)}">
+    ${sel('students','course','Course',COURSE_OPTS())}${sel('students','sem','Semester',SEM_OPTS_())}${sel('students','cat','Category',CAT_OPTS)}${sel('students','fund','Funding type',FUND_OPTS)}${sel('students','ref','Admission reference',REF_OPTS())}
     ${sel('students','status','Status',[['','All status'],['ACTIVE','Active'],['LEFT','Left'],['PASSED','Passed']])}${sel('students','dues','Dues',[['','Dues: any'],['yes','Has dues'],['no','No dues']])}
     ${Object.entries(f).some(([k,v])=>!['sort','dir','page','status'].includes(k)&&v)?'<button class="btn sm" data-act="clearF" data-scope="students">Clear</button>':''}</div>
   <div class="tablewrap"><table><thead><tr>${sortTh('students','name','Student')}${sortTh('students','enrol','Enrolment no')}${sortTh('students','course','Course · Sem')}${sortTh('students','cat','Category')}${sortTh('students','fund','Funding')}${sortTh('students','paid','Paid',1)}${sortTh('students','due','Due now',1)}<th>Status</th></tr></thead><tbody>
@@ -2129,28 +2187,33 @@ function studentForm(s){
   const isNew=!s;const T=today();const y=+T.slice(0,4);const st=db.settings;
   const c0=pickedCourse()||myCourses()[0]||'BED';const y0=+T.slice(5,7)>=6?y:y-1;
   const d=s||{name:'',gender:'',dob:'',phone:'',email:'',address:'',course:c0,admissionYear:y0,sem:1,category:'General',funding:'CASH',scholarshipNote:'',ref:'',status:'ACTIVE',fees:semsOf(c0).map(n=>({sem:n,amount:(st.feeDefault[c0]||[])[n-1]||0,due:defaultDue(c0,y0,n)}))};
-  const canEnrol=!isNew&&(cur().role==='Super Admin'||cur().role==='Principal');
+  /* the office types the enrolment no. for a new student; changing it later stays with the Principal / Super Admin */
+  const showEnrol=isNew||canChangeEnrol();
   ui.photo=d.photo||'';
   return`<button class="btn x" data-act="close">Close</button><h2>${isNew?'Add student':'Edit '+E(d.name)}</h2>
-  <p class="muted" style="margin:4px 0 14px">${isNew?'A login is created automatically and the details are emailed to the student.':'Enrolment no. '+E(d.enrol)}</p>
+  <p class="muted" style="margin:4px 0 14px">${isNew?'A login is created automatically and the login ID and password are emailed to the student.':'Enrolment no. '+E(d.enrol)}</p>
   <form data-form="${isNew?'addStudent':'editStudent'}" ${isNew?'':`data-id="${E(d.id)}"`} class="grid" style="gap:18px" novalidate>
    <fieldset class="fs"><legend>Personal</legend><div class="form">
     ${F('name','Full name',{val:d.name,req:true,span:1,attrs:'maxlength="80" autocomplete="off"'})}
     ${F('gender','Gender',{val:d.gender,opts:[['','Select'],['F','Female'],['M','Male'],['O','Other']]})}
     ${F('dob','Date of birth',{type:'date',val:d.dob,attrs:`max="${T}"`})}
-    ${F('phone','Mobile',{type:'tel',val:d.phone,req:true,attrs:'inputmode="numeric" maxlength="10" pattern="[6-9][0-9]{9}"'})}
-    ${F('email','Email',{type:'email',val:d.email,req:true,attrs:'maxlength="120"'})}
+    ${F('phone','Mobile',{type:'tel',val:d.phone,req:true,attrs:'inputmode="numeric" maxlength="10" pattern="[6-9][0-9]{9}" data-live="loginPrev"'})}
+    ${F('email','Email',{type:'email',val:d.email,req:true,attrs:'maxlength="120" data-live="loginPrev"'})}
     ${F('address','Address',{type:'textarea',val:d.address,span:1,rows:2})}
     <div class="field span"><span class="label">Photo</span><div class="photo-row"><div id="photoPrev">${ui.photo?`<img class="av lg" src="${E(ui.photo)}" alt="">`:`<div class="av lg">${E(initials(d.name||'?'))}</div>`}</div><label class="btn sm"><input type="file" accept="image/*" data-change="photo" class="sr"> Choose photo</label>${ui.photo?'<button type="button" class="btn sm" data-act="photoClear">Remove</button>':''}</div></div>
    </div></fieldset>
    <fieldset class="fs"><legend>Course</legend><div class="form">
+    ${showEnrol?F('enrol','Enrolment no.',{val:d.enrol||'',req:true,ph:'e.g. BED26-001',attrs:'maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" data-live="loginPrev"'}):''}
     ${F('course','Course',{val:d.course,opts:db.courses.filter(c=>mayCourse(c.id)&&(c.active!==false||c.id===d.course)).map(c=>[c.id,c.name]),req:true,attrs:'data-change="formCourse"'})}
     <div class="field" id="batchWrap">${batchSelect(d.course,d.admissionYear)}</div>
     <div class="field" id="semWrap">${semSelect(d.course,d.sem)}</div>
-    ${F('ref','Admission reference',{val:d.ref||'',attrs:'maxlength="60" placeholder="e.g. NARESHBHAI or COLLEGE"'})}
+    ${refField(d.ref||'')}
     ${isNew?'':F('status','Status',{val:d.status,opts:[['ACTIVE','Active'],['LEFT','Left'],['PASSED','Passed']]})}
-    ${canEnrol?F('enrol','Enrolment no.',{val:d.enrol,req:true,attrs:'maxlength="20"'}):''}
    </div></fieldset>
+   ${isNew?`<fieldset class="fs"><legend>Student login</legend>
+    <div class="rline"><span>Login ID</span><b class="mono" id="lpId">${E(loginIdText(d.enrol,d.email))}</b></div>
+    <div class="rline"><span>Password</span><b class="mono" id="lpPw">${E(loginPwText(d.phone,d.admissionYear))}</b></div>
+    <p class="note" style="margin:8px 0 0">Password = first 5 digits of the mobile + @ + the year the batch starts (mobile 94290 86515, batch 2026-28 → 94290@2026). It is emailed to the student. Students cannot change it; only staff with the reset permission can.</p></fieldset>`:''}
    <fieldset class="fs"><legend>Category</legend><div class="form">
     ${F('category','Category',{val:d.category,opts:CATS.map(c=>[c,c]),req:true,attrs:'data-change="formCat"'})}
     <div class="field" id="fundWrap" ${fundingApplies(d.category)?'':'hidden'}><span class="label">Funding type *</span><div class="seg" role="radiogroup" aria-label="Funding type">
@@ -2171,6 +2234,53 @@ function semFeeFields(cid,fees){return semsOf(cid).map(n=>{const fe=(fees||[]).f
      <label class="label" for="f_fee${n}">Tuition fee (₹)</label><input id="f_fee${n}" name="fee${n}" inputmode="decimal" value="${fe.amount/100}" required data-live="feeEdit">
      <label class="label" for="f_due${n}">Due date</label><input id="f_due${n}" name="due${n}" type="date" value="${E(fe.due||'')}"></div>`}).join('')}
 const feeNoteText=cid=>`Pre-filled from the default tuition fee (${inr(((db.settings.feeDefault[cid]||[])[0])||0)} per semester). Change any semester for this student only.`;
+const canChangeEnrol=()=>{const r=(cur()||{}).role;return r==='Super Admin'||r==='Principal'};
+
+/* ---------- live login preview on the Add student form (change 1) ---------- */
+const loginIdText=(en,mail)=>{en=String(en||'').trim().toUpperCase();mail=String(mail||'').trim().toLowerCase();return(en||'(enrolment no.)')+' or '+(mail||'(email)')};
+const loginPwText=(ph,y)=>String(ph||'').replace(/\D/g,'').length>=5?studentPassword(ph,y):'(type the mobile number)';
+function loginPrev(f){if(!f||f.dataset.form!=='addStudent')return;const a=$('#lpId'),b=$('#lpPw');
+  if(a)a.textContent=loginIdText(f.enrol&&f.enrol.value,f.email&&f.email.value);if(b)b.textContent=loginPwText(f.phone&&f.phone.value,f.admissionYear&&f.admissionYear.value)}
+LIVE.loginPrev=el=>loginPrev(el.form);
+
+/* ---------- admission reference picker (change 2) ----------
+   Click / focus the field: the saved references open as a list (filtered while typing, with the number of students).
+   A name that is not saved yet shows "Add new reference"; it is saved with an id (REF001 …) when the student is saved.
+   Arrow keys move, Enter picks, Esc closes. */
+const refCountText=n=>n+' student'+(n===1?'':'s');
+const refHint=v=>{const n=refClean(v),all=(db.refs||[]).length;if(!n)return all?`${all} saved reference${all===1?'':'s'}. Click the field to pick one, or type a new name.`:'Type a name. It is saved for next time.';
+  const r=refByName(n);return r?`Saved reference ${r.id} · ${refCountText(refCount(r.id))}`:'New reference. It is saved with an id when you save the student.'};
+function refField(val){
+  return`<div class="field cbx"><label class="label" for="f_ref">Admission reference</label>
+   <div class="cbx-box"><input id="f_ref" name="ref" value="${E(val)}" maxlength="60" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="refList" aria-describedby="refHint" data-cbx="ref" placeholder="Pick a saved name or type a new one">
+    <span class="cbx-caret" aria-hidden="true"></span><ul class="cbx-list" id="refList" role="listbox" aria-label="Saved admission references" hidden></ul></div>
+   <small class="muted" id="refHint">${E(refHint(val))}</small></div>`}
+const CBX={inp:null,act:-1,items:[]};
+function cbxDraw(){
+  const inp=CBX.inp;if(!inp||!inp.isConnected)return cbxClose();const ul=inp.parentNode.querySelector('.cbx-list');const q=refKey(inp.value);
+  const l=(db.refs||[]).filter(r=>!q||refKey(r.name).includes(q)).sort((a,b)=>{const A=refKey(a.name),B=refKey(b.name);return(A.startsWith(q)?0:1)-(B.startsWith(q)?0:1)||A.localeCompare(B)}).slice(0,60);
+  CBX.items=l.map(r=>({v:r.name,r}));if(q&&!refByName(inp.value))CBX.items.push({v:refClean(inp.value),add:true});
+  if(CBX.act>=CBX.items.length)CBX.act=CBX.items.length-1;
+  ul.innerHTML=CBX.items.map((it,i)=>`<li id="refOpt${i}" role="option" class="cbx-opt${it.add?' add':''}${i===CBX.act?' on':''}" aria-selected="${i===CBX.act}" data-i="${i}">${it.add?`<span>+ Add new reference “<b>${E(it.v)}</b>”</span>`:`<span>${E(it.r.name)}</span><small>${E(it.r.id)} · ${refCountText(refCount(it.r.id))}</small>`}</li>`).join('')
+    ||'<li class="cbx-empty" role="presentation">No saved references yet. Type a name to add the first one.</li>';
+  ul.hidden=false;inp.setAttribute('aria-expanded','true');
+  if(CBX.act>=0){inp.setAttribute('aria-activedescendant','refOpt'+CBX.act);const on=ul.querySelector('.on');if(on)on.scrollIntoView({block:'nearest'})}else inp.removeAttribute('aria-activedescendant');
+}
+function cbxOpen(inp){CBX.inp=inp;CBX.act=-1;cbxDraw()}
+function cbxClose(){const inp=CBX.inp;CBX.inp=null;CBX.act=-1;CBX.items=[];if(!inp)return;const ul=inp.parentNode&&inp.parentNode.querySelector('.cbx-list');if(ul){ul.hidden=true;ul.innerHTML=''}inp.setAttribute('aria-expanded','false');inp.removeAttribute('aria-activedescendant')}
+const cbxHint=inp=>{const h=$('#refHint');if(h)h.textContent=refHint(inp.value)};
+function cbxPick(i){const it=CBX.items[i],inp=CBX.inp;if(!it||!inp)return;inp.value=it.v;cbxClose();cbxHint(inp);softFocus(inp)}
+const isCbx=t=>!!(t&&t.matches&&t.matches('[data-cbx=ref]'));
+document.addEventListener('focusin',e=>{if(isCbx(e.target)){if(CBX.inp!==e.target)cbxOpen(e.target)}else if(CBX.inp&&!CBX.inp.parentNode.contains(e.target))cbxClose()});
+document.addEventListener('mousedown',e=>{if(e.target.closest&&e.target.closest('.cbx-list'))e.preventDefault()}); /* keep focus in the field while picking */
+document.addEventListener('click',e=>{const t=e.target;const o=t.closest&&t.closest('.cbx-opt');if(o&&CBX.inp){cbxPick(+o.dataset.i);return}
+  if(isCbx(t)){if(!CBX.inp)cbxOpen(t);return}if(CBX.inp&&!(t.closest&&t.closest('.cbx-box')))cbxClose()});
+document.addEventListener('input',e=>{if(!isCbx(e.target))return;CBX.inp=e.target;CBX.act=-1;cbxDraw();cbxHint(e.target)});
+document.addEventListener('keydown',e=>{const t=e.target;if(!isCbx(t))return;const open=CBX.inp===t;
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(!open)cbxOpen(t);const n=CBX.items.length;if(!n)return;CBX.act=e.key==='ArrowDown'?(CBX.act+1)%n:(CBX.act<=0?n-1:CBX.act-1);cbxDraw()}
+  else if(e.key==='Enter'&&open&&CBX.act>=0){e.preventDefault();e.stopPropagation();cbxPick(CBX.act)}
+  else if(e.key==='Escape'&&open){e.preventDefault();e.stopPropagation();cbxClose()}
+  else if(e.key==='Tab'&&open)cbxClose()},true);
 ACT.newStudent=()=>{need('students.edit','add students');ui.feeTouched=false;drawer(studentForm(null),true,'Add student');$('#f_name').focus()};
 ACT.editStudent=el=>{need('students.edit','edit students');guardStudent(el.dataset.id);const s=stu(el.dataset.id);ui.feeTouched=true;drawer(studentForm(s),true,'Edit student')};
 LIVE.feeEdit=()=>{ui.feeTouched=true};
@@ -2179,13 +2289,15 @@ document.addEventListener('change',e=>{if(e.target.name==='funding')$('#schNote'
 CHG.formCourse=el=>{const f=el.form;if(!f)return;const c=f.course.value,y=+f.admissionYear.value;
   if(el.name==='course'){$('#batchWrap').innerHTML=batchSelect(c,y);$('#semWrap').innerHTML=semSelect(c,Math.min(+f.sem.value||1,semsOf(c).length))}
   const isNew=f.dataset.form==='addStudent';const sameLen=semsOf(c).every(n=>f['fee'+n]);
-  if(isNew&&!ui.feeTouched||!sameLen){$('#semFees').innerHTML=semFeeFields(c,semsOf(c).map(n=>({sem:n,amount:(db.settings.feeDefault[c]||[])[n-1]||0,due:defaultDue(c,y,n)})));$('#feeNote').textContent=feeNoteText(c)}};
+  if(isNew&&!ui.feeTouched||!sameLen){$('#semFees').innerHTML=semFeeFields(c,semsOf(c).map(n=>({sem:n,amount:(db.settings.feeDefault[c]||[])[n-1]||0,due:defaultDue(c,y,n)})));$('#feeNote').textContent=feeNoteText(c)}
+  loginPrev(f)};
 CHG.photo=el=>{const file=el.files&&el.files[0];if(!file)return;if(!/^image\//.test(file.type))throw new Error('Choose an image file');
   const img=new Image();const url=URL.createObjectURL(file);img.onload=()=>{const c=document.createElement('canvas'),S=160;const r=Math.max(S/img.width,S/img.height);c.width=c.height=S;const g=c.getContext('2d');g.drawImage(img,(S-img.width*r)/2,(S-img.height*r)/2,img.width*r,img.height*r);ui.photo=c.toDataURL('image/jpeg',.8);URL.revokeObjectURL(url);$('#photoPrev').innerHTML=`<img class="av lg" src="${ui.photo}" alt="">`};img.onerror=()=>toast('Could not read this image',true);img.src=url};
 ACT.photoClear=()=>{ui.photo='';$('#photoPrev').innerHTML='<div class="av lg">?</div>'};
 const MAIL_OK=/^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]{2,}$/;
 function readStudentForm(f,d,old){
   const name=capText(d.name,'Name');if(name.length<2)throw new Error('Enter the student\'s full name');
+  const enrol=old?null:readEnrol(d.enrol,null); /* a new student: the office types the enrolment no. */
   const phone=String(d.phone||'').replace(/\D/g,'');if(!/^[6-9]\d{9}$/.test(phone))throw new Error('Enter a 10-digit mobile number');
   const email=String(d.email||'').trim().toLowerCase();if(!MAIL_OK.test(email))throw new Error('Enter a valid email (login details are sent there)');
   if(db.students.some(s=>s!==old&&s.email.toLowerCase()===email))throw new Error('Another student already uses this email');
@@ -2196,26 +2308,31 @@ function readStudentForm(f,d,old){
   if(d.dob&&!validIso(d.dob))throw new Error('Check the date of birth');
   if(!semsOf(d.course).includes(+d.sem||1))throw new Error('Choose a valid semester');
   const fees=semsOf(d.course).map(n=>{const a=toPaise(d['fee'+n]);if(!(a>=0)||a>100000000)throw new Error(`Semester ${n} tuition fee must be a number between 0 and 10,00,000`);const due=d['due'+n]||'';if(due&&!validIso(due))throw new Error(`Check the semester ${n} due date`);return{sem:n,amount:a,due}});
-  return{name,gender:d.gender||'',dob:d.dob||'',phone,email,address:capText(d.address,'Address',300),photo:ui.photo||'',course:d.course,admissionYear:y,sem:+d.sem||1,category:d.category,funding:fundOn?d.funding:'CASH',scholarshipNote:fundOn&&d.funding==='SCHOLARSHIP'?capText(d.scholarshipNote,'Scholarship note',120):'',ref:capText(d.ref,'Admission reference',60),fees};
+  return{name,gender:d.gender||'',dob:d.dob||'',phone,email,address:capText(d.address,'Address',300),photo:ui.photo||'',course:d.course,admissionYear:y,sem:+d.sem||1,category:d.category,funding:fundOn?d.funding:'CASH',scholarshipNote:fundOn&&d.funding==='SCHOLARSHIP'?capText(d.scholarshipNote,'Scholarship note',120):'',ref:refClean(capText(d.ref,'Admission reference',60)),fees,...(enrol?{enrol}:{})};
 }
+/* links the typed reference to its saved record (creating it the first time) */
+const linkRef=v=>{const r=refEnsure(v.ref,cur().name);v.ref=r?r.name:'';v.refId=r?r.id:'';return v};
 FORM.addStudent=(f,d)=>{
-  need('students.edit','add students');const v=readStudentForm(f,d,null);
+  need('students.edit','add students');const v=linkRef(readStudentForm(f,d,null));
   const s=makeStudent({...v,fees:v.fees.map(x=>x.amount),dues:v.fees.map(x=>x.due),createdBy:cur().name,createdAt:Date.now()});
-  db.students.push(s);const pw=tempPassword();createStudentLogin(s,pw,true);
-  log('Student added','Student',s.enrol,null,{name:s.name,course:s.course,sem:s.sem,category:s.category,funding:s.funding,fees:s.fees.map(x=>inr(x.amount)).join(' / ')});
-  sendCredentials(s,pw,'new');save();closeLayer();renderPage();openStudent(s.id);
-  toast(`${s.name} added · login details are being emailed to ${s.email}`);
+  db.students.push(s);const u=createStudentLogin(s);
+  log('Student added','Student',s.enrol,null,{name:s.name,enrol:s.enrol,course:s.course,sem:s.sem,category:s.category,funding:s.funding,ref:s.ref,fees:s.fees.map(x=>inr(x.amount)).join(' / ')});
+  sendCredentials(s,u.password,'new');save();closeLayer();renderPage();openStudent(s.id);
+  toast(`${s.name} added · login ID and password are being emailed to ${s.email}`);
 };
 ACT.openStudentD=el=>{closeDialog();openStudent(el.dataset.id)};
 FORM.editStudent=(f,d)=>{
   need('students.edit','edit students');guardStudent(f.dataset.id);const s=stu(f.dataset.id);if(!s)throw new Error('Student not found');const v=readStudentForm(f,d,s);
   const before={name:s.name,ref:s.ref||'',phone:s.phone,email:s.email,course:s.course,sem:s.sem,category:s.category,funding:s.funding,status:s.status,fees:s.fees.map(x=>inr(x.amount)).join(' / '),enrol:s.enrol};
-  if(d.enrol!==undefined){const en=capText(d.enrol,'Enrolment no.',20).toUpperCase();if(!/^[A-Z0-9-\/]{3,20}$/.test(en))throw new Error('Enrolment no. can use letters, numbers and -');if(db.students.some(x=>x!==s&&x.enrol===en))throw new Error('This enrolment no. is already used');
-    if(en!==s.enrol){const u=db.users.find(x=>x.id===s.userId);if(u)u.username=en.toLowerCase();s.enrol=en}}
+  if(d.enrol!==undefined&&!canChangeEnrol())throw new Error('Only the Principal can change the enrolment no.');
+  const en=d.enrol!==undefined?readEnrol(d.enrol,s):s.enrol;
   if(v.fees.some(x=>{const sm=semSummary(s,x.sem);return x.amount<sm.paid}))throw new Error('A semester fee cannot be lower than what is already paid for it');
+  linkRef(v);
+  const u=db.users.find(x=>x.id===s.userId);
+  if(en!==s.enrol){if(u)u.username=en.toLowerCase();s.enrol=en}
   Object.assign(s,v);if(d.status&&statusLabel[d.status])s.status=d.status;
-  const u=db.users.find(x=>x.id===s.userId);if(u){u.name=s.name;u.email=s.email;u.phone=s.phone;u.active=s.status==='ACTIVE'||s.status==='PASSED'}
-  const after={name:s.name,phone:s.phone,email:s.email,course:s.course,sem:s.sem,category:s.category,funding:s.funding,status:s.status,fees:s.fees.map(x=>inr(x.amount)).join(' / '),enrol:s.enrol};
+  if(u){u.name=s.name;u.email=s.email;u.phone=s.phone;u.active=s.status==='ACTIVE'||s.status==='PASSED'}
+  const after={name:s.name,ref:s.ref||'',phone:s.phone,email:s.email,course:s.course,sem:s.sem,category:s.category,funding:s.funding,status:s.status,fees:s.fees.map(x=>inr(x.amount)).join(' / '),enrol:s.enrol};
   const b={},a={};Object.keys(after).forEach(k=>{if(String(before[k])!==String(after[k])){b[k]=before[k];a[k]=after[k]}});
   if(Object.keys(a).length)log('Student edited','Student',s.enrol,b,a);
   save();closeLayer();renderPage();openStudent(s.id);toast('Saved');
@@ -2225,11 +2342,27 @@ FORM.editStudent=(f,d)=>{
 function sendCredentials(s,pw,why){
   const rec=queueMail({kind:'credentials',studentId:s.id,to:[s.email],subject:`Your ${db.college.short} student login`,why,pw});
   s.cred={status:rec.status,at:Date.now(),to:s.email,mailId:rec.id};
-  notify('credentials',why==='new'?'Welcome to the NPCTE student portal':'Your login details were sent again',`Check ${s.email} for your login ID and temporary password.`,{students:[s.id],portal:'sprofile',self:true});
+  notify('credentials',why==='new'?'Welcome to the NPCTE student portal':why==='reset'?'Your password was reset by the college office':'Your login details were sent again',`Check ${s.email} for your login ID and password.`,{students:[s.id],portal:'sprofile',self:true});
 }
-ACT.resendCred=el=>{need('students.edit','resend logins');const s=stu(el.dataset.id);const u=db.users.find(x=>x.id===s.userId);const pw=tempPassword();u.password=pw;u.mustChange=true;
-  log('Login details resent','Student',s.enrol,null,null,'New temporary password emailed');sendCredentials(s,pw,'resend');save();openStudent(s.id);toast('New password is being emailed to '+s.email)};
-ACT.resetPw=el=>{need('students.edit','reset passwords');const s=stu(el.dataset.id);confirmBox('Reset password',`${s.name} gets a new temporary password by email and must change it at the next sign-in.`,'Reset password',()=>ACT.resendCred(el))};
+/* students never change or reset their own password (change 1). Staff with students.password resend or reset it. */
+const stuLogin=id=>{need('students.password','student passwords');guardStudent(id);const s=stu(id);const u=s&&db.users.find(x=>x.id===s.userId);if(!u)throw new Error('This student has no login');return{s,u}};
+ACT.resendCred=el=>{const{s,u}=stuLogin(el.dataset.id);
+  log('Login details resent','Student',s.enrol,null,null,'Current password emailed');sendCredentials(s,u.password,'resend');save();openStudent(s.id);toast('Login details are being emailed to '+s.email)};
+ACT.resetPw=el=>{const{s}=stuLogin(el.dataset.id);const def=studentPwOf(s);
+  dialog(`<h3>Reset password</h3><p class="muted" style="margin:0 0 14px">${E(s.name)} · ${E(s.enrol)}. The new password is emailed to ${E(s.email)}. The student cannot change it.</p>
+   <form data-form="stuPwReset" data-id="${E(s.id)}" class="grid" style="gap:12px">
+    <fieldset class="fs-plain pw-kind"><legend class="label">New password</legend>
+     <label class="chk"><input type="radio" name="kind" value="default" checked data-change="pwKind"> <span>Default rule: <b class="mono">${E(def)}</b><small class="muted" style="display:block">First 5 digits of the mobile @ the year the batch starts</small></span></label>
+     <label class="chk"><input type="radio" name="kind" value="custom" data-change="pwKind"> <span>Type a different password</span></label></fieldset>
+    <div class="field" id="pwCustom" hidden><label class="label" for="f_pw">Password *</label><input id="f_pw" name="pw" maxlength="40" autocomplete="off" spellcheck="false"><small class="muted">6 to 40 characters, no spaces.</small></div>
+    <div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Cancel</button><button class="btn primary">Reset and email</button></div></form>`,'Reset password')};
+CHG.pwKind=el=>{const c=el.value==='custom';const w=$('#pwCustom');if(w)w.hidden=!c;const i=$('#f_pw');if(i){i.required=c;if(c)i.focus()}};
+FORM.stuPwReset=(f,d)=>{const{s,u}=stuLogin(f.dataset.id);const custom=d.kind==='custom';
+  const pw=custom?String(d.pw||''):studentPwOf(s);
+  if(custom&&!/^\S{6,40}$/.test(pw))throw new Error('Password: 6 to 40 characters, no spaces');
+  u.password=pw;u.mustChange=false;delete LOCK[u.username];delete LOCK[(u.email||'').toLowerCase()]; /* a locked-out student can sign in again */
+  log('Student password reset','Student',s.enrol,null,null,custom?'Set by the office':'Reset to the default rule');
+  sendCredentials(s,pw,'reset');save();closeDialog();openStudent(s.id);toast('New password is being emailed to '+s.email)};
 
 /* ---------- profile ---------- */
 function semCards(s,o={}){
@@ -2256,8 +2389,9 @@ function openStudent(id){
    ${pays.map(p=>`<tr><td class="mono">${E(p.rc)}</td><td>${fmtD(p.invoiceDate)}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}</td><td>${payPill(p.status)}</td><td><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">Receipt</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No payments yet.</td></tr>'}</tbody></table></div>
    <h3>Login</h3><div class="panel" style="padding:12px"><div class="rline"><span>Login ID</span><b class="mono">${E(u?u.username:'—')} · ${E(s.email)}</b></div>
     <div class="rline"><span>Credentials email</span><span>${mail?mailPill(mail.status)+' <small class="muted">'+E(fmtT(mail.sentAt||mail.at||mail.ts))+'</small>':pill('Not sent','warn')}</span></div>
-    <div class="rline"><span>Last sign-in</span><span>${u&&u.lastLoginAt?E(fmtT(u.lastLoginAt)):'Never'}${u&&u.mustChange?' · '+pill('Must change password','warn'):''}</span></div>
-    ${can('students.edit')?`<div class="actions" style="margin-top:8px"><button class="btn sm" data-act="resendCred" data-id="${E(s.id)}">Resend credentials</button><button class="btn sm" data-act="resetPw" data-id="${E(s.id)}">Reset password</button></div>`:''}</div>
+    <div class="rline"><span>Password</span><span>${u?(u.password===studentPwOf(s)?pill('Default rule','good')+' <small class="muted">mobile 5 digits @ batch year</small>':pill('Set by the office','acc')):'—'}</span></div>
+    <div class="rline"><span>Last sign-in</span><span>${u&&u.lastLoginAt?E(fmtT(u.lastLoginAt)):'Never'}</span></div>
+    ${can('students.password')?`<div class="actions" style="margin-top:8px"><button class="btn sm" data-act="resendCred" data-id="${E(s.id)}">Resend login details</button><button class="btn sm" data-act="resetPw" data-id="${E(s.id)}">Reset password</button></div>`:'<p class="note" style="margin:8px 0 0">Password reset is done by staff with the "Reset student passwords" permission.</p>'}</div>
    <h3>Notices sent to this student</h3><div class="list">${notes.slice(0,8).map(n=>`<div class="li"><div><b>${E(n.title)}</b><small>${fmtT(n.publishAt)} · ${E(audienceLabel(n.audience))}</small></div>${n.isFeeAlert?pill('Fee alert','warn'):''}</div>`).join('')||'<p class="note">No notices yet.</p>'}</div>
    ${can('activity.view')?`<h3>Audit trail</h3><div class="list">${trail.map(a=>`<div class="li"><div><b>${E(a.action)}</b><small>${E(fmtT(a.at))} · ${E(a.actor)} (${E(a.role)})${a.after?' · '+E(diffText(a.before,a.after)):''}</small></div></div>`).join('')||'<p class="note">Nothing yet.</p>'}</div>`:''}`,true,s.name);
 }
@@ -2265,22 +2399,22 @@ ACT.openStudent=el=>openStudent(el.dataset.id);
 const diffText=(b,a)=>{if(!a)return'';return Object.keys(a).map(k=>`${k}: ${b&&b[k]!==undefined?b[k]+' → ':''}${a[k]}`).join(', ').slice(0,220)};
 
 /* ---------- CSV import (spec §15.6: a template for students only) ---------- */
-const IMPORT_COLS=['name','gender','dob','phone','email','address','course','admissionYear','sem','category','funding','fee1','fee2','fee3','fee4','ref'];
+const IMPORT_COLS=['enrol','name','gender','dob','phone','email','address','course','admissionYear','sem','category','funding','fee1','fee2','fee3','fee4','ref'];
 ACT.importStudents=()=>{need('students.edit');drawer(`<button class="btn x" data-act="close">Close</button><h2>Import students from CSV</h2>
-  <p class="muted">Save your Excel sheet as CSV with these columns (first row = headings). Dates as YYYY-MM-DD, course code (e.g. BED or MED), funding CASH or SCHOLARSHIP, fees in rupees (blank = default). Each imported student gets a login and an email.</p>
+  <p class="muted">Save your Excel sheet as CSV with these columns (first row = headings). Enrolment no. (enrol) is required and must be new, dates as YYYY-MM-DD, course code (e.g. BED or MED), funding CASH or SCHOLARSHIP, fees in rupees (blank = default). Each imported student gets a login (password = first 5 digits of the mobile @ batch year) and an email.</p>
   <div class="actions" style="margin:10px 0"><button class="btn" data-act="importTpl">Download template</button><label class="btn"><input type="file" accept=".csv,text/csv" class="sr" data-change="importFile"> Choose CSV file</label></div>
   <div id="importOut"></div>`,true)};
-ACT.importTpl=()=>download('npcte-student-import-template.csv','﻿'+csvOf(IMPORT_COLS,[['Riya Patel','F','2003-04-15','9876543210','riya.patel@example.com','Mahesana','BED',today().slice(0,4),'1','SC','SCHOLARSHIP','30000','30000','30000','30000','COLLEGE']]),'text/csv;charset=utf-8');
+ACT.importTpl=()=>download('npcte-student-import-template.csv','﻿'+csvOf(IMPORT_COLS,[['BED'+today().slice(2,4)+'-001','Riya Patel','F','2003-04-15','9876543210','riya.patel@example.com','Mahesana','BED',today().slice(0,4),'1','SC','SCHOLARSHIP','30000','30000','30000','30000','COLLEGE']]),'text/csv;charset=utf-8');
 function parseCsv(t){const rows=[];let r=[],v='',q=false;for(let i=0;i<t.length;i++){const c=t[i];if(q){if(c==='"'&&t[i+1]==='"'){v+='"';i++}else if(c==='"')q=false;else v+=c}else if(c==='"')q=true;else if(c===','){r.push(v);v=''}else if(c==='\n'||c==='\r'){if(c==='\r'&&t[i+1]==='\n')i++;r.push(v);rows.push(r);r=[];v=''}else v+=c}if(v||r.length){r.push(v);rows.push(r)}return rows.filter(x=>x.some(y=>y.trim()))}
 CHG.importFile=el=>{const file=el.files&&el.files[0];if(!file)return;file.text().then(t=>{
-  const rows=parseCsv(t.replace(/^﻿/,''));const hd=rows.shift().map(h=>h.trim());const miss=['name','phone','email','course','admissionYear','category'].filter(c=>!hd.includes(c));
+  const rows=parseCsv(t.replace(/^﻿/,''));const hd=rows.shift().map(h=>h.trim());const miss=['enrol','name','phone','email','course','admissionYear','category'].filter(c=>!hd.includes(c));
   if(miss.length){$('#importOut').innerHTML=`<div class="err">Missing columns: ${E(miss.join(', '))}</div>`;return}
   const ok=[],bad=[];rows.forEach((r,i)=>{const d={};hd.forEach((h,j)=>d[h]=(r[j]||'').trim());d.course=(d.course||'').toUpperCase();d.funding=(d.funding||'CASH').toUpperCase();d.sem=d.sem||1;
     (course(d.course)?semsOf(d.course):SEMS).forEach(n=>{d['fee'+n]=d['fee'+n]||String(db.settings.feeDefault[d.course]?db.settings.feeDefault[d.course][n-1]/100:'');d['due'+n]=''});
-    try{ui.photo='';const v=readStudentForm(null,d,null);if(ok.some(x=>x.email===v.email))throw new Error('Email repeated in the file');ok.push(v)}catch(e){bad.push(`Row ${i+2}: ${e.message}`)}});
+    try{ui.photo='';const v=readStudentForm(null,d,null);if(ok.some(x=>x.email===v.email))throw new Error('Email repeated in the file');if(ok.some(x=>x.enrol===v.enrol))throw new Error('Enrolment no. repeated in the file');ok.push(v)}catch(e){bad.push(`Row ${i+2}: ${e.message}`)}});
   ui.importRows=ok;$('#importOut').innerHTML=`<div class="panel" style="padding:12px"><p style="margin:0"><b>${ok.length}</b> ready to import${bad.length?`, <b class="t-bad">${bad.length}</b> with problems`:''}.</p>${bad.length?`<ul class="note">${bad.slice(0,20).map(b=>`<li>${E(b)}</li>`).join('')}</ul>`:''}
    ${ok.length?`<button class="btn primary" style="margin-top:10px" data-act="importGo">Import ${ok.length} students</button>`:''}</div>`}).catch(()=>toast('Could not read the file',true))};
-ACT.importGo=()=>{need('students.edit');const l=ui.importRows||[];l.forEach(v=>{v.dues=semsOf(v.course).map(n=>defaultDue(v.course,v.admissionYear,n));const s=makeStudent({...v,fees:v.fees.map(x=>x.amount),createdBy:cur().name});db.students.push(s);const pw=tempPassword();createStudentLogin(s,pw,true);sendCredentials(s,pw,'new')});
+ACT.importGo=()=>{need('students.edit');const l=ui.importRows||[];l.forEach(v=>{v.dues=semsOf(v.course).map(n=>defaultDue(v.course,v.admissionYear,n));linkRef(v);const s=makeStudent({...v,fees:v.fees.map(x=>x.amount),createdBy:cur().name});db.students.push(s);const u=createStudentLogin(s);sendCredentials(s,u.password,'new')});
   log('Students imported','Student','',null,{count:l.length});ui.importRows=null;save();closeLayer();renderPage();toast(`${l.length} students imported. Login emails are on their way.`)};
 /* =====================================================================
    Fee Collection (spec §5): Collect fee (every student, semester-wise) · Pending dues · Receipts · Fee setup
@@ -2861,11 +2995,13 @@ function mailText(o){return[`Dear ${o.name},`,'',o.intro,o.big?`\n${o.big.label}
 function mailContent(rec,pw){
   const c=db.college,s=rec.studentId?stu(rec.studentId):null;
   if(rec.kind==='credentials'){const cr=course(s.course);
-    return{subject:rec.subject,title:rec.why==='new'?`Welcome to the ${c.short} student portal`:'Your new portal password',name:s.name,
-      intro:rec.why==='new'?`Your student account at ${c.name} is ready. Use the login details below to sign in to the student portal, where you can see your fees, pay by UPI, download receipts and read college notices.`:'Your student portal password was reset by the college office. Use the details below to sign in.',
-      rows:[['Name',s.name],['Enrolment no.',s.enrol],['Course',`${cr?cr.name:s.course} · Semester ${s.sem}`],['Batch',defaultBatch(s)],['Login ID',s.enrol.toLowerCase(),1],['Or sign in with',s.email],['Password',pw||'(not available, ask the office to resend)',1]],
+    /* change 1: the password follows the rule (mobile 5 digits @ batch start year) unless the office set another one; students cannot change it */
+    const rule=pw&&pw===studentPwOf(s);
+    return{subject:rec.subject,title:rec.why==='new'?`Welcome to the ${c.short} student portal`:rec.why==='reset'?'Your new portal password':'Your portal login details',name:s.name,
+      intro:rec.why==='new'?`Your student account at ${c.name} is ready. Use the login details below to sign in to the student portal, where you can see your fees, pay by UPI, download receipts and read college notices.`:rec.why==='reset'?'Your student portal password was reset by the college office. Use the details below to sign in.':'As requested, here are your student portal login details.',
+      rows:[['Name',s.name],['Enrolment no.',s.enrol],['Course',`${cr?cr.name:s.course} · Semester ${s.sem}`],['Batch',defaultBatch(s)],['Login ID',s.enrol,1],['Or sign in with',s.email],['Password',pw||'(not available, ask the office to resend)',1]],
       button:{label:'Open student portal',url:portalUrl()},notesTitle:'How to sign in',
-      notes:['Open the portal and sign in with your Login ID (or email) and the password above.','You will be asked to choose your own password at the first sign-in.','Add the portal to your phone: in Chrome tap "Install app", on iPhone Safari tap Share → "Add to Home Screen".','Never share your password. The college will never ask for it.']}}
+      notes:['Open the portal and sign in with your enrolment no. (or email) and the password above.',...(rule?['Your password is the first 5 digits of your mobile number, then @, then the year your batch starts (for example 94290@2026).']:[]),'The password cannot be changed from the portal. If you forget it, contact the college office.','Add the portal to your phone: in Chrome tap "Install app", on iPhone Safari tap Share → "Add to Home Screen".','Never share your password. The college will never ask for it.']}}
   if(rec.kind==='staff'){const u=db.users.find(x=>x.id===rec.userId);
     return{subject:rec.subject,title:rec.why==='new'?`Your ${c.short} ERP login`:'Your new ERP password',name:u.name,
       intro:rec.why==='new'?`A ${u.role} login has been created for you in the ${c.short} College ERP.`:'Your ERP password was reset by the administrator.',
@@ -3225,7 +3361,7 @@ ACT.backup=()=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');con
 
 /* ---------- my account ---------- */
 function accountPanel(){return`<form class="panel" data-form="myPw"><h2>Change password</h2><div class="grid" style="gap:10px">${F('old','Current password',{type:'password',req:true,attrs:'autocomplete="current-password"'})}${F('p1','New password',{type:'password',req:true,attrs:'autocomplete="new-password"'})}${F('p2','Type it again',{type:'password',req:true,attrs:'autocomplete="new-password"'})}<button class="btn primary">Change password</button></div></form>`}
-FORM.myPw=(f,d)=>{const u=cur();if(d.old!==u.password)throw new Error('Current password is wrong');if(!pwOk(d.p1))throw new Error('Use at least 8 characters with a letter and a number');if(d.p1!==d.p2)throw new Error('The two new passwords are not the same');u.password=d.p1;log('Password changed','User',u.username);save();f.reset();toast('Password changed')};
+FORM.myPw=(f,d)=>{const u=cur();if(isStudentUser(u))throw new Error('Only the college office can change a student password');if(d.old!==u.password)throw new Error('Current password is wrong');if(!pwOk(d.p1))throw new Error('Use at least 8 characters with a letter and a number');if(d.p1!==d.p2)throw new Error('The two new passwords are not the same');u.password=d.p1;log('Password changed','User',u.username);save();f.reset();toast('Password changed')};
 function staffProfileHtml(){const u=cur();const L=(k,v)=>`<div class="rline"><span>${k}</span><b style="font-weight:500;text-align:right;overflow-wrap:anywhere">${E(v||'-')}</b></div>`;
   return`<button class="btn x" data-act="close">Close</button><div class="who" style="margin:4px 0 14px"><div class="av lg">${E(initials(u.name))}</div><div><h2 style="margin:0">${E(u.name)}</h2><small class="muted">${E(u.role)}</small></div></div>
   <div class="panel">${L('Username',u.username)}${L('Email',u.email)}${u.phone?L('Mobile',u.phone):''}${L('Last sign-in',fmtT(u.lastLoginAt))}<div class="actions" style="margin-top:10px"><button class="btn sm" data-act="editUser" data-id="${E(u.id)}">Edit details</button></div></div><div class="panel" style="margin-top:12px"><h2>What you can open</h2><div class="actions">${navFor(u).map(n=>pill(n[1])).join('')}</div></div><div class="panel" style="margin-top:12px"><h2>Notifications</h2><div id="notifyPanel">${notifyPanelHtml()}</div></div><div class="panel" style="margin-top:12px"><h2>App</h2><div id="profileInstall">${installPanelHtml()}</div></div><div style="margin-top:12px">${accountPanel()}</div>`}
@@ -3274,7 +3410,7 @@ function viewStudentProfile(){
    <div class="facts">${L('Enrolment no.',s.enrol)}${L('Course',course(s.course).name)}${L('Semester',s.sem)}${L('Batch',defaultBatch(s))}${L('Category',s.category)}${L('Email',s.email)}${L('Date of birth',fmtD(s.dob))}${L('Address',s.address)}</div>
    <form data-form="myPhone" class="form" style="margin-top:8px">${F('phone','Mobile',{type:'tel',val:s.phone,attrs:'maxlength="10" inputmode="numeric"'})}<div class="field" style="justify-content:flex-end"><button class="btn">Update mobile</button></div></form>
    <p class="note">To change other details, contact the college office.</p></div>
-   <div class="grid" style="align-content:start">${accountPanel()}
+   <div class="grid" style="align-content:start"><div class="panel"><h2>Password</h2><p class="note" style="margin:0">Sign in with your enrolment no. (<b class="mono">${E(s.enrol)}</b>) or your email. The password cannot be changed here. If you forget it, contact the college office and they will reset it.</p></div>
     <div class="panel"><h2>Notifications</h2><div id="notifyPanel">${notifyPanelHtml()}</div></div>
     <div class="panel"><h2>App</h2><div id="profileInstall">${installPanelHtml()}</div></div>
     <button class="btn danger" data-act="logout">Sign out</button></div></div>`;

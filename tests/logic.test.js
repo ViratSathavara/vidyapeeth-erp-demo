@@ -29,7 +29,7 @@ ok(A.handleUpiWebhook(A.gwEvent(o.id,'captured'))===null,'idempotent');
 const due0=A.semSummary(s,m.sem).due;A.cancelPayment(p,'Wrong entry');ok(A.semSummary(s,m.sem).due===due0+100000,'cancel restores due');
 // new student fee default & edit sem2
 login('principal');
-const d={name:'Test Student',gender:'F',dob:'',phone:'9876543210',email:'t.s@example.com',address:'',course:'BED',admissionYear:'2026',sem:'1',category:'General',funding:'CASH',fee1:'30000',fee2:'25000',fee3:'30000',fee4:'30000',due1:'',due2:'',due3:'',due4:''};
+const d={enrol:'BED26-901',name:'Test Student',gender:'F',dob:'',phone:'9876543210',email:'t.s@example.com',address:'',course:'BED',admissionYear:'2026',sem:'1',category:'General',funding:'CASH',fee1:'30000',fee2:'25000',fee3:'30000',fee4:'30000',due1:'',due2:'',due3:'',due4:''};
 A.ui.photo='';const v=A.readStudentForm(null,d,null);ok(v.fees[1].amount===2500000&&v.fees[0].amount===3000000,'sem2 25000');
 const ns=A.makeStudent({...v,fees:v.fees.map(x=>x.amount),dues:v.fees.map(x=>x.due)});ok(A.feeSum(ns).total===11500000,'total 1,15,000');
 // SC shows funding; general hides
@@ -93,4 +93,47 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  login('principal');ok(!A.eventsVisible().some(e=>e.role==='Super Admin')&&!A.auditVisible().some(a=>a.role==='Super Admin'),'principal never sees super admin logs');
  login('clerk');ok(!A.can('fees.setup')&&!A.can('roles.manage')&&!A.can('settings.manage'),'clerk never gets principal-only rights');
  const r=db.roles.Clerk;r.push('activity.view');ok(!A.eventsVisible().some(e=>e.role==='Principal'||e.role==='Super Admin'),'clerk never sees principal logs');r.pop();}
+// ---- change 1: office-typed enrolment no., password = mobile 5 digits @ batch start year, login by enrolment no. or email ----
+// ---- change 2: admission references saved with an id, picked again, filterable ----
+// ---- change 3: no student-side password change; reset only with the students.password permission ----
+{const quiet=fn=>{try{fn()}catch(e){if(!/null|firstElementChild|innerHTML|not a function/.test(e.message))console.log('err',e.message)}};
+ ok(A.studentPassword('9429086515','2026')==='94290@2026','password rule example 94290@2026');
+ login('clerk');
+ const base={gender:'F',dob:'',address:'',course:'BED',admissionYear:'2026',sem:'1',category:'General',funding:'CASH',fee1:'30000',fee2:'30000',fee3:'30000',fee4:'30000',due1:'',due2:'',due3:'',due4:''};
+ const nOut=db.outbox.length,nRefs=db.refs.length;
+ quiet(()=>A.FORM.addStudent({dataset:{}},{...base,enrol:'bed26-777',name:'Ref Test One',phone:'9429086515',email:'ref.one@example.com',ref:'  Trustee   Shah '}));
+ const s1=db.students.find(x=>x.enrol==='BED26-777');const u1=s1&&db.users.find(u=>u.id===s1.userId);
+ ok(s1&&u1&&u1.username==='bed26-777','enrolment no. typed by the office is used as login ID');
+ ok(u1&&u1.password==='94290@2026'&&u1.mustChange===false,'new student password follows the rule, no forced change');
+ ok(db.outbox.length===nOut+1&&db.outbox[0].kind==='credentials'&&db.outbox[0].to[0]==='ref.one@example.com','credentials email queued on create');
+ const r1=s1&&A.refByName('trustee shah');ok(r1&&s1.refId===r1.id&&s1.ref==='Trustee Shah'&&/^REF\d{3}$/.test(r1.id)&&db.refs.length===nRefs+1,'new reference saved with an id');
+ let th=false;try{A.readStudentForm(null,{...base,enrol:'BED26-777',name:'Dup',phone:'9876500000',email:'dup@example.com'},null)}catch(e){th=/already used/.test(e.message)}ok(th,'duplicate enrolment no. refused');
+ th=false;try{A.readStudentForm(null,{...base,enrol:'',name:'No Enrol',phone:'9876500000',email:'ne@example.com'},null)}catch(e){th=/enrolment/i.test(e.message)}ok(th,'enrolment no. required');
+ quiet(()=>A.FORM.addStudent({dataset:{}},{...base,enrol:'BED26-778',name:'Ref Test Two',phone:'9876512345',email:'ref.two@example.com',ref:'TRUSTEE SHAH'}));
+ const s2=db.students.find(x=>x.enrol==='BED26-778');ok(s2&&s2.refId===r1.id&&db.refs.length===nRefs+1,'same reference name reuses the saved id');
+ A.ui.f.students={ref:r1.id,status:''};const fl=A.studentsFiltered();ok(fl.length===2&&fl.every(x=>x.s.refId===r1.id),'students list filters by reference');
+ A.ui.f.students={ref:'',status:'ACTIVE'};ok(/All references/.test(A.viewStudents()),'reference filter shown');
+ // sign in with enrolment no. and with email
+ A.sesSet('');quiet(()=>A.FORM.login({},{u:'BED26-777',p:'94290@2026'}));ok(A.cur()&&A.cur().id===u1.id,'student signs in with enrolment no.');
+ A.sesSet('');quiet(()=>A.FORM.login({},{u:'ref.one@example.com',p:'94290@2026'}));ok(A.cur()&&A.cur().id===u1.id,'student signs in with email');
+ // student cannot change the password, and the profile has no change-password form
+ th=false;try{A.FORM.myPw({reset(){}},{old:'94290@2026',p1:'newpass123',p2:'newpass123'})}catch(e){th=/office/.test(e.message)}ok(th&&u1.password==='94290@2026','student cannot change own password');
+ ok(!/data-form="myPw"/.test(A.viewStudentProfile())&&/contact the college office/.test(A.viewStudentProfile()),'student profile: no change password, contact office');
+ // reset permission: Principal yes, Clerk no until ticked
+ login('clerk');ok(!A.can('students.password'),'clerk has no password reset by default');
+ th=false;try{A.FORM.stuPwReset({dataset:{id:s1.id}},{kind:'custom',pw:'abc12345'})}catch(e){th=/access/.test(e.message)}ok(th&&u1.password==='94290@2026','clerk reset refused');
+ db.roles.Clerk.push('students.password');ok(A.can('students.password'),'principal can give the clerk the reset permission');db.roles.Clerk.pop();
+ login('principal');ok(A.can('students.password'),'principal can reset');
+ quiet(()=>A.FORM.stuPwReset({dataset:{id:s1.id}},{kind:'custom',pw:'Office@123'}));ok(u1.password==='Office@123'&&db.outbox[0].kind==='credentials'&&db.outbox[0].why==='reset','custom reset saved and emailed');
+ th=false;try{A.FORM.stuPwReset({dataset:{id:s1.id}},{kind:'custom',pw:'a b'})}catch(e){th=true}ok(th,'bad custom password refused');
+ quiet(()=>A.FORM.stuPwReset({dataset:{id:s1.id}},{kind:'default'}));ok(u1.password==='94290@2026','reset back to the default rule');
+ ok(db.audit.some(a=>a.action==='Student password reset'&&!JSON.stringify(a).includes('Office@123')),'reset logged without the password');
+ // migration of data saved by the old version: seed password -> rule, emailed password untouched, references built, Principal gets the permission
+ const old=db.students.find(x=>x.enrol!=='BED26-777'&&x.enrol!=='BED26-778');const uo=db.users.find(u=>u.id===old.userId);uo.password='student123';uo.mustChange=true;u1.password='Emailed#1';
+ db.mig={};delete db.refs;old.ref='Old Ref';db.roles.Principal=db.roles.Principal.filter(p=>p!=='students.password');A.save();A.load();const D=A.db;
+ const uo2=D.users.find(u=>u.id===uo.id),so2=D.students.find(x=>x.id===old.id);
+ ok(uo2.password===A.studentPassword(so2.phone,so2.admissionYear)&&uo2.mustChange===false,'migration: seed password moves to the rule');
+ ok(D.users.find(u=>u.id===u1.id).password==='Emailed#1','migration: emailed password untouched');
+ ok(Array.isArray(D.refs)&&so2.refId&&D.refs.find(r=>r.id===so2.refId).name==='Old Ref','migration: references built from existing names');
+ ok(D.roles.Principal.includes('students.password')&&!D.roles.Clerk.includes('students.password'),'migration: Principal gets reset permission, Clerk does not');}
 console.log('pass',pass,'fail',fail);

@@ -73,7 +73,8 @@ Course(id, collegeId, code[BED|MED], name, semesters=4)
 FeeTemplate(id, courseId, semester 1..4, defaultAmount)          -- default ₹30,000 per sem (editable in Settings)
 Student(id, collegeId, userId, enrolmentNo, name, gender, dob, phone, email, address, photoUrl,
         courseId, admissionYear, currentSemester, category[GENERAL|OBC|SC|ST|EWS],
-        fundingType[CASH|SCHOLARSHIP], scholarshipNote?, status[ACTIVE|LEFT|PASSED], createdBy)
+        fundingType[CASH|SCHOLARSHIP], scholarshipNote?, admissionRefId?, status[ACTIVE|LEFT|PASSED], createdBy)
+AdmissionReference(id, collegeId, code e.g. REF001, name UNIQUE per college (case-insensitive), createdBy, createdAt)
 StudentSemesterFee(id, studentId, semester 1..4, amount, dueDate?)  -- copied from FeeTemplate, editable per student
 Payment(id, collegeId, studentId, semester, batch, mode[CASH|CHEQUE|UPI|EXPENSE], amount,
         invoiceDate, entryAt, chequeNo?, bankName?, chequeDate?, upiRef?, providerTxnId?, expenseReason?,
@@ -169,16 +170,20 @@ Sections: Personal (name, gender, DOB, phone, email, address, photo) · Course (
   - For other categories it defaults to By Cash (field hidden; Principal can enable it for all categories in Settings — **OPEN**, default hidden).
   - Funding type is a **filter/label only**. It does **not** change the fee amount or collection process — the student still pays the college; the scholarship comes from the government.
 - **Fees:** the 4 semester amounts, pre-filled from defaults, editable.
-- Enrolment number auto-generated (e.g. `BED25-001`, `MED25-001`), editable by Principal.
+- **Enrolment number** (change 1, 21-11-2026): typed by the office when adding a student (required, also a column in the CSV import). 3-20 letters, numbers, `-` or `/`, stored upper-case, unique among students and logins. Changing it later: Principal / Super Admin only.
+- **Admission reference** (change 2, 21-11-2026): every reference name is saved once as an `AdmissionReference` with an id (`REF001`, `REF002`…). Clicking the field opens a list of saved references (filtered while typing, with the number of students each); a name not in the list shows "+ Add new reference" and is saved when the student is saved. Matching is case-insensitive and ignores extra spaces, so the same person is never saved twice.
 
-### 6.2 Login creation
-- Saving a new student automatically creates the Student user with a strong temporary password.
-- An email goes to the student's email with portal link, login ID (enrolment no or email) and temporary password, plus "Install as app" instructions.
-- First login forces password change. Clerk/Principal can "Resend credentials" / "Reset password".
-- Email delivery status shown on the student profile.
+### 6.2 Login creation (change 1 and 3, 21-11-2026)
+- Saving a new student automatically creates the Student user. **Password rule: first 5 digits of the mobile + `@` + the year the batch starts** (mobile 9429086515, batch 2026-28 → `94290@2026`). The Add student form shows the login ID and password live before saving.
+- Login ID: the **enrolment no. or the email** (both work, case-insensitive).
+- An email goes to the student with portal link, login ID, email, password, the password rule, and "Install as app" instructions.
+- **No password change, forgot-password or self-reset for students** (no forced change at first sign-in, no change-password form in the portal). The sign-in page and the portal profile say: contact the college office.
+- Reset is staff-only and permission-based: new permission **`students.password`** ("Reset student passwords and resend login details"), shown in Settings → Roles & permissions. Default: Principal on, Clerk off (the Principal can tick it for the Clerk); Super Admin always. Reset options: back to the default rule, or a password typed by the office (6-40 characters, no spaces). The new password is emailed; the audit log records the reset without the password.
+- Staff logins keep the temporary password + forced change at first sign-in.
+- Email delivery status and "Password: Default rule / Set by the office" shown on the student profile.
 
 ### 6.3 Student list & profile
-- Table with search, filters (course, semester, category, funding type, status, has dues) and sorting; export CSV/Excel.
+- Table with search (name, enrolment no, phone, email, reference), filters (course, semester, category, funding type, **admission reference** incl. "No reference", status, has dues) and sorting; export CSV/Excel.
 - Profile page: details, 4-semester fee card, all payments & receipts, notices sent, audit trail for that student.
 
 ## 7. Module: Audit Management
@@ -214,7 +219,7 @@ Same website, installable like the ABCD learning app:
   - Home: due summary, latest notices, alerts.
   - Fees: 4 semester cards (amount, paid, due, due date), Pay now (UPI), receipts download.
   - Notices: notice board with unread count.
-  - Profile: details (read-only except phone/photo if allowed), change password, notification settings.
+  - Profile: details (read-only except phone/photo if allowed), notification settings. No change-password form (§6.2): "contact the college office".
 - Ask for notification permission after install / first login with a clear explanation.
 
 ## 10. Live notifications
@@ -260,7 +265,7 @@ Each phase ends with: working build, tests passing, a short report, and a commit
 | # | Phase | Delivers | Done when |
 |---|---|---|---|
 | 0 | Setup | Branch `phase1`, monorepo `/web` + `/server`, Prisma schema, env example, lint/format, seed script, NPCTE branding | `npm run dev` runs both; seed loads |
-| 1 | Auth & roles | Login, JWT, 4 roles, permission matrix, forced password change, role-based layout & menu | Each role sees only its menu; API rejects wrong role |
+| 1 | Auth & roles | Login, JWT, 4 roles, permission matrix, forced password change (staff only; students use the §6.2 rule), role-based layout & menu | Each role sees only its menu; API rejects wrong role |
 | 2 | Students | Add/edit form (category + SC/ST funding type), 4 editable semester fees, list/filter/export, profile, auto login + credentials email | New student gets email and can log in |
 | 3 | Fee collection | 4 tabs, Cash/Cheque/Expense with manual invoice date + inline edit, receipts PDF + email, pending dues, cancel with reason | Invoice-date rules pass tests; dues correct |
 | 4 | UPI | Provider adapter, order + webhook, payment date +1 day invoice rule, Pay now in portal | Sandbox payment marks SUCCESS via webhook only |
@@ -294,7 +299,7 @@ Each phase ends with: working build, tests passing, a short report, and a commit
 5. College bank account & UPI merchant setup — which bank / gateway is allowed?
 6. Old data: Excel import of current students and past payments? (Phase 1: provide a CSV import template for students only)
 7. Exact list of reports the trust / university asks for.
-8. Login ID for students: enrolment number or email? (default: either)
+8. ~~Login ID for students: enrolment number or email?~~ Decided 21-11-2026: either (§6.2).
 
 ---
 

@@ -147,11 +147,13 @@ function mailText(o){return[`Dear ${o.name},`,'',o.intro,o.big?`\n${o.big.label}
 function mailContent(rec,pw){
   const c=db.college,s=rec.studentId?stu(rec.studentId):null;
   if(rec.kind==='credentials'){const cr=course(s.course);
-    return{subject:rec.subject,title:rec.why==='new'?`Welcome to the ${c.short} student portal`:'Your new portal password',name:s.name,
-      intro:rec.why==='new'?`Your student account at ${c.name} is ready. Use the login details below to sign in to the student portal, where you can see your fees, pay by UPI, download receipts and read college notices.`:'Your student portal password was reset by the college office. Use the details below to sign in.',
-      rows:[['Name',s.name],['Enrolment no.',s.enrol],['Course',`${cr?cr.name:s.course} · Semester ${s.sem}`],['Batch',defaultBatch(s)],['Login ID',s.enrol.toLowerCase(),1],['Or sign in with',s.email],['Password',pw||'(not available, ask the office to resend)',1]],
+    /* change 1: the password follows the rule (mobile 5 digits @ batch start year) unless the office set another one; students cannot change it */
+    const rule=pw&&pw===studentPwOf(s);
+    return{subject:rec.subject,title:rec.why==='new'?`Welcome to the ${c.short} student portal`:rec.why==='reset'?'Your new portal password':'Your portal login details',name:s.name,
+      intro:rec.why==='new'?`Your student account at ${c.name} is ready. Use the login details below to sign in to the student portal, where you can see your fees, pay by UPI, download receipts and read college notices.`:rec.why==='reset'?'Your student portal password was reset by the college office. Use the details below to sign in.':'As requested, here are your student portal login details.',
+      rows:[['Name',s.name],['Enrolment no.',s.enrol],['Course',`${cr?cr.name:s.course} · Semester ${s.sem}`],['Batch',defaultBatch(s)],['Login ID',s.enrol,1],['Or sign in with',s.email],['Password',pw||'(not available, ask the office to resend)',1]],
       button:{label:'Open student portal',url:portalUrl()},notesTitle:'How to sign in',
-      notes:['Open the portal and sign in with your Login ID (or email) and the password above.','You will be asked to choose your own password at the first sign-in.','Add the portal to your phone: in Chrome tap "Install app", on iPhone Safari tap Share → "Add to Home Screen".','Never share your password. The college will never ask for it.']}}
+      notes:['Open the portal and sign in with your enrolment no. (or email) and the password above.',...(rule?['Your password is the first 5 digits of your mobile number, then @, then the year your batch starts (for example 94290@2026).']:[]),'The password cannot be changed from the portal. If you forget it, contact the college office.','Add the portal to your phone: in Chrome tap "Install app", on iPhone Safari tap Share → "Add to Home Screen".','Never share your password. The college will never ask for it.']}}
   if(rec.kind==='staff'){const u=db.users.find(x=>x.id===rec.userId);
     return{subject:rec.subject,title:rec.why==='new'?`Your ${c.short} ERP login`:'Your new ERP password',name:u.name,
       intro:rec.why==='new'?`A ${u.role} login has been created for you in the ${c.short} College ERP.`:'Your ERP password was reset by the administrator.',

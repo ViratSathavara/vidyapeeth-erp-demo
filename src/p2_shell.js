@@ -1,7 +1,7 @@
 /* =====================================================================
    Login, forced password change, app shell (sidebar, top bar, student bottom tabs)
    ===================================================================== */
-const DEMO_ACCTS=()=>{const s=db.students[0];return[['admin','admin123','Super Admin','Platform owner · everything'],['principal','principal123','Principal','B.Ed only'],['principalmed','principal123','Principal','M.Ed only'],['clerk','clerk123','Clerk / Accountant','B.Ed + M.Ed · fees, students'],[s?s.enrol.toLowerCase():'','student123','Student',s?s.name+' · own portal':'']]};
+const DEMO_ACCTS=()=>{const s=db.students[0];return[['admin','admin123','Super Admin','Platform owner · everything'],['principal','principal123','Principal','B.Ed only'],['principalmed','principal123','Principal','M.Ed only'],['clerk','clerk123','Clerk / Accountant','B.Ed + M.Ed · fees, students'],[s?s.enrol.toLowerCase():'',(s&&(db.users.find(u=>u.id===s.userId)||{}).password)||'','Student',s?s.name+' · own portal':'']]};
 const LOGO=()=>`<div class="seal" aria-hidden="true">N</div>`;
 function renderLogin(msg){
   document.body.classList.remove('rail-lock','portal');const c=db.college;document.title='Sign in · '+c.short+' ERP';
@@ -13,7 +13,8 @@ function renderLogin(msg){
    <form data-form="login" class="grid" style="gap:12px">${msg?`<div class="err" role="alert">${E(msg)}</div>`:''}
     <div class="field"><label class="label" for="lu">Username, enrolment no. or email</label><input id="lu" name="u" autocomplete="username" required autocapitalize="off" spellcheck="false"></div>
     <div class="field"><label class="label" for="lp">Password</label><input id="lp" name="p" type="password" autocomplete="current-password" required></div>
-    <button class="btn primary big">Sign in</button></form>
+    <button class="btn primary big">Sign in</button>
+    <p class="note" style="margin:0">Student and forgot your password? Contact the college office; only the office can reset it.</p></form>
    <div><span class="label">Demo accounts (tap to fill)</span><div class="demo-accts" style="margin-top:8px">${DEMO_ACCTS().map(a=>`<button class="acct" type="button" data-act="fillLogin" data-u="${E(a[0])}" data-p="${E(a[1])}"><b>${E(a[2])}</b><small>${E(a[0])} / ${E(a[1])}</small><small>${E(a[3])}</small></button>`).join('')}</div></div>
    <div class="actions"><button class="btn sm" data-act="theme" type="button">Dark mode</button><button class="btn sm danger" data-act="resetDemo" type="button">Reset demo data</button></div></section></div>`;
   if(typeof renderInstallUI==='function')renderInstallUI();
@@ -31,6 +32,7 @@ FORM.login=(f,d)=>{
     if(ex)log('Sign-in failed','User',ex.username,null,null,'Wrong password');ev('Auth','Sign-in failed',id,{status:'fail',who:id});save();renderLogin(ex&&!ex.active?'This account is switched off. Ask the office.':'Wrong login or password.');return}
   delete LOCK[id];sesSet(u.id);u.lastLoginAt=now;ui.route=u.role==='Student'?'shome':'dashboard';ui.tab={};ui.f={};
   log('Signed in','User',u.username,null,null,u.role);ev('Auth','Signed in',u.username+' · '+device());ntSync();save();
+  if(u.role==='Student'&&u.mustChange)u.mustChange=false; /* students never set their own password (change 1) */
   if(u.mustChange){renderForceChange();return}
   setTimeout(()=>{if(typeof askNotifyGently==='function'&&cur())askNotifyGently()},1200);
   try{document.activeElement&&document.activeElement.blur()}catch(e){}
@@ -48,7 +50,7 @@ function renderForceChange(msg){
   toTop();$('#f_p1').focus({preventScroll:true});
 }
 const pwOk=p=>p.length>=8&&/[A-Za-z]/.test(p)&&/\d/.test(p);
-FORM.forcePw=(f,d)=>{const u=cur();if(!pwOk(d.p1))return renderForceChange('Use at least 8 characters with a letter and a number.');if(d.p1!==d.p2)return renderForceChange('The two passwords are not the same.');if(d.p1===u.password)return renderForceChange('Choose a password different from the temporary one.');
+FORM.forcePw=(f,d)=>{const u=cur();if(isStudentUser(u))throw new Error('Only the college office can change a student password');if(!pwOk(d.p1))return renderForceChange('Use at least 8 characters with a letter and a number.');if(d.p1!==d.p2)return renderForceChange('The two passwords are not the same.');if(d.p1===u.password)return renderForceChange('Choose a password different from the temporary one.');
   u.password=d.p1;u.mustChange=false;log('Password changed','User',u.username,null,null,'First login');save();try{document.activeElement.blur()}catch(e){}renderApp();toTop();setTimeout(toTop,350);toast('Password saved. Welcome!');setTimeout(()=>typeof askInstall==='function'&&askInstall(),600)};
 ACT.logout=()=>{const u=cur();if(u){log('Signed out','User',u.username);ev('Auth','Signed out',u.username)}save();sesDel();closeLayer();renderLogin();const h=$('.login-form h2');if(h){h.tabIndex=-1;softFocus(h)}};
 ACT.resetDemo=()=>{const u=cur();if(u&&u.role!=='Super Admin')throw new Error('Only the Super Admin can reset the data');confirmBox('Reset demo data','All students, payments and changes in this browser will be replaced by fresh sample data.','Reset',()=>{seed();save();sesDel();closeLayer();renderLogin();toast('Demo data reset')},true)};

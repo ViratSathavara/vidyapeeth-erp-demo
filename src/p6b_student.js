@@ -43,7 +43,7 @@ function viewStudentProfile(){
    <div class="facts">${L('Enrolment no.',s.enrol)}${L('Course',course(s.course).name)}${L('Semester',s.sem)}${L('Batch',defaultBatch(s))}${L('Category',s.category)}${L('Email',s.email)}${L('Date of birth',fmtD(s.dob))}${L('Address',s.address)}</div>
    <form data-form="myPhone" class="form" style="margin-top:8px">${F('phone','Mobile',{type:'tel',val:s.phone,attrs:'maxlength="10" inputmode="numeric"'})}<div class="field" style="justify-content:flex-end"><button class="btn">Update mobile</button></div></form>
    <p class="note">To change other details, contact the college office.</p></div>
-   <div class="grid" style="align-content:start">${accountPanel()}
+   <div class="grid" style="align-content:start"><div class="panel"><h2>Password</h2><p class="note" style="margin:0">Sign in with your enrolment no. (<b class="mono">${E(s.enrol)}</b>) or your email. The password cannot be changed here. If you forget it, contact the college office and they will reset it.</p></div>
     <div class="panel"><h2>Notifications</h2><div id="notifyPanel">${notifyPanelHtml()}</div></div>
     <div class="panel"><h2>App</h2><div id="profileInstall">${installPanelHtml()}</div></div>
     <button class="btn danger" data-act="logout">Sign out</button></div></div>`;
