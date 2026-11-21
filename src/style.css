@@ -103,7 +103,7 @@ textarea{width:100%;resize:vertical}
 .filters input[type=search]{flex:1;min-width:180px}
 .field{display:flex;flex-direction:column;gap:5px;min-width:0}
 .field input,.field select,.field textarea{width:100%}
-.form{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.form>*,.grid>*{min-width:0} /* a wide table inside a form scrolls in its own box instead of widening the form (change 10/11) */
 .form .span{grid-column:1/-1}
 .list{display:flex;flex-direction:column}
 .li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
@@ -316,57 +316,18 @@ textarea{width:100%;resize:vertical}
 .nt small{color:var(--muted);font-size:12px}
 .nt small em{font-style:normal;font-weight:700;color:var(--accent)}
 
-/* tables become cards */
+/* change 10 (21-11-2026): tables stay tables at every width. A wide table scrolls sideways inside its own box
+   (shadows at the edges show there is more); the page itself never scrolls sideways. Cells stay on one line;
+   only long free text (class "wrap") wraps inside a fixed width. */
+.tablewrap{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+.tablewrap>table{min-width:100%}
+td.wrap,th.wrap{white-space:normal;min-width:220px;max-width:380px;overflow-wrap:anywhere}
+td .split-line{white-space:nowrap} /* the cash split under an amount stays on one line, so every row has the same height */
 @media (max-width:900px){
-  .tablewrap{overflow:visible}
-  table,tbody,tr,td{display:block;width:100%}
-  thead{display:none}
-  tbody{display:grid;gap:10px}
-  tr{display:flex;flex-direction:column;position:relative;background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
-  tr.click:active{transform:scale(.99)}
-  td{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:7px 0;border:0;border-bottom:1px dashed var(--line);white-space:normal;text-align:right;min-width:0;overflow-wrap:anywhere}
-  td:last-child,td:nth-last-child(1 of :not([data-empty])){border-bottom:0}
-  td::before{content:attr(data-label);flex:none;max-width:44%;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:left}
-  td[data-label=""]::before,td:not([data-label])::before{display:none}
-  td[data-primary]{order:-1;justify-content:flex-start;text-align:left;font-weight:700;font-size:15px;border-bottom:1px solid var(--line);padding:0 28px 10px 0;margin-bottom:4px}
-  td[data-primary]::before{display:none}
-  td[data-empty]{display:none}
-  td[data-check]{position:absolute;top:12px;right:12px;width:auto;padding:0;border:0;z-index:1}
-  td[data-check] input{width:20px;height:20px}
-  td[data-actions]{justify-content:flex-end;flex-wrap:wrap;gap:8px;border-bottom:0;padding-top:10px}
-  td.empty{justify-content:center;text-align:center;color:var(--muted);border:0;padding:18px 0}
-  td .pill{white-space:normal;border-radius:12px;line-height:1.25;padding:3px 9px;text-align:center;height:fit-content}
-  td.mono,td .mono{white-space:normal}
-  input[type=checkbox],input[type=radio]{width:22px;height:22px;accent-color:var(--accent)}
-  td.click{min-height:36px}
-  td .who{text-align:left}
-  td input[type=number],td input[type=text]{width:110px;text-align:right}
-  td .mono{font-size:12px}
-  /* many-column rows: two compact columns, label above value */
-  tr[data-many]{display:grid;grid-template-columns:1fr 1fr;column-gap:14px}
-  tr[data-many] td::before{max-width:100%;letter-spacing:.03em;font-size:10.5px;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
-  tr[data-many] td{min-width:0}
-  tr[data-many] td{font-size:14px;justify-content:flex-start}
-  .panel:has(>.tablewrap){background:transparent;border:0;box-shadow:none;padding:0!important}
-  tr[data-many] td{flex-direction:column;align-items:flex-start;text-align:left;gap:2px;border-bottom:0;padding:6px 0}
-  tr[data-many] td[data-primary]{grid-column:1/-1;flex-direction:row;border-bottom:1px solid var(--line);padding:0 28px 10px 0;margin-bottom:4px}
-  tr[data-many] td[data-actions]{grid-column:1/-1;flex-direction:row}
-  .matrix tbody{gap:8px}
-  .matrix td[data-primary]{font-size:14px}
-  .matrix td{padding:9px 0}
-  .matrix td input[type=checkbox]{width:22px;height:22px}
-  /* permission / notification grids: every role is a labelled tick box, two per line (the generic card rule stacked them on top of each other) */
-  .matrix tr[data-many]{display:grid;grid-template-columns:1fr 1fr;column-gap:16px;row-gap:0}
-  .matrix td[data-check]{position:static;inset:auto;width:auto;display:flex;flex-direction:row;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border:0;border-top:1px dashed var(--line);text-align:left}
-  .matrix td[data-check]::before{display:block;max-width:none;flex:1;min-width:0;font-size:12px;letter-spacing:.02em;text-transform:none;font-weight:600;color:var(--fg);white-space:normal}
-  .matrix td[data-check] input{flex:none}
-  .matrix td[data-primary]{grid-column:1/-1;border-bottom:0;padding:0 0 8px 0;margin:0}
-  .matrix td[data-desc]{grid-column:1/-1;border:0;padding:0 0 6px;color:var(--muted);font-size:13px;font-weight:400;order:-1;text-align:left}
-  .receipt table{margin:0}.receipt tr{background:var(--surface);padding:10px 12px}
-}
-@media (max-width:720px){
-  td,tr:hover td,tr.click:hover td{background:transparent!important}
-  tr.click:hover{background:var(--surface)}
+  th{padding:8px 10px}td{padding:9px 10px;font-size:14px}
+  table.dense th,table.dense td{padding:7px 9px}
+  td.wrap,th.wrap{min-width:200px;max-width:300px}
+}@media (max-width:720px){
   .filters .btn{white-space:normal;line-height:1.25}
   .filters .pill,.filters .muted{grid-column:1/-1;white-space:normal;text-align:left}
   .filters select{text-overflow:ellipsis}
@@ -395,14 +356,9 @@ textarea{width:100%;resize:vertical}
 
 .matrix th,.matrix td{padding:8px 7px}.matrix td:first-child{white-space:normal;min-width:190px;max-width:330px}
 
-@media (min-width:901px) and (max-width:1400px){.evtbl th:last-child,.evtbl td:last-child:not(.empty){display:none}}
 @media (min-width:901px) and (max-width:1500px){.tablewrap th,.tablewrap td{padding-left:9px;padding-right:9px}}
 /* reports: use the report drop-down below 1500px so the table gets the full width */
 @media (min-width:821px) and (max-width:1500px){.repsel{display:block;max-width:440px;margin-bottom:12px}.repnav{display:none}.repgrid{grid-template-columns:minmax(0,1fr)}}
-/* desktop and tablet tables: let ordinary text wrap before the table grows sideways */
-@media (min-width:901px){.tablewrap td:not(.num):not(.mono):not(.nw){white-space:normal}}
-/* column headings may wrap to two lines on laptops (long subject names in the marks sheet); they only wrap when the table would otherwise scroll sideways */
-@media (min-width:901px) and (max-width:1500px){.tablewrap th{white-space:normal;vertical-align:bottom}}
 /* ---- Laptop polish: slim scrollbars everywhere, rail fits short screens ---- */
 html,body{margin:0}
 html{scrollbar-gutter:stable;-webkit-text-size-adjust:100%}

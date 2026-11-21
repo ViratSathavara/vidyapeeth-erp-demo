@@ -57,21 +57,20 @@ ACT.resetDemo=()=>{const u=cur();if(u&&u.role!=='Super Admin')throw new Error('O
 
 /* ---------- shell ---------- */
 const ICONS={dashboard:'<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 9h8V3h-8z"/>',students:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.8.7 3 2.4 3.5 5.2"/>',
- fees:'<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M7 15h3"/>',cash:'<path d="M4 7h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11"/><path d="M16 13.5h.01"/><path d="M20 11h-4a2 2 0 0 0 0 5h4"/>',notices:'<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
+ fees:'<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M7 15h3"/>',notices:'<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
  audit:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',settings:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',
  shome:'<path d="M3 11l9-8 9 8v10H3z"/><path d="M9 21v-6h6v6"/>',sfees:'<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M7 15h3"/>',snotices:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',sprofile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4 4-6 8-6s7.2 2 8 6"/>'};
 const NAV=[
  ['dashboard','Dashboard',()=>can('dashboard.view'),()=>viewDashboard()],
  ['students','Students',()=>can('students.view'),()=>viewStudents()],
  ['fees','Fee Collection',()=>can('fees.view'),()=>viewFees()],
- ['cash','Cash in hand',()=>can('cash.view'),()=>viewCash()],
  ['audit','Audit',()=>canAny('audit.view','activity.view'),()=>viewAudit()],
  ['notices','Notice Board',()=>can('notices.post'),()=>viewNotices()],
  ['settings','Settings',()=>canAny('settings.manage','roles.manage','fees.setup'),()=>viewSettings()]];
 const SNAV=[['shome','Home',()=>true,()=>viewStudentHome()],['sfees','Fees',()=>true,()=>viewStudentFees()],['snotices','Notices',()=>true,()=>viewStudentNotices()],['sprofile','Profile',()=>true,()=>viewStudentProfile()]];
 const isPortal=u=>isStudentUser(u);
 const navFor=u=>u.role==='Student'?SNAV:NAV.filter(n=>n[2]());
-const NAV_GROUP={dashboard:'Overview',students:'Office',fees:'Office',cash:'Office',audit:'Office',notices:'Communication',settings:'System'};
+const NAV_GROUP={dashboard:'Overview',students:'Office',fees:'Office',audit:'Office',notices:'Communication',settings:'System'};
 const badgeCount=id=>{const u=cur();if(id==='snotices'&&u&&u.role==='Student')return unreadNotices(u);return 0};
 function badgeFor(id){const n=badgeCount(id);return n?`<span class="badge" title="${n} unread">${n}</span>`:''}
 const RAIL_KEY='npcte_erp_rail';const NAV_HIDDEN=new Set();

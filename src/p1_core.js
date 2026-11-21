@@ -66,10 +66,15 @@ function migrate(){
   /* change 4 (21-11-2026): no "By Expense" mode any more. An old Expense receipt becomes a Cash receipt whose whole amount is the expense part. */
   if(!db.mig.cash){db.mig.cash=1;
     db.payments.forEach(p=>{if(p.mode!=='EXPENSE')return;p.mode='CASH';p.wasExpenseMode=true;if(!(p.expenseItems||[]).length)p.expenseItems=[{amount:p.amount,reason:p.reason||'College expense',doc:null}]});
-    STAFF_ROLES.forEach(r=>{const l=db.roles[r]=db.roles[r]||[];['cash.view','cash.spend','cash.deposit'].forEach(k=>{if(!l.includes(k))l.push(k)})})}
+    STAFF_ROLES.forEach(r=>{const l=db.roles[r]=db.roles[r]||[];if(!l.includes('cash.spend'))l.push('cash.spend')})}
+  /* change 7: cash is managed in one place (Audit → Cash). Cheque and UPI go to the bank directly. One bank deposit can hold the fee cash and
+     students' cash in hand, so cash-in-hand deposits move into db.deposits (cihLines). Viewing and depositing use the audit permissions. */
+  if(!db.mig.cash7){db.mig.cash7=1;
+    (cashbox().deposits||[]).forEach(d=>db.deposits.push({id:d.id,ref:d.ref,type:'CASH',course:d.course,periodFrom:d.depositedOn,periodTo:d.depositedOn,total:d.total,feeTotal:0,cihTotal:d.total,count:d.lines.length,depositedOn:d.depositedOn,bankRef:d.bankRef,by:d.by,byId:d.byId||'',at:d.at,cihLines:d.lines,demo:d.demo}));
+    cashbox().deposits=[];Object.keys(db.roles).forEach(r=>{db.roles[r]=(db.roles[r]||[]).filter(k=>k!=='cash.view'&&k!=='cash.deposit')})}
   cashbox();
   /* change 5: example cash-in-hand data, once, only if nothing of the kind exists yet (a browser that already uses cash in hand is left alone) */
-  if(!db.mig.cashDemo){db.mig.cashDemo=1;if(!db.payments.some(p=>payCih(p)>0)&&!cashbox().spends.length&&!cashbox().deposits.length){const n=seedCashDemo();if(n)log('Sample cash in hand data added','System','',null,null,n+' cash receipts with cash in hand, with expenses and a bank deposit')}}
+  if(!db.mig.cashDemo){db.mig.cashDemo=1;if(!db.payments.some(p=>payCih(p)>0)&&!cashbox().spends.length&&!db.deposits.some(d=>(d.cihLines||[]).length)){const n=seedCashDemo();if(n)log('Sample cash in hand data added','System','',null,null,n+' cash receipts with cash in hand, with expenses and a bank deposit')}}
 }
 const NAME_MAX=80;
 const capText=(v,label,max=NAME_MAX)=>{v=String(v??'').trim();if(v.length>max)throw new Error(`${label} is too long (${v.length} characters; the limit is ${max}).`);return v};
@@ -80,8 +85,8 @@ const PERMS=[
  ['students.view','View students'],['students.edit','Add and edit students'],['students.password','Reset student passwords and resend login details'],
  ['fees.view','Open Fee Collection'],['fees.collect','Collect payments (Cash, Cheque, UPI)'],['fees.cancel','Cancel a receipt (with reason)'],
  ['fees.editdate','Edit invoice date of Cash / Cheque'],['expenses.manage','Split a cash fee: expense now / cash in hand'],
- ['cash.view','See cash in hand'],['cash.spend','Add expenses from cash in hand'],['cash.deposit','Deposit cash in hand to the bank'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
- ['audit.view','Transactions audit and exports'],['audit.deposit','Mark cash / cheque as deposited'],['activity.view','Activity log (every action)'],
+ ['cash.spend','Add expense from cash in hand'],['fees.setup','Fee setup (default fees, receipt prefix, UPI)'],
+ ['audit.view','Transactions audit and exports'],['audit.deposit','Deposit cash to the bank'],['activity.view','Activity log (every action)'],
  ['notices.post','Post notices and fee reminders'],['enquiries.view','Admission enquiries'],
  ['settings.manage','College settings'],['roles.manage','Roles and permissions']];
 const ROLE_NAMES=['Super Admin','Principal','Clerk','Student'];
@@ -89,7 +94,7 @@ const STAFF_ROLES=['Principal','Clerk'];
 const ALL_STAFF_PERMS=PERMS.map(p=>p[0]);
 const DEFAULT_ROLES=()=>({
  'Principal':ALL_STAFF_PERMS.slice(),
- 'Clerk':['dashboard.view','students.view','students.edit','fees.view','fees.collect','fees.cancel','fees.editdate','expenses.manage','cash.view','cash.spend','cash.deposit','audit.view','audit.deposit','notices.post','enquiries.view']});
+ 'Clerk':['dashboard.view','students.view','students.edit','fees.view','fees.collect','fees.cancel','fees.editdate','expenses.manage','cash.spend','audit.view','audit.deposit','notices.post','enquiries.view']});
 const cur=()=>db&&db.users.find(u=>u.id===sesGet()&&u.active);
 /* hierarchy: Super Admin > Principal > Clerk > Student. A lower role never gets a higher role's settings or sees its logs. */
 const ROLE_RANK={'Super Admin':3,'Principal':2,'Clerk':1,'Student':0};
@@ -173,12 +178,14 @@ function feeSum(s){
    The student's fee always counts in full; the split is office bookkeeping only. */
 const payExp=p=>p.mode==='CASH'?sum(p.expenseItems||[],x=>x.amount):0;
 const payCih=p=>p.mode==='CASH'?(p.cih||0):0;
-const payToBank=p=>p.mode==='CASH'||p.mode==='CHEQUE'?p.amount-payExp(p)-payCih(p):0; /* what the office deposits (UPI reaches the bank through the gateway) */
+const payToBank=p=>p.mode==='CASH'?p.amount-payExp(p)-payCih(p):p.amount; /* cash: what the office takes to the bank; cheque and UPI reach the bank directly (change 7) */
+/* fee cash still in the office waiting for the bank (change 7: only cash is deposited by the office) */
+const feeCashLeft=p=>p.mode==='CASH'&&p.status==='SUCCESS'&&!p.depositId?Math.max(0,payToBank(p)):0;
 /* ---------- cash in hand: one pool per course. In = cash-in-hand parts of cash receipts; out = expenses (taken from the oldest
    receipt first, so every rupee stays linked to a student) and deposits to the bank in the student's name. ---------- */
 function cashbox(){if(!db.cashbox)db.cashbox={spends:[],deposits:[]};return db.cashbox}
 const cihUsed=p=>sum(cashbox().spends.filter(x=>x.status==='ACTIVE'),x=>sum(x.alloc.filter(a=>a.pid===p.id),a=>a.amount));
-const cihDeposited=p=>sum(cashbox().deposits,d=>sum(d.lines.filter(a=>a.pid===p.id),a=>a.amount));
+const cihDeposited=p=>sum(db.deposits,d=>sum((d.cihLines||[]).filter(a=>a.pid===p.id),a=>a.amount));
 const cihLeft=p=>p.status==='SUCCESS'?Math.max(0,payCih(p)-cihUsed(p)-cihDeposited(p)):0;
 const lotOrder=(a,b)=>a.invoiceDate<b.invoiceDate?-1:a.invoiceDate>b.invoiceDate?1:(a.entryAt||0)-(b.entryAt||0);
 /* cash receipts with a cash-in-hand part (oldest first), of one course, received on or before a date */
@@ -333,7 +340,7 @@ function seedReal(R){
     db.payments.push(p)});
   /* bank deposits: one per month up to two months ago (cash + cheque), made on the 3rd of the next month */
   const lastMonth=addDays(today().slice(0,7)+'-01',-1).slice(0,7);const months={};
-  db.payments.forEach(p=>{if(payToBank(p)>0&&p.invoiceDate.slice(0,7)<lastMonth)(months[p.invoiceDate.slice(0,7)]=months[p.invoiceDate.slice(0,7)]||[]).push(p)});
+  db.payments.forEach(p=>{if(p.mode==='CASH'&&payToBank(p)>0&&p.invoiceDate.slice(0,7)<lastMonth)(months[p.invoiceDate.slice(0,7)]=months[p.invoiceDate.slice(0,7)]||[]).push(p)});
   Object.keys(months).sort().forEach((m,i)=>{const l=months[m];const [y,mo]=m.split('-').map(Number);const nx=mo===12?`${y+1}-01`:`${y}-${pad(mo+1)}`;
     const on=nx+'-03';const dp={id:uid('d'),type:[...new Set(l.map(p=>p.mode))].join('+'),periodFrom:m+'-01',periodTo:addDays(nx+'-01',-1),total:sum(l,payToBank),depositedOn:on,
       bankRef:`SBI slip ${55800+i*17}`,by:by?by.name:'Accounts Clerk',at:Date.parse(on+'T15:00:00+05:30'),count:l.length};
@@ -370,7 +377,7 @@ function seedCashDemo(){
     /* one bank deposit: the whole money left of the second-newest student, in that student's name */
     const open=picks.filter(p=>cihLeft(p)>0).sort(lotOrder);const dl=open.length>1?open[open.length-2]:null;
     if(dl){let d=addDays(dl.invoiceDate,7);if(d>T)d=T;const spentAfter=cashbox().spends.filter(x=>x.course===c.id).map(x=>x.date).sort().pop();if(spentAfter&&d<spentAfter)d=spentAfter;
-      cashbox().deposits.push({id:uid('cd'),ref:nextCashRef('DEP'),course:c.id,depositedOn:d,bankRef:'SBI slip '+(60100+count),lines:[{pid:dl.id,amount:cihLeft(dl)}],total:cihLeft(dl),by:by.name,byId:by.id,at:at(d)+3600e3,demo:true})}
+      const amt=cihLeft(dl);db.deposits.push({id:uid('d'),ref:nextCashRef('DEP'),type:'CASH',course:c.id,periodFrom:dl.invoiceDate,periodTo:dl.invoiceDate,total:amt,feeTotal:0,cihTotal:amt,count:1,depositedOn:d,bankRef:'SBI slip '+(60100+count),cihLines:[{pid:dl.id,amount:amt}],by:by.name,byId:by.id,at:at(d)+3600e3,demo:true})}
   });
   return count;
 }
@@ -394,7 +401,7 @@ function seed(){
       {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
     students:[],refs:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
-    cashbox:{spends:[],deposits:[]},counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1,cash:1,cashDemo:1}};
+    cashbox:{spends:[],deposits:[]},counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1,cash:1,cashDemo:1,cash7:1}};
   /* real college data (fee registers 2026-27), available only after the password gate has decrypted it */
   if(typeof REAL!=='undefined'&&REAL){seedReal(REAL)}else{
   /* sample names only (demo) */
@@ -426,8 +433,8 @@ function seed(){
   const pc=db.payments.find(p=>p.mode==='CASH');if(pc){const s=stu(pc.studentId);const extra={id:uid('p'),studentId:s.id,sem:pc.sem,mode:'CASH',amount:500000,invoiceDate:addDays(today(),-9),entryAt:Date.now()-9*864e5,paidAt:Date.now()-9*864e5,chequeNo:'',bank:'',chequeDate:'',upiRef:'',providerTxnId:'',note:'',status:'CANCELLED',cancelReason:'Entered twice by mistake',cancelledAt:Date.now()-9*864e5+6e5,cancelledBy:by.name,rc:`${db.college.receiptPrefix}${pad(db.college.nextReceipt++,4)}`,depositId:'',by:by.name,byId:by.id,dateEdits:[]};db.payments.push(extra)}
   db.payments.forEach(p=>{if(p.mode==='UPI'){p.upiRef='UTR'+String(400000000000+Math.floor(rnd()*9e10));p.providerTxnId='pay_'+Math.floor(rnd()*1e12).toString(36)}});
   /* an older deposit so the report shows both deposited and pending money */
-  const old=db.payments.filter(p=>p.status==='SUCCESS'&&payToBank(p)>0&&diffDays(today(),p.invoiceDate)>40);
-  if(old.length){const dp={id:uid('d'),type:'CASH+CHEQUE',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,payToBank),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}
+  const old=db.payments.filter(p=>p.status==='SUCCESS'&&p.mode==='CASH'&&payToBank(p)>0&&diffDays(today(),p.invoiceDate)>40);
+  if(old.length){const dp={id:uid('d'),type:'CASH',periodFrom:old.map(p=>p.invoiceDate).sort()[0],periodTo:addDays(today(),-41),total:sum(old,payToBank),depositedOn:addDays(today(),-40),bankRef:'SBI slip 55821',by:by.name,at:Date.now()-40*864e5,count:old.length};db.deposits.push(dp);old.forEach(p=>p.depositId=dp.id)}
   }
   seedCashDemo(); /* change 5: example cash in hand (both the real registers and the sample data) */
   /* notices */

@@ -5,10 +5,10 @@ A.load();const db=A.db;
  ok(L.length>=4&&L.every(p=>p.mode==='CASH'&&p.cih>0&&!p.depositId&&A.payExp(p)+A.payCih(p)<=p.amount),'example: cash receipts with cash in hand (never already banked)');
  ok(L.some(p=>(p.expenseItems||[]).length),'example: some also have an expense-now part');
  ok(cb.spends.length>=2&&cb.spends.every(x=>x.status==='ACTIVE'&&x.amount===x.alloc.reduce((a,b)=>a+b.amount,0)&&x.alloc.every(a=>{const p=db.payments.find(y=>y.id===a.pid);return p&&p.invoiceDate<=x.date})),'example: expenses paid from cash in hand, only from money received before the expense date');
- ok(cb.deposits.length>=1&&cb.deposits.every(d=>d.lines.length===1&&d.total>0),'example: a bank deposit in one student\'s name');
+ const cd=db.deposits.filter(d=>(d.cihLines||[]).length);ok(cd.length>=1&&cd.every(d=>d.cihLines.length===1&&d.total>0),'example: a bank deposit in one student\'s name');
  ok(L.every(p=>A.cihUsed(p)+A.cihDeposited(p)+A.cihLeft(p)===p.cih)&&L.some(p=>A.cihLeft(p)>0),'example: every rupee accounted, some money still in hand');
  ok(db.payments.filter(p=>p.depositId).every(p=>!p.cih),'example: receipts already deposited are untouched');
- console.log('  example data:',L.length,'receipts ·',cb.spends.length,'expenses ·',cb.deposits.length,'deposits ·',db.courses.map(c=>c.id+' left '+A.inr(A.cihBalance(c.id))).join(', '));}
+ console.log('  example data:',L.length,'receipts ·',cb.spends.length,'expenses ·',cd.length,'cash-in-hand deposits ·',db.courses.map(c=>c.id+' left '+A.inr(A.cihBalance(c.id))).join(', '));}
 // login as clerk
 const login=un=>{const u=db.users.find(x=>x.username===un);A.sesSet(u.id);return u};
 login('clerk');
@@ -77,8 +77,9 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  const pe=db.payments.at(-1);ok(pe.mode==='CASH'&&pe.batch==='2025-27'&&pe.expenseItems.length===2&&A.payExp(pe)===500000&&A.payCih(pe)===300000&&A.payToBank(pe)===200000,'cash split saved: 5,000 expense + 3,000 cash in hand + 2,000 bank');
  ok(A.semSummary(s2,m2.sem).due===due0-1000000,'the whole fee counts as paid');ok(!A.db.expenses&&!A.feeTabs().some(t=>t[0]==='expenses'),'no separate expense section');
  ok(/2025-27/.test(A.receiptHtml(pe))&&/Exam fees/.test(A.receiptHtml(pe))&&/Where this cash went/.test(A.receiptHtml(pe)),'office receipt shows where the cash went');
- A.ui.f['audit.tx']={split:'cih'};ok(A.txFiltered().some(r=>r.id===pe.id&&r.batch==='2025-27'),'audit filter: has cash in hand');
- A.ui.f.dep={p:'custom',from:'2026-11-01',to:'2026-11-30'};const dq=A.depPending().find(p=>p.id===pe.id);ok(dq&&A.payToBank(dq)===200000&&/Kept from cash/.test(A.auditDeposit()),'deposit report takes only the to-bank part');
+ A.ui.f['audit.tx']={modes:['CASH'],split:'cih'};ok(A.txFiltered().some(r=>r.id===pe.id&&r.batch==='2025-27')&&A.txFiltered().every(r=>r.mode==='CASH'&&A.payCih(r.rec)>0),'audit filter: cash with cash in hand');
+ const dq=A.depPending().find(p=>p.id===pe.id);ok(dq&&A.payToBank(dq)===200000,'to deposit: only the to-bank part of a split cash fee');
+ ok(!A.depPending().some(p=>p.mode!=='CASH'),'change 7: cheque and UPI are never waiting for a deposit');
  ok(A.receiptPdf(pe).startsWith('%PDF'),'split pdf');
  const su2=db.users.find(u=>u.studentId===s2.id);A.sesSet(su2.id);ok(!/Where this cash went|cash in hand/i.test(A.receiptHtml(pe)),'student receipt hides the split');login('clerk');}
 // ---- course scope (B.Ed / M.Ed principals, one clerk for both, Super Admin all) ----
@@ -173,22 +174,101 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  th=false;try{A.cancelPayment(lots[0],'Entered by mistake')}catch(e){th=/already used/.test(e.message)}ok(th&&lots[0].status==='SUCCESS','receipt with used cash in hand cannot be cancelled');
  // deposit the 10,000 left, in the student's own name
  try{A.FORM.cashDeposit({},{course:'BED',lots:lots[2].id,depositedOn:'2026-07-15',bankRef:'SBI slip 777'})}catch(e){quiet(e)}
- const dp=D.cashbox.deposits.find(d=>d.bankRef==='SBI slip 777');ok(dp&&dp.total===1000000&&dp.lines.length===1&&dp.lines[0].pid===lots[2].id&&A.cihLeft(lots[2])===0&&/^DEP-\d{4}$/.test(dp.ref),'10,000 deposited to the bank in student 3\'s name');
- const ex=A.cashEvents(['BED']).filter(e=>['2026-01-05','2026-01-10','2026-01-15','2026-03-10','2026-06-30','2026-07-15'].includes(e.date));ok(ex.length===6&&ex.at(-1).kind==='To bank','register lists in, expenses and the deposit in date order');
+ const dp=D.deposits.find(d=>d.bankRef==='SBI slip 777');ok(dp&&dp.total===1000000&&dp.cihLines.length===1&&dp.cihLines[0].pid===lots[2].id&&A.cihLeft(lots[2])===0&&/^DEP-\d{4}$/.test(dp.ref),'10,000 deposited to the bank in student 3\'s name');
+ const ex=A.cashBook(['BED']).filter(e=>['2026-01-05','2026-01-10','2026-01-15','2026-03-10','2026-06-30','2026-07-15'].includes(e.date));ok(ex.length===6&&ex[0].kind==='Fee cash'&&ex.at(-1).kind==='Bank deposit','cash book lists fee cash, expenses and the deposit in date order');
  ok(lots.reduce((a,p)=>a+A.cihUsed(p)+A.cihDeposited(p),0)===3000000,'every rupee of the 30,000 is accounted for (20,000 spent + 10,000 banked)');
  // only the Principal cancels an expense; the money goes back to the same students
  th=false;try{A.FORM.cashSpendCancel({dataset:{id:sp[1].id}},{reason:'Wrong bill'})}catch(e){th=/Principal/.test(e.message)}ok(th&&sp[1].status==='ACTIVE','clerk cannot cancel an expense');
  login2('principal');try{A.FORM.cashSpendCancel({dataset:{id:sp[1].id}},{reason:'Wrong bill'})}catch(e){quiet(e)}
  ok(sp[1].status==='CANCELLED'&&A.cihLeft(lots[1])===300000&&A.cihLeft(lots[2])===500000,'cancelled expense: 3,000 back to student 2, 5,000 back to student 3');
- for(const t of ['lots','register','spends','deposits']){A.ui.tab.cash=t;try{ok(A.viewCash().length>200,'cash in hand tab '+t)}catch(e){fail++;console.log('THROW cash',t,e.message,e.stack.split('\n')[1])}}
- login2('clerk');ok(/Cash in hand/.test(A.viewDashboard()),'dashboard shows cash in hand');
+ // change 6: no separate menu; a tab in Fee Collection and a report tab in Audit
+ // change 7: everything about cash in Audit → Cash; nothing in Fee Collection, no own menu
+ ok(!A.feeTabs().some(t=>t[0]==='cash'),'Fee Collection has no cash tab any more');
+ A.ui.tab.audit='cash';A.ui.f.dep={p:'all'};try{const h=A.viewAudit();ok(/Cash fees collected/.test(h)&&/Cash that should be in the office now/.test(h)&&/Cash book/.test(h)&&!/Cash &amp; cheque deposit|Cash & cheque deposit/.test(h),'Audit has one Cash tab (no cash & cheque deposit)')}catch(e){fail++;console.log('THROW auditCash',e.message)}
+ A.ui.f['cash.book']={kind:'Expense'};ok(/Water cooler repair/.test(A.auditCash())&&!/SBI slip 777 ·/.test(A.auditCash()),'cash book filter: expenses only');
+ A.ui.f['cash.book']={kind:'Bank deposit'};ok(/SBI slip 777/.test(A.auditCash()),'cash book filter: bank deposits');A.ui.f['cash.book']={};
+ // total in drawer = cash book balance (fee cash to deposit + cash in hand), per course (clerk manages both courses)
+ login2('clerk');A.setPickedCourse('');
+ for(const c of ['BED','MED']){const now=A.cashNow(c);const book=A.cashBook([c]);ok(book.length&&book.at(-1).bal===now.total&&now.total===now.dep+now.cih,'cash book balance = total in drawer · '+c)}
+ // one deposit with fee cash + cash in hand of B.Ed; then the drawer goes down by exactly that
+ const before7=A.cashNow('BED');const fp=A.depPending('BED').slice(0,2),cp=A.cihLots('BED').filter(p=>A.cihLeft(p)>0).slice(0,1);
+ try{A.FORM.cashDeposit({},{course:'BED',fees:fp.map(p=>p.id).join(','),lots:cp.map(p=>p.id).join(','),depositedOn:A.istDate(Date.now()),bankRef:'SBI slip 8888'})}catch(e){quiet(e)}
+ const d8=D.deposits.find(d=>d.bankRef==='SBI slip 8888');const want=fp.reduce((a,p)=>a+A.payToBank(p),0)+cp.reduce((a,p)=>a+(p.cih-A.cihUsed(p)),0);
+ ok(d8&&d8.course==='BED'&&d8.count===fp.length+cp.length&&fp.every(p=>p.depositId===d8.id)&&d8.total===want&&A.cashNow('BED').total===before7.total-d8.total,'one deposit holds fee cash + cash in hand; drawer goes down by the same amount');
+ const mp=A.depPending('MED')[0];th=false;if(mp){try{A.FORM.cashDeposit({},{course:'BED',fees:mp.id,lots:'',depositedOn:A.istDate(Date.now()),bankRef:'mix'})}catch(e){th=/Tick at least one/.test(e.message)}ok(th&&!mp.depositId,'an M.Ed receipt cannot go into a B.Ed bank deposit')}
+ th=false;try{A.FORM.cashDeposit({},{course:'BED',fees:'',lots:'',depositedOn:'2026-11-01',bankRef:'x'})}catch(e){th=true}ok(th,'empty deposit refused');
+ ok(!/data-id="cash"/.test(A.viewDashboard()),'no separate Cash in hand menu item');
+ login2('clerk');ok(/Cash in office/.test(A.viewDashboard()),'dashboard shows cash in office');
+ login2('principal');ok(A.cashNow('MED').total===0&&A.depPending('MED').length===0,'B.Ed principal never sees M.Ed cash');login2('clerk');
  // old data: a "By Expense" receipt becomes Cash with the whole amount as expense
  const so=D.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).sems.some(m=>m.due>=100000));const old=A.recordPayment(so,{sem:A.feeSum(so).sems.find(m=>m.due>=100000).sem,mode:'CASH',amount:100000,invoiceDate:'2026-11-02',batch:'2025-27'});old.mode='EXPENSE';old.reason='Old expense';delete D.mig.cash;A.save();A.load();
  const o2=A.db.payments.find(p=>p.id===old.id);ok(o2.mode==='CASH'&&A.payExp(o2)===o2.amount&&A.payToBank(o2)===0&&o2.expenseItems[0].reason==='Old expense','migration: By Expense receipt → Cash, whole amount as expense');
- ok(A.db.roles.Clerk.includes('cash.spend')&&A.db.roles.Principal.includes('cash.deposit'),'migration: cash in hand permissions added');
+ ok(A.db.roles.Clerk.includes('cash.spend')&&A.db.roles.Principal.includes('cash.spend')&&!Object.values(A.db.roles).some(l=>l.includes('cash.view')||l.includes('cash.deposit')),'migration: cash permissions merged (cash.spend kept; view/deposit use the audit permissions)');
  // a browser that already uses cash in hand does not get example data again
  const nS=A.db.cashbox.spends.length;delete A.db.mig.cashDemo;A.save();A.load();ok(A.db.cashbox.spends.length===nS,'example data not added twice');
  // a browser with old data and no cash in hand gets it once
- const B=A.db;B.payments.forEach(p=>{delete p.cih;delete p.demoSplit});B.cashbox={spends:[],deposits:[]};delete B.mig.cashDemo;A.save();A.load();
+ const B=A.db;B.payments.forEach(p=>{delete p.cih;delete p.demoSplit});B.cashbox={spends:[],deposits:[]};B.deposits=B.deposits.filter(d=>!(d.cihLines||[]).length);delete B.mig.cashDemo;A.save();A.load();
  ok(A.db.payments.some(p=>p.demoSplit)&&A.db.cashbox.spends.length>0&&A.db.audit.some(a=>a.action==='Sample cash in hand data added'),'existing browser gets the example data once');}
+// ---- change 8: admission reference filter on every list ----
+{const D=A.db;const lg=un=>{const u=D.users.find(x=>x.username===un);A.sesSet(u.id)};lg('clerk');A.setPickedCourse('');
+ const two=D.students.filter(s=>s.status==='ACTIVE'&&D.payments.some(p=>p.studentId===s.id&&p.status==='SUCCESS'&&p.mode==='CASH')).slice(0,2);
+ D.refs.push({id:'REFT1',name:'Test Reference',createdAt:Date.now(),createdBy:'test'});two.forEach(s=>{s.refId='REFT1';s.ref='Test Reference'});
+ const has=s=>s&&s.refId==='REFT1';
+ A.ui.f['fees.collect']={ref:'REFT1'};const cr=A.colRows();ok(cr.length===2&&cr.every(x=>has(x.s))&&/Admission reference/.test(A.feeCollect()),'collect fee: reference filter');
+ A.ui.f['fees.collect']={ref:'__none'};ok(A.colRows().every(x=>!x.s.refId),'collect fee: "No reference" option');A.ui.f['fees.collect']={};
+ A.ui.f['fees.dues']={ref:'REFT1'};ok(A.duesFiltered().every(x=>has(x.s)),'pending dues: reference filter');A.ui.tab.fees='dues';ok(/Admission reference/.test(A.viewFees()),'pending dues: filter shown');A.ui.f['fees.dues']={};
+ A.ui.f['fees.receipts']={ref:'REFT1'};const rr=A.receiptsFiltered();ok(rr.length>0&&rr.every(p=>has(D.students.find(s=>s.id===p.studentId))),'receipts: reference filter');A.ui.tab.fees='receipts';ok(/Admission reference/.test(A.viewFees()),'receipts: filter shown');A.ui.f['fees.receipts']={};
+ A.ui.f['audit.tx']={ref:'REFT1'};const tr=A.txFiltered();ok(tr.length>0&&tr.every(r=>has(r.s)),'audit transactions: reference filter');A.ui.tab.audit='tx';ok(/Admission reference/.test(A.viewAudit()),'audit transactions: filter shown');A.ui.f['audit.tx']={};
+ A.ui.f.dep={p:'all'};A.ui.f['cash.book']={ref:'REFT1'};const cb=A.cashBookRows();ok(cb.length>0&&cb.every(e=>e.studs.some(has)),'cash book: reference filter');A.ui.tab.audit='cash';ok(/Admission reference/.test(A.viewAudit()),'cash book: filter shown');A.ui.f['cash.book']={};
+ A.ui.f.students={ref:'REFT1',status:''};ok(A.studentsFiltered().length===2,'students: reference filter');A.ui.f.students={};}
+// ---- change 9: choosing Cash shows one more filter: expense now / cash in hand ----
+{const D=A.db;const lg=un=>{const u=D.users.find(x=>x.username===un);A.sesSet(u.id)};lg('clerk');A.setPickedCourse('');
+ const has=(h,re)=>re.test(h);A.ui.tab.fees='receipts';
+ A.ui.f['fees.receipts']={mode:'CHEQUE',split:'exp'};ok(!has(A.viewFees(),/data-k="split"/)&&A.receiptsFiltered().every(p=>p.mode==='CHEQUE')&&A.receiptsFiltered().length>0,'receipts: no cash split filter for Cheque (and a left-over split is ignored)');
+ A.ui.f['fees.receipts']={mode:'CASH'};ok(has(A.viewFees(),/data-k="split"/),'receipts: cash split filter appears for Cash');
+ for(const [v,fn] of [['exp',p=>A.payExp(p)>0],['cih',p=>A.payCih(p)>0],['plain',p=>!A.payExp(p)&&!A.payCih(p)],['any',p=>A.payExp(p)+A.payCih(p)>0]]){A.ui.f['fees.receipts']={mode:'CASH',split:v};const l=A.receiptsFiltered();ok(l.length>0&&l.every(p=>p.mode==='CASH'&&fn(p)),'receipts: Cash + '+v)}
+ A.ui.f['fees.receipts']={};
+ A.ui.tab.audit='tx';A.ui.f['audit.tx']={modes:['UPI']};ok(!has(A.viewAudit(),/data-k="split"/),'transactions: no cash split filter without Cash');
+ A.ui.f['audit.tx']={modes:['CASH'],split:'exp'};ok(has(A.viewAudit(),/data-k="split"/)&&A.txFiltered().length>0&&A.txFiltered().every(r=>A.payExp(r.rec)>0),'transactions: Cash + expense now');
+ try{A.ACT.txMode({dataset:{m:'CASH'}})}catch(e){}ok(!A.ui.f['audit.tx'].modes.includes('CASH')&&A.ui.f['audit.tx'].split==='','transactions: turning Cash off clears the cash split');A.ui.f['audit.tx']={};
+ A.ui.tab.audit='cash';A.ui.f.dep={p:'all'};
+ A.ui.f['cash.book']={kind:'Fee cash'};ok(has(A.viewAudit(),/data-k="split"/)&&!has(A.viewAudit(),/data-k="sub"/),'cash book: Fee cash shows the cash split filter');
+ A.ui.f['cash.book']={kind:'Fee cash',split:'cih'};let l=A.cashBookRows();ok(l.length>0&&l.every(e=>e.kind==='Fee cash'&&A.payCih(e.pay)>0),'cash book: fee cash with cash in hand');
+ A.ui.f['cash.book']={kind:'Expense'};ok(has(A.viewAudit(),/data-k="sub"/)&&!has(A.viewAudit(),/data-k="split"/),'cash book: Expenses shows the expense type filter');
+ A.ui.f['cash.book']={kind:'Expense',sub:'now'};l=A.cashBookRows();ok(l.length>0&&l.every(e=>e.sub==='now'),'cash book: expense now only');
+ A.ui.f['cash.book']={kind:'Expense',sub:'cih'};l=A.cashBookRows();ok(l.length>0&&l.every(e=>e.sub==='cih'),'cash book: expenses from cash in hand only');
+ A.ui.f['cash.book']={kind:'Bank deposit',sub:'now',split:'exp'};l=A.cashBookRows();ok(l.length>0&&l.every(e=>e.kind==='Bank deposit'),'cash book: other entries ignore a left-over sub filter');A.ui.f['cash.book']={};}
+// ---- change 11: collected = deposited + to deposit + expenses + cash in hand (after all the deposits / expenses / cancels above) ----
+{const D=A.db;const u=D.users.find(x=>x.username==='clerk');A.sesSet(u.id);A.setPickedCourse('');
+ for(const c of ['BED','MED','']){const T=A.cashTotals(c);const n=A.cashNow(c);
+  ok(T.collected>0&&T.collected===T.dep+T.pending+T.exp+T.cih,'every rupee of cash accounted for · '+(c||'both')+' ('+A.inr(T.collected)+')');
+  ok(T.drawer===n.total&&T.pending===n.dep&&T.cih===n.cih,'drawer = to deposit + cash in hand · '+(c||'both'))}
+ const a=A.cashTotals('BED'),b=A.cashTotals('MED'),all=A.cashTotals('');ok(all.collected===a.collected+b.collected&&all.dep===a.dep+b.dep,'both courses = B.Ed + M.Ed');
+ A.ui.tab.audit='cash';const h=A.viewAudit();ok(/Deposited to bank/.test(h)&&/To deposit/.test(h)&&/Spent as expense/.test(h)&&/Cash in hand \(college drawer\)/.test(h)&&/class="cn-bar"/.test(h),'Audit → Cash shows the five numbers and the bar');}
+// ---- change 12: batch filter on every list, batch column in every table ----
+{const D=A.db;const u=D.users.find(x=>x.username==='clerk');A.sesSet(u.id);A.setPickedCourse('');
+ const B=D.students.find(s=>s.status==='ACTIVE');const bat=`${B.admissionYear}-${String(B.admissionYear+2).slice(2)}`;
+ A.ui.f.students={batch:bat,status:''};let l=A.studentsFiltered();ok(l.length>0&&l.every(x=>x.s.admissionYear===B.admissionYear),'students: batch filter');
+ ok(/data-k="batch"/.test(A.viewStudents())&&/>Batch</.test(A.viewStudents()),'students: batch filter and column shown');A.ui.f.students={};
+ A.ui.f['fees.collect']={batch:bat};ok(A.colRows().length>0&&A.colRows().every(x=>x.s.admissionYear===B.admissionYear),'collect fee: batch filter');A.ui.f['fees.collect']={};
+ A.ui.f['fees.dues']={batch:bat};ok(A.duesFiltered().every(x=>x.s.admissionYear===B.admissionYear),'pending dues: batch filter');A.ui.tab.fees='dues';ok(/data-k="batch"/.test(A.viewFees())&&/>Batch</.test(A.viewFees()),'pending dues: batch filter and column shown');A.ui.f['fees.dues']={};
+ const pb=D.payments.find(p=>p.status==='SUCCESS').batch;
+ A.ui.f['fees.receipts']={batch:pb};ok(A.receiptsFiltered().length>0&&A.receiptsFiltered().every(p=>A.batchOf(p)===pb),'receipts: batch filter (receipt batch)');A.ui.tab.fees='receipts';ok(/data-k="batch"/.test(A.viewFees()),'receipts: batch filter shown');A.ui.f['fees.receipts']={};
+ A.ui.f['audit.tx']={batch:pb};ok(A.txFiltered().length>0&&A.txFiltered().every(r=>r.batch===pb),'transactions: batch filter');A.ui.f['audit.tx']={};
+ A.ui.f.dep={p:'all'};const cb=A.cashBook(['BED','MED']).find(e=>(e.bats||[]).length);const cbat=cb.bats[0];A.ui.f['cash.book']={batch:cbat};l=A.cashBookRows();ok(l.length>0&&l.every(e=>e.bats.includes(cbat)),'cash book: batch filter');
+ A.ui.tab.audit='cash';const h=A.viewAudit();ok(/data-k="batch"/.test(h)&&/<th>Batch<\/th>/.test(h),'cash book: batch filter and column shown');A.ui.f['cash.book']={};}
+// ---- change 13: filters inside the Export panel (file only; the screen keeps its own) ----
+{const D=A.db;const u=D.users.find(x=>x.username==='clerk');A.sesSet(u.id);A.setPickedCourse('');const X=A.EXPORTS['audit.tx'];
+ A.ui.f['audit.tx']={modes:['CASH']};A.ui.expF=A.expSnap('audit.tx');ok(JSON.stringify(A.ui.expF['audit.tx'].modes)==='["CASH"]','export starts with the screen filters');
+ A.ui.expF['audit.tx'].modes=['UPI'];const r=A.expRows(X);ok(r.length>0&&r.every(p=>p.mode==='UPI'),'export filter (mode UPI) gives only UPI rows');
+ ok(JSON.stringify(A.ui.f['audit.tx'].modes)==='["CASH"]','the screen filter is unchanged after the export');
+ const pb=D.payments.find(p=>p.status==='SUCCESS').batch;A.ui.expF={'audit.tx':{batch:pb}};const rb=A.expRows(X);ok(rb.length>0&&rb.every(p=>A.batchOf(p)===pb)&&A.expFilterText('audit.tx').includes('Batch: '+pb),'export filter by batch + filter text');
+ // every list with an Export button: filters render, snapshot and rows work
+ let okAll=true;for(const k of Object.keys(A.EXP_FILTERS)){try{A.ui.expF=A.expSnap(k);A.EXP_FILTERS[k].list().forEach(d=>{if(d.opts)d.opts()});A.expRows(A.EXPORTS[k]);A.expFilterText(k)}catch(e){okAll=false;console.log('export filters',k,e.message)}}ok(okAll,'export filters work for all '+Object.keys(A.EXP_FILTERS).length+' lists');
+ // cash book: export by its own date range; the screen period stays
+ A.ui.f.dep={p:'month'};A.ui.expF={'cash.book':{},dep:{from:'2026-11-01',to:''}};const cr=A.expRows(A.EXPORTS['audit.cash']);ok(cr.length>0&&cr.every(e=>e.date>='2026-11-01')&&A.ui.f.dep.p==='month','cash book export: own date range, screen period unchanged');
+ // the files say which filters were used
+ A.ui.expF={'audit.tx':{batch:pb}};const cols=X.cols().filter(c=>c.def);const t=A.withFilters(A.ui.expF,()=>A.expTable(X,cols,X.rows()));const ft=A.expFilterText('audit.tx');
+ const xl=Buffer.from(A.xlsxOf(X.title,cols,t,[['Filters',ft]])).toString('latin1');ok(xl.includes('xl/worksheets/sheet2.xml')&&xl.includes('Batch: '+pb)&&xl.includes('name="Filters"'),'Excel file has a Filters sheet');
+ const pdf=A.withFilters(A.ui.expF,()=>A.expPdf(X,cols,t,ft));ok(typeof pdf==='string'&&pdf.startsWith('%PDF')&&pdf.includes('Filters: Batch'),'PDF prints the filters');A.ui.f['audit.tx']={};}
 console.log('pass',pass,'fail',fail);

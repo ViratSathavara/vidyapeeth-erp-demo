@@ -165,30 +165,6 @@ ACT.closeDialog=el=>{const d=$('#dlg .dialog[data-hold]:not(.leaving)');if(d&&el
 ACT.tab=el=>{ui.tab[el.dataset.key]=el.dataset.id;ev('Page','Opened tab',humanize(el.dataset.key)+' › '+el.textContent.trim().slice(0,40));renderPage();playEnter('swap')};
 ACT.go=el=>{closeLayer();go(el.dataset.to)};
 
-/* ---------- tables become cards on phones: label every cell with its column name ---------- */
-function labelTables(root=document){
-  $$('table',root).forEach(t=>{
-    const heads=$$('thead th',t).map(h=>h.textContent.trim());
-    $$('tbody tr:not([data-l])',t).forEach(tr=>{
-      tr.dataset.l='1';const tds=[...tr.children].filter(c=>c.tagName==='TD'||c.tagName==='TH');let col=0;
-      tds.forEach(td=>{
-        const span=td.colSpan||1;
-        td.dataset.label=span>1?'':(heads[col]||'');col+=span;
-        const txt=td.textContent.trim();
-        const hasUi=td.querySelector('input,select,textarea,button,svg,img,.bar,.stack');
-        if(!txt&&!hasUi)td.dataset.empty='1';
-        else if(!txt&&td.querySelector('input[type=checkbox]')&&!td.querySelector('button'))td.dataset.check='1';
-        else if(!td.dataset.label&&td.querySelector('button')&&span===1&&!td.querySelector('input,select'))td.dataset.actions='1';
-      });
-      if(tds.length>=5)tr.dataset.many='1';
-      const prim=tr.querySelector('.who')?.closest('td')||tds.find(td=>!td.dataset.check&&!td.dataset.empty&&!td.dataset.actions&&td.dataset.label!==undefined);
-      if(prim&&tds.length>1)prim.dataset.primary='1';
-    });
-  });
-}
-new MutationObserver(()=>labelTables()).observe(document.documentElement,{childList:true,subtree:true});
-document.addEventListener('DOMContentLoaded',()=>labelTables());
-
 /* ---------- motion helpers ---------- */
 const calm=()=>matchMedia('(prefers-reduced-motion:reduce)').matches;
 function playEnter(kind){

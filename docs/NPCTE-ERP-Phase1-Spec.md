@@ -81,7 +81,7 @@ Payment(id, collegeId, studentId, semester, batch, mode[CASH|CHEQUE|UPI], amount
         cashInHand (paise, CASH only, default 0),            -- change 4: part of the cash kept in the college
         status[PENDING|SUCCESS|FAILED|CANCELLED], cancelReason?, receiptNo, receiptPdfUrl, depositId?, createdBy)
 PaymentExpenseItem(id, paymentId, amount, reason, billUrl?)  -- change 4: expense-now part of a CASH payment
-        -- toBank = amount - sum(expense items) - cashInHand  (only toBank goes to the Cash & cheque deposit report)
+        -- toBank = amount - sum(expense items) - cashInHand  (only toBank waits for the office's bank deposit, §5.6)
 CashSpend(id, collegeId, courseId, ref e.g. EXP-0001, date, amount, status[ACTIVE|CANCELLED], cancelReason?, createdBy, createdAt)
 CashSpendItem(id, cashSpendId, amount, reason, billUrl?)
 CashAllocation(id, cashSpendId?, cashDepositId?, paymentId, amount)   -- which student's cash in hand paid / was banked
@@ -147,7 +147,7 @@ Flow: search student (name / enrolment no / phone) → see 4 semester cards with
 - **To bank = fee received − expense now − cash in hand.** The form shows it live (Fee ₹30,000 = Expense ₹5,000 + Cash in hand ₹5,000 + To bank ₹20,000). Expense + cash in hand can never be more than the fee received.
 - The **student's fee counts in full** (₹30,000 paid, one receipt for ₹30,000). The split is office bookkeeping only: the student never sees it (portal, PDF, email).
 - The office receipt shows "Where this cash went" (expense lines with bills, cash in hand and how much is left, to bank).
-- Only the **to-bank** part goes into the Cash & cheque deposit report (§7).
+- Only the **to-bank** part waits for the office's bank deposit (Audit → Cash, §5.6).
 - Old "By Expense" receipts (fee registers, old data) become Cash receipts whose whole amount is the expense part, so all totals stay the same.
 - A receipt whose cash in hand is already used or deposited cannot be cancelled or re-dated (cancel that expense / undo that deposit first).
 ### 5.4 UPI / Google Pay
@@ -163,16 +163,18 @@ Flow: search student (name / enrolment no / phone) → see 4 semester cards with
 - Student portal: "Pay now" button per due semester.
 
 ### 5.5 Pending dues
-- List of students with outstanding amount, by course / semester / category / funding type.
+- List of students with outstanding amount, by course / semester / category / funding type / admission reference.
 - Actions: send fee reminder (to one, selected, or all filtered) → creates a notice + notification.
 - Automatic fee alerts: X days before a due date and when overdue (X set in Settings, default 7).
 
-### 5.6 Cash in hand (change 4, 21-11-2026) — own menu item
+### 5.6 Cash: deposit, expenses, cash in hand (change 4, 6, 7 — 21-11-2026) — Audit → Cash
 - **One pool per course** (B.Ed and M.Ed separately, because the bank accounts are separate). Each pool is made of the cash-in-hand parts of cash receipts, so every rupee stays linked to a student.
 - **Expense from cash in hand**: date, course, one or more lines (amount, reason, bill), same format as all expenses. The money is taken **from the oldest student money first** (received date, then entry time; FIFO) and only from money received on or before the expense date. The form shows live which students' money it will use. More than the balance is refused.
-- **Deposit to bank**: pick the course, tick students (all ticked by default), deposited-on date and bank slip → each student's money left is deposited **in that student's name**. Printable slip per deposit with student lines.
-- Screens: balance card per course (in / spent / to bank, warning when money is older than 6 months); tabs **Students** (kept / used / to bank / left, "Where it went"), **Register** (passbook: date, in, out, running balance, opening and closing, print), **Expenses**, **Bank deposits**. Every list exports (Excel / CSV / PDF).
-- Permissions: `cash.view`, `cash.spend`, `cash.deposit` (default Principal + Clerk). **Only the Principal / Super Admin** cancels an expense (with reason; money returns to the same students) or undoes a deposit. Everything goes to the activity log.
+- **Only cash is managed by the office.** Cheque and UPI go to the bank directly (they are in Transactions only; no "mark as deposited" for them).
+- **Cash fees · where the money is** (change 11, top of Audit → Cash, all time, per course or both): **Cash fees collected** = **Deposited to bank** (fee cash + cash in hand) + **To deposit** + **Spent as expense** (at collection + from cash in hand) + **Cash in hand (college drawer)**. Always adds up; a coloured bar shows the four parts. Below it: **cash that should be in the office now** = to deposit + cash in hand (to match the counted cash). The dashboard card "Cash in office" shows that same number.
+- **Deposit to bank (one slip):** choose the course (= bank account), fee cash is listed ticked, students' cash in hand is listed unticked (tick it to deposit it too), deposited-on date, bank slip → one Deposit record; every line stays in that student's name. A receipt of another course cannot go in. Printable slip with student lines.
+- **Screens (change 7):** everything is in **Audit → Cash**: the "Cash in the office now" card with **Deposit to bank**, **Add expense**, **Print cash book**; and the **Cash book**: every rupee of cash (fee cash received, expense now, expense from cash in hand, bank deposit) with In / Out / running balance (= cash in the office), opening → closing for the period, filters (period, course, entry type — Fee cash adds the cash split filter, Expenses adds "expense now / from cash in hand" (change 9) — admission reference, search), export and print (with "cash counted" and signature lines). Fee Collection has no cash tab: cash is split only in Collect fee → By Cash. No own menu item.
+- Permissions: viewing = `audit.view`; depositing = `audit.deposit` ("Deposit cash to the bank"); `cash.spend` ("Add expense from cash in hand"); `expenses.manage` (split a cash fee). Default Principal + Clerk. **Only the Principal / Super Admin** cancels an expense (with reason; money returns to the same students) or undoes a deposit. Everything goes to the activity log.
 - Worked example: Riya 5,000 + Amit 10,000 + Virat 15,000 kept (30,000) → expenses 20,000 use Riya 5,000, Amit 10,000, Virat 5,000 → Virat 10,000 left → deposited to bank as Virat's fee.
 
 ## 6. Module: Student Management
@@ -208,10 +210,10 @@ Two parts:
 
 **A. Transactions audit (main)**
 - One table of every payment and expense: date (invoice), entry time, student, course, semester, category, funding type, mode, amount, receipt no, status, entered by.
-- **Filters:** mode (Cash / Cheque / UPI — multi-select), cash split (has expense / has cash in hand), date range, course, semester, category, funding type (Cash/Scholarship), status, entered by, amount range, text search.
+- **Filters:** mode (Cash / Cheque / UPI — multi-select); **when Cash is chosen** one more filter appears: all cash / all to bank (no split) / with expense now / with cash in hand / with either (change 9, same on Receipts); date range, course, semester, category, funding type (Cash/Scholarship), admission reference, status, entered by, amount range, text search.
 - **Sorting** on every column. Totals per mode at the top for the filtered result, with the expense-now and cash-in-hand parts of cash. Exports have Expense now / Cash in hand / To bank columns.
-- **Cash & cheque deposit report:** pick a period (week / month / custom) → shows the **to-bank part** of Cash and Cheque collections not yet deposited, totals, and lets the clerk "Mark as deposited" (date + bank ref) → creates a Deposit record. Report shows Cash / Cheque / UPI and "Kept from cash" (expense now + cash in hand) side by side for that period so the person taking money to the bank can reconcile.
-- Export: Excel + PDF (college header).
+- **Cash** (change 7): the cash deposit, expenses, cash in hand and the cash book, all in one tab (§5.6). There is no "Cash & cheque deposit" tab: cheques and UPI are not deposited by the office.
+- Export: Excel + PDF (college header). The Export panel shows the list's fields **and its filters** (change 13): they start from the screen, can be changed for the file only, and the file records them (PDF line under the title, Excel "Filters" sheet).
 
 **B. Activity log**
 - Every action by every role (login, create/edit/cancel, date edits, settings changes, notices sent) with before/after values, actor, IP/device, time. Read-only. Principal and Super Admin only.
@@ -265,7 +267,7 @@ Same website, installable like the ABCD learning app:
 
 ## 12. Non-functional requirements
 
-- **Responsive & mobile-first:** every screen usable at 360 px; tables turn into cards on phones; no horizontal page scroll; big tap targets.
+- **Responsive & mobile-first:** every screen usable at 360 px; **tables keep their columns at every width (change 10): a wide table scrolls sideways inside its own box with edge shadows, cells stay on one line, only long free text wraps in a fixed width**; no horizontal page scroll; big tap targets.
 - **User-friendly:** simple English labels (Gujarati UI toggle = later phase), clear empty states, confirm dialogs for cancel actions, toasts for success/error, light/dark mode.
 - **Security:** bcrypt passwords, JWT httpOnly + secure cookies, CSRF protection, rate-limit login, server-side permission checks on every route, input validation (zod), no secrets in frontend, Helmet, CORS locked to the app domain, daily DB backup.
 - **Performance:** paginated tables (server-side), indexes on studentId, invoiceDate, mode, collegeId.
@@ -285,7 +287,7 @@ Each phase ends with: working build, tests passing, a short report, and a commit
 | 2 | Students | Add/edit form (category + SC/ST funding type), 4 editable semester fees, list/filter/export, profile, auto login + credentials email | New student gets email and can log in |
 | 3 | Fee collection | 4 tabs, Cash/Cheque with manual invoice date + inline edit, cash split + Cash in hand (§5.3, §5.6), receipts PDF + email, pending dues, cancel with reason | Invoice-date rules pass tests; dues correct |
 | 4 | UPI | Provider adapter, order + webhook, payment date +1 day invoice rule, Pay now in portal | Sandbox payment marks SUCCESS via webhook only |
-| 5 | Audit | Transactions audit with all filters/sorting/totals, deposit report + mark deposited, activity log, exports | Filters & totals match DB queries in tests |
+| 5 | Audit | Transactions audit with all filters/sorting/totals, Cash tab (cash in office, one-slip bank deposit, expenses, cash book), activity log, exports | Filters & totals match DB queries in tests |
 | 6 | Notices & notifications | Notice board, audiences, fee reminders, Socket.IO live toasts + sound + bell, Web Push | Notice reaches the right students live and as phone push |
 | 7 | Student PWA | Manifest, service worker, install prompt, bottom tabs, offline page | Installs on Android & iPhone; Lighthouse PWA checks pass |
 | 8 | Dashboard | KPIs + 4 charts + drill-down | Numbers match audit totals |
@@ -300,7 +302,9 @@ Each phase ends with: working build, tests passing, a short report, and a commit
 - [ ] New student default fee ₹30,000 × 4; change sem 2 to ₹25,000 → dues reflect it.
 - [ ] SC/ST shows the funding-type field; General hides it; scholarship students still show dues.
 - [ ] Audit filters (mode + funding type + date range) give correct rows and totals.
-- [ ] Deposit report lists only undeposited Cash/Cheque in the period, and only the to-bank part of a split cash fee.
+- [ ] Cash to deposit lists only undeposited cash (never cheque or UPI), and only the to-bank part of a split cash fee. Cash book balance = total in drawer.
+- [ ] Every list (students, collect fee, pending dues, receipts, transactions, cash book) filters by admission reference, including "No reference".
+- [ ] Every list filters by batch and shows a Batch column (change 12): student lists use the student's batch, receipt lists the batch written on the receipt.
 - [ ] Cash in hand example: 5,000 + 10,000 + 15,000 kept, 20,000 spent → first two used up, third has 10,000 left (FIFO); deposit puts 10,000 in the third student's name; nothing is lost (30,000 = 20,000 + 10,000).
 - [ ] Clerk cannot open Settings → Roles or the activity log (UI and API).
 - [ ] Student can only fetch their own data (try another student's ID → 403).

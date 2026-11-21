@@ -57,23 +57,23 @@ ACT.openAtt=el=>{const n=db.notices.find(x=>x.id===el.dataset.id);if(!n||!n.atta
 
 /* ---------- audit ---------- */
 function viewAudit(){
-  const tabs=[];if(can('audit.view'))tabs.push(['tx','Transactions'],['deposit','Cash & cheque deposit']);if(can('activity.view'))tabs.push(['activity','Activity log'],['events','Event log']);
-  let t=ui.tab.audit||tabs[0][0];if(!tabs.some(x=>x[0]===t))t=tabs[0][0];ui.tab.audit=t;
+  const tabs=[];if(can('audit.view'))tabs.push(['tx','Transactions'],['cash','Cash']); /* change 7: cash (deposit, expenses, cash in hand, cash book) in one tab; cheque and UPI go to the bank directly */if(can('activity.view'))tabs.push(['activity','Activity log'],['events','Event log']);
+  if(ui.tab.audit==='deposit')ui.tab.audit='cash';let t=ui.tab.audit||tabs[0][0];if(!tabs.some(x=>x[0]===t))t=tabs[0][0];ui.tab.audit=t;
   if(t==='activity'||t==='events')need('activity.view','the activity log');else need('audit.view','the audit');
-  return head('Audit','Every payment and expense, with filters, totals and exports.','')+tabsBar('audit',tabs,t)+({tx:auditTx,deposit:auditDeposit,activity:auditActivity,events:auditEvents}[t])();
+  return head('Audit','Every payment and expense, with filters, totals and exports.','')+tabsBar('audit',tabs,t)+({tx:auditTx,cash:auditCash,activity:auditActivity,events:auditEvents}[t])();
 }
 /* one row per payment or expense */
 function txAll(){
   return vPayments().map(p=>{const s=stu(p.studentId);return{kind:'p',id:p.id,date:p.invoiceDate,entry:p.entryAt,s,sem:p.sem,mode:p.mode,amount:p.amount,ref:p.rc,status:p.status,by:p.by,rec:p,reason:p.reason||'',batch:batchOf(p)}})
    ;
 }
-function txFilter(){return ui.f['audit.tx']=Object.assign({q:'',modes:[],split:'',from:'',to:'',course:'',sem:'',cat:'',fund:'',status:'',by:'',min:'',max:'',sort:'date',dir:-1,page:0},ui.f['audit.tx']||{})}
+function txFilter(){return ui.f['audit.tx']=Object.assign({q:'',modes:[],split:'',from:'',to:'',course:'',batch:'',sem:'',cat:'',fund:'',ref:'',status:'',by:'',min:'',max:'',sort:'date',dir:-1,page:0},ui.f['audit.tx']||{})}
 function txFiltered(){
   const f=txFilter();const q=f.q.toLowerCase();const mn=f.min!==''?toPaise(f.min):null,mx=f.max!==''?toPaise(f.max):null;
-  let l=txAll().filter(r=>(!f.modes.length||f.modes.includes(r.mode))&&(!f.from||r.date>=f.from)&&(!f.to||r.date<=f.to)&&(!f.course||(r.s&&r.s.course===f.course))&&(!f.sem||r.sem===+f.sem)
-   &&(!f.cat||(r.s&&r.s.category===f.cat))&&(!f.fund||(r.s&&r.s.funding===f.fund))&&(!f.status||r.status===f.status)&&(!f.split||(f.split==='exp'?payExp(r.rec)>0:f.split==='cih'?payCih(r.rec)>0:f.split==='any'?payExp(r.rec)+payCih(r.rec)>0:true))&&(!f.by||r.by===f.by)&&(mn===null||r.amount>=mn)&&(mx===null||r.amount<=mx)
+  let l=txAll().filter(r=>(!f.modes.length||f.modes.includes(r.mode))&&(!f.from||r.date>=f.from)&&(!f.to||r.date<=f.to)&&(!f.course||(r.s&&r.s.course===f.course))&&(!f.batch||r.batch===f.batch)&&(!f.sem||r.sem===+f.sem)
+   &&(!f.cat||(r.s&&r.s.category===f.cat))&&(!f.fund||(r.s&&r.s.funding===f.fund))&&(!f.ref||(r.s&&refOk(r.s,f.ref)))&&(!f.status||r.status===f.status)&&(!f.modes.includes('CASH')||splitOk(r.rec,f.split))&&(!f.by||r.by===f.by)&&(mn===null||r.amount>=mn)&&(mx===null||r.amount<=mx)
    &&(!q||[r.ref,r.s&&r.s.name,r.s&&r.s.enrol,r.reason,r.batch,r.rec.chequeNo,r.rec.upiRef].some(v=>String(v||'').toLowerCase().includes(q))));
-  const k={date:r=>r.date+String(r.entry).padStart(14,'0'),entry:r=>r.entry,name:r=>r.s?r.s.name:'~',course:r=>r.s?r.s.course:'~',sem:r=>r.sem||0,cat:r=>r.s?r.s.category:'~',fund:r=>r.s?r.s.funding:'~',mode:r=>r.mode,amount:r=>r.amount,ref:r=>r.ref,status:r=>r.status,by:r=>r.by}[f.sort]||(r=>r.date);
+  const k={date:r=>r.date+String(r.entry).padStart(14,'0'),entry:r=>r.entry,name:r=>r.s?r.s.name:'~',course:r=>r.s?r.s.course:'~',batch:r=>r.batch||'~',sem:r=>r.sem||0,cat:r=>r.s?r.s.category:'~',fund:r=>r.s?r.s.funding:'~',mode:r=>r.mode,amount:r=>r.amount,ref:r=>r.ref,status:r=>r.status,by:r=>r.by}[f.sort]||(r=>r.date);
   l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l;
 }
 const txTotals=l=>{const ok=l.filter(r=>r.status==='SUCCESS');const o={};PAY_MODES.forEach(m=>o[m]=sum(ok.filter(r=>r.mode===m),r=>r.amount));o.income=o.CASH+o.CHEQUE+o.UPI;o.EXP=sum(ok,r=>payExp(r.rec));o.CIH=sum(ok,r=>payCih(r.rec));o.BANK=sum(ok,r=>payToBank(r.rec));return o};
@@ -81,17 +81,17 @@ function auditTx(){
   const f=txFilter();const sc='audit.tx';const l=txFiltered();const pg=pageRows(f,l);const t=txTotals(l);const bys=[...new Set(txAll().map(r=>r.by))];
   return`<div class="totals">${PAY_MODES.map(m=>`<div class="tt ${MODE_TONE[m]}"><span>${modeName(m)}</span><b>${inr(t[m])}</b>${m==='CASH'&&(t.EXP||t.CIH)?`<small>expense ${inr(t.EXP)} · cash in hand ${inr(t.CIH)}</small>`:''}</div>`).join('')}<div class="tt sum"><span>Cash + Cheque + UPI</span><b>${inr(t.income)}</b></div></div>
   <div class="panel"><div class="filters"><input type="search" placeholder="Search receipt, name, cheque, UTR, reason" aria-label="Search transactions" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
-   <div class="chips" role="group" aria-label="Mode">${PAY_MODES.map(m=>`<button type="button" class="chip ${MODE_TONE[m]}" aria-pressed="${f.modes.includes(m)}" data-act="txMode" data-m="${m}">${modeName(m)}</button>`).join('')}</div>
+   <div class="chips" role="group" aria-label="Mode">${PAY_MODES.map(m=>`<button type="button" class="chip ${MODE_TONE[m]}" aria-pressed="${f.modes.includes(m)}" data-act="txMode" data-m="${m}">${modeName(m)}</button>`).join('')}</div>${f.modes.includes('CASH')?sel(sc,'split','Cash split',SPLIT_OPTS):''}
    <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label>
-   ${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'sem','Semester',SEM_OPTS_())}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'split','Cash split',[['','Cash split: any'],['any','Has expense or cash in hand'],['exp','Has expense now'],['cih','Has cash in hand']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled'],['FAILED','Failed']])}${sel(sc,'by','Entered by',[['','Anyone'],...bys.map(b=>[b,b])])}
+   ${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'batch','Batch',payBatchOpts())}${sel(sc,'sem','Semester',SEM_OPTS_())}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'ref','Admission reference',REF_OPTS())}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled'],['FAILED','Failed']])}${sel(sc,'by','Entered by',[['','Anyone'],...bys.map(b=>[b,b])])}
    <input class="numin" placeholder="Min ₹" aria-label="Minimum amount" value="${E(f.min)}" data-change="sf" data-scope="${sc}" data-k="min" inputmode="decimal"><input class="numin" placeholder="Max ₹" aria-label="Maximum amount" value="${E(f.max)}" data-change="sf" data-scope="${sc}" data-k="max" inputmode="decimal">
    <button class="btn sm" data-act="txClear">Clear</button></div>
   <div class="actions" style="margin-bottom:10px"><span class="muted">${l.length} rows</span><span style="flex:1"></span><button class="btn exp-btn" data-act="expOpen" data-key="audit.tx">Export</button></div>
-  <div class="tablewrap"><table class="dense"><thead><tr>${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entry time')}${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course')}<th>Batch</th>${sortTh(sc,'sem','Sem')}${sortTh(sc,'cat','Category')}${sortTh(sc,'fund','Funding')}${sortTh(sc,'mode','Mode')}${sortTh(sc,'amount','Amount',1)}${sortTh(sc,'ref','Receipt / ref')}${sortTh(sc,'status','Status')}${sortTh(sc,'by','Entered by')}</tr></thead><tbody>
+  <div class="tablewrap"><table class="dense"><thead><tr>${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entry time')}${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course')}${sortTh(sc,'batch','Batch')}${sortTh(sc,'sem','Sem')}${sortTh(sc,'cat','Category')}${sortTh(sc,'fund','Funding')}${sortTh(sc,'mode','Mode')}${sortTh(sc,'amount','Amount',1)}${sortTh(sc,'ref','Receipt / ref')}${sortTh(sc,'status','Status')}${sortTh(sc,'by','Entered by')}</tr></thead><tbody>
   ${pg.map(r=>`<tr><td>${fmtD(r.date)}</td><td><small>${fmtT(r.entry)}</small></td><td>${r.s?`<button class="lnk" data-act="openStudent" data-id="${E(r.s.id)}">${E(r.s.name)}</button>`:`<span class="muted">${E(r.reason||'—')}</span>`}</td><td>${r.s?E(course(r.s.course).name):'—'}</td><td class="mono">${E(r.batch||'—')}</td><td>${r.sem||'—'}</td><td>${r.s?E(r.s.category):'—'}</td><td>${r.s?E(fundLabel(r.s.funding)):'—'}</td><td>${modePill(r.mode)}</td><td class="num amt">${inr(r.amount)}${splitLine(r.rec)}</td><td class="mono">${r.kind==='p'?`<button class="lnk mono" data-act="viewReceipt" data-id="${E(r.id)}">${E(r.ref)}</button>`:E(r.ref)}</td><td>${payPill(r.status)}</td><td>${E(r.by)}</td></tr>`).join('')||'<tr><td colspan="13" class="empty">No transactions for these filters.</td></tr>'}
   </tbody></table></div>${pager(sc,l.length)}</div>`;
 }
-ACT.txMode=el=>{const f=txFilter();const m=el.dataset.m;f.modes=f.modes.includes(m)?f.modes.filter(x=>x!==m):[...f.modes,m];f.page=0;renderPage()};
+ACT.txMode=el=>{const f=txFilter();const m=el.dataset.m;f.modes=f.modes.includes(m)?f.modes.filter(x=>x!==m):[...f.modes,m];if(!f.modes.includes('CASH'))f.split='';f.page=0;renderPage()};
 ACT.txClear=()=>{const f=txFilter();ui.f['audit.tx']={sort:f.sort,dir:f.dir,page:0};renderPage()};
 const txCols=['Invoice date','Entry time','Student','Enrolment no','Course','Batch','Sem','Category','Funding','Mode','Amount (₹)','Expense now (₹)','Cash in hand (₹)','To bank (₹)','Receipt / ref','Status','Entered by','Cheque no','Bank','UPI ref','Reason'];
 const txRow=r=>[fmtD(r.date),fmtT(r.entry),r.s?r.s.name:'',r.s?r.s.enrol:'',r.s?course(r.s.course).name:'',r.batch||'',r.sem||'',r.s?r.s.category:'',r.s?fundLabel(r.s.funding):'',modeName(r.mode),r.amount/100,payExp(r.rec)/100,payCih(r.rec)/100,payToBank(r.rec)/100,r.ref,r.status,r.by,r.rec.chequeNo||'',r.rec.bank||'',r.rec.upiRef||'',r.reason||r.rec.cancelReason||''];
@@ -108,50 +108,14 @@ ACT.txPrint=()=>{need('audit.view');const f=txFilter();const l=txFiltered();cons
    l.map(r=>[fmtD(r.date),r.s?r.s.name+' ('+r.s.enrol+')':r.reason,r.s?course(r.s.course).name:'',r.sem||'',r.s?r.s.category:'',r.s?fundLabel(r.s.funding):'',modeName(r.mode),inr(r.amount),r.ref,r.status,r.by]),
    `<p class="pt">Cash ${inr(t.CASH)} (expense ${inr(t.EXP)}, cash in hand ${inr(t.CIH)}) · Cheque ${inr(t.CHEQUE)} · UPI ${inr(t.UPI)} · Fees received ${inr(t.income)} · ${l.length} rows</p>`);log('Audit exported','Audit','',null,{rows:l.length,format:'PDF'})};
 
-/* deposit report (§7A) */
+/* period chips of Audit → Cash (change 7): this week, last week, this month, last month, all, custom */
 function weekStart(iso){const d=parseD(iso);const k=(d.getDay()+6)%7;return addDays(iso,-k)}
-function depPeriod(){const f=ui.f.dep=Object.assign({p:'week',from:'',to:''},ui.f.dep||{});const T=today();
+function depPeriod(){const f=ui.f.dep=Object.assign({p:'month',from:'',to:''},ui.f.dep||{});const T=today();if(f.p==='all')return{from:'',to:'',f};
   if(f.p==='week')return{from:weekStart(T),to:addDays(weekStart(T),6),f};if(f.p==='lastweek'){const w=addDays(weekStart(T),-7);return{from:w,to:addDays(w,6),f}}
   if(f.p==='month')return{from:T.slice(0,8)+'01',to:addDays(isoOf(new Date(+T.slice(0,4),+T.slice(5,7),1)),-1),f};
   if(f.p==='lastmonth'){const d=new Date(+T.slice(0,4),+T.slice(5,7)-2,1);return{from:isoOf(d),to:addDays(isoOf(new Date(d.getFullYear(),d.getMonth()+1,1)),-1),f}}
   return{from:f.from||addDays(T,-30),to:f.to||T,f}}
-/* cash and cheque of the chosen period that are not yet marked as deposited (oldest first) */
-/* change 4: only the "to bank" part of a cash fee is deposited here; expense now and cash in hand are kept out (cash in hand goes to the bank from Cash in hand) */
-function depPending(){const{from,to}=depPeriod();return vPayments().filter(p=>p.invoiceDate>=from&&p.invoiceDate<=to&&p.status==='SUCCESS'&&payToBank(p)>0&&!p.depositId).sort((a,b)=>a.invoiceDate<b.invoiceDate?-1:1)}
-function auditDeposit(){
-  const{from,to,f}=depPeriod();const inP=p=>p.invoiceDate>=from&&p.invoiceDate<=to&&p.status==='SUCCESS';
-  const pays=vPayments().filter(inP);const und=depPending();const cash=pays.filter(p=>p.mode==='CASH');
-  const col=m=>{const l=pays.filter(p=>p.mode===m);return{t:sum(l,x=>x.amount),n:l.length,bank:sum(l,payToBank),und:m==='CASH'||m==='CHEQUE'?sum(l.filter(p=>!p.depositId),payToBank):null}};
-  const sc=can('audit.deposit');const c=col('CASH'),ch=col('CHEQUE'),u=col('UPI');const ex=sum(cash,payExp),ci=sum(cash,payCih);
-  return`<div class="panel"><h2>Cash & cheque deposit report</h2>
-   <div class="filters"><div class="chips" role="group" aria-label="Period">${[['week','This week'],['lastweek','Last week'],['month','This month'],['lastmonth','Last month'],['custom','Custom']].map(([k,l])=>`<button type="button" class="chip" aria-pressed="${f.p===k}" data-act="depP" data-p="${k}">${l}</button>`).join('')}</div>
-    ${f.p==='custom'?`<label class="dl">From <input type="date" value="${E(from)}" data-change="sf" data-scope="dep" data-k="from"></label><label class="dl">To <input type="date" value="${E(to)}" data-change="sf" data-scope="dep" data-k="to"></label>`:`<span class="muted">${fmtD(from)} to ${fmtD(to)}</span>`}</div>
-   <div class="totals four"><div class="tt m-cash"><span>Cash · ${c.n}</span><b>${inr(c.t)}</b><small>${inr(c.bank)} to bank · ${c.und?inr(c.und)+' not deposited':'all deposited'}</small></div>
-    <div class="tt m-cheque"><span>Cheque · ${ch.n}</span><b>${inr(ch.t)}</b><small>${ch.und?inr(ch.und)+' not deposited':'all deposited'}</small></div>
-    <div class="tt m-upi"><span>UPI · ${u.n}</span><b>${inr(u.t)}</b><small>goes to bank by gateway</small></div>
-    <div class="tt m-exp"><span>Kept from cash</span><b>${inr(ex+ci)}</b><small>expense now ${inr(ex)} · cash in hand ${inr(ci)}</small></div></div>
-   <h3>Not yet deposited · ${und.length} entries · ${inr(sum(und,payToBank))}<button class="btn exp-btn" data-act="expOpen" data-key="audit.dep">Export</button></h3>
-   <div class="tablewrap"><table><thead><tr>${sc?`<th><input type="checkbox" aria-label="Select all" data-change="depAll" checked></th>`:''}<th>Invoice date</th><th>Receipt</th><th>Student</th><th>Mode</th><th>Cheque</th><th class="num">To deposit</th></tr></thead><tbody>
-   ${und.sort((a,b)=>a.invoiceDate<b.invoiceDate?-1:1).map(p=>`<tr>${sc?`<td><input type="checkbox" name="dep" value="${E(p.id)}" checked aria-label="Include ${E(p.rc)}" data-change="depCount"></td>`:''}<td>${fmtD(p.invoiceDate)}</td><td class="mono">${E(p.rc)}</td><td>${E(stu(p.studentId).name)}</td><td>${modePill(p.mode)}</td><td>${p.mode==='CHEQUE'?E(p.chequeNo+' · '+p.bank):'—'}</td><td class="num amt">${inr(payToBank(p))}${payToBank(p)!==p.amount?`<small class="muted split-line">of ${inr(p.amount)}</small>`:''}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nothing waiting to be deposited in this period.</td></tr>'}</tbody></table></div>
-   ${sc&&und.length?`<form data-form="deposit" class="form" style="margin-top:14px"><div class="field span"><b id="depSum">Selected: ${und.length} · ${inr(sum(und,payToBank))}</b></div>${F('depositedOn','Deposited on',{type:'date',val:today(),req:true,attrs:`max="${today()}"`})}${F('bankRef','Bank slip / reference',{req:true,attrs:'maxlength="60"'})}<div class="actions span"><button class="btn primary big">Mark as deposited</button><button type="button" class="btn" data-act="depPrint">Print report</button></div></form>`:`<div class="actions" style="margin-top:12px"><button class="btn" data-act="depPrint">Print report</button></div>`}
-  </div>
-  <div class="panel" style="margin-top:16px"><h2>Deposits made<button class="btn exp-btn" data-act="expOpen" data-key="audit.depmade">Export</button></h2><div class="tablewrap"><table><thead><tr><th>Deposited on</th><th>Period</th><th>Entries</th><th class="num">Total</th><th>Bank ref</th><th>By</th><th></th></tr></thead><tbody>
-   ${pageRows(ui.f.depmade=ui.f.depmade||{},db.deposits.slice().sort((a,b)=>b.at-a.at)).map(d=>`<tr><td>${fmtD(d.depositedOn)}</td><td>${fmtD(d.periodFrom)} – ${fmtD(d.periodTo)}</td><td>${d.count}</td><td class="num amt">${inr(d.total)}</td><td>${E(d.bankRef)}</td><td>${E(d.by)}</td><td>${['Super Admin','Principal'].includes(cur().role)?`<button class="btn sm" data-act="depUndo" data-id="${E(d.id)}">Undo</button>`:''}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">No deposits yet.</td></tr>'}</tbody></table></div>${pager('depmade',db.deposits.length)}</div>`;
-}
 ACT.depP=el=>{depPeriod().f.p=el.dataset.p;renderPage()};
-const depChecked=()=>$$('input[name=dep]:checked').map(i=>db.payments.find(p=>p.id===i.value)).filter(Boolean);
-CHG.depCount=()=>{const l=depChecked();const s=$('#depSum');if(s)s.textContent=`Selected: ${l.length} · ${inr(sum(l,payToBank))}`};
-CHG.depAll=el=>{$$('input[name=dep]').forEach(i=>i.checked=el.checked);CHG.depCount()};
-FORM.deposit=(f,d)=>{need('audit.deposit','mark deposits');const l=depChecked().filter(p=>p.status==='SUCCESS'&&!p.depositId&&payToBank(p)>0);if(!l.length)throw new Error('Select at least one entry');
-  if(!validIso(d.depositedOn)||d.depositedOn>today())throw new Error('Choose the deposit date');const ref=capText(d.bankRef,'Bank reference',60);if(ref.length<2)throw new Error('Enter the bank slip / reference');
-  const{from,to}=depPeriod();const types=[...new Set(l.map(p=>p.mode))];
-  const dp={id:uid('d'),type:types.join('+'),periodFrom:from,periodTo:to,total:sum(l,payToBank),depositedOn:d.depositedOn,bankRef:ref,by:cur().name,at:Date.now(),count:l.length};
-  db.deposits.push(dp);l.forEach(p=>p.depositId=dp.id);log('Marked as deposited','Deposit',dp.id,null,{total:inr(dp.total),entries:dp.count,bankRef:ref,on:fmtD(dp.depositedOn)});save();renderPage();toast(`${inr(dp.total)} marked as deposited`)};
-ACT.depUndo=el=>{if(!['Super Admin','Principal'].includes(cur().role))throw new Error('Only the Principal can undo a deposit');const dp=db.deposits.find(x=>x.id===el.dataset.id);
-  confirmBox('Undo deposit',`${dp.count} entries (${inr(dp.total)}) go back to "not deposited".`,'Undo',()=>{db.payments.forEach(p=>{if(p.depositId===dp.id)p.depositId=''});db.deposits=db.deposits.filter(x=>x!==dp);log('Deposit undone','Deposit',dp.id,{total:inr(dp.total)},null);save();renderPage();toast('Deposit undone')},true)};
-ACT.depPrint=()=>{const{from,to}=depPeriod();const l=vPayments().filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to&&payToBank(p)>0);const inP=vPayments().filter(p=>p.status==='SUCCESS'&&p.invoiceDate>=from&&p.invoiceDate<=to);const t=m=>inr(sum(inP.filter(p=>p.mode===m),p=>p.amount));
-  printReport('Cash & cheque deposit report',`${fmtD(from)} to ${fmtD(to)}`,['Invoice date','Receipt','Student','Mode','Cheque','Fee','To bank','Deposited'],l.map(p=>[fmtD(p.invoiceDate),p.rc,stu(p.studentId).name,modeName(p.mode),p.mode==='CHEQUE'?p.chequeNo+' '+p.bank:'',inr(p.amount),inr(payToBank(p)),p.depositId?'Yes':'No']),
-   `<p class="pt">Cash ${t('CASH')} (expense now ${inr(sum(inP,payExp))}, cash in hand ${inr(sum(inP,payCih))}) · Cheque ${t('CHEQUE')} · UPI ${t('UPI')} · Not deposited ${inr(sum(l.filter(p=>!p.depositId),payToBank))}</p><p class="pt">Deposited by: ____________________ &nbsp; Checked by: ____________________</p>`)};
 
 /* activity log (§7B): read-only, Principal and Super Admin */
 function actFiltered(){const f=ui.f.act=Object.assign({q:'',role:'',from:'',to:'',page:0},ui.f.act||{});const q=f.q.toLowerCase();
@@ -163,7 +127,7 @@ function auditActivity(){
    <div class="filters"><input type="search" placeholder="Search action, person, receipt, value" aria-label="Search activity" data-live="sq" data-scope="act" value="${E(f.q)}">${sel('act','role','Role',[['','All roles'],...ROLE_NAMES.map(r=>[r,r]),['System','System']])}
     <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="act" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="act" data-k="to"></label></div>
    <div class="tablewrap"><table class="dense"><thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Record</th><th>Before → after</th><th>IP · device</th></tr></thead><tbody>
-   ${pg.map(a=>`<tr><td><small>${fmtT(a.at)}</small></td><td>${E(a.actor)}<small class="muted" style="display:block">${E(a.role)}</small></td><td><b>${E(a.action)}</b>${a.detail?`<small class="muted" style="display:block">${E(a.detail)}</small>`:''}</td><td class="mono">${E(a.entity)}${a.entityId?' · '+E(a.entityId):''}</td><td><small>${E(diffText(a.before,a.after))||'—'}</small></td><td><small>${E(a.ip)}<br>${E(a.device)}</small></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Nothing found.</td></tr>'}</tbody></table></div>${pager('act',l.length)}
+   ${pg.map(a=>`<tr><td><small>${fmtT(a.at)}</small></td><td>${E(a.actor)}<small class="muted" style="display:block">${E(a.role)}</small></td><td class="wrap"><b>${E(a.action)}</b>${a.detail?`<small class="muted" style="display:block">${E(a.detail)}</small>`:''}</td><td class="mono">${E(a.entity)}${a.entityId?' · '+E(a.entityId):''}</td><td class="wrap"><small>${E(diffText(a.before,a.after))||'—'}</small></td><td class="wrap"><small>${E(a.ip)}<br>${E(a.device)}</small></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Nothing found.</td></tr>'}</tbody></table></div>${pager('act',l.length)}
    <p class="note">Read-only. Nobody can edit or delete these entries.</p></div>`;
 }
 ACT.actCsv=()=>{need('activity.view');showCsv('NPCTE activity log',['Time','Who','Role','Action','Entity','Record','Before','After','Detail','IP','Device'],auditVisible().map(a=>[fmtT(a.at),a.actor,a.role,a.action,a.entity,a.entityId,JSON.stringify(a.before||''),JSON.stringify(a.after||''),a.detail,a.ip,a.device]))};
@@ -181,7 +145,7 @@ function auditEvents(){
    <div class="filters"><input type="search" placeholder="Search button, page, person, detail" aria-label="Search events" data-live="sq" data-scope="evl" value="${E(f.q)}">${sel('evl','cat','Type',[['','All types'],...EV_CATS.map(c=>[c,c])])}${sel('evl','role','Role',[['','All roles'],...ROLE_NAMES.map(r=>[r,r]),['Guest','Guest (signed out)']])}${sel('evl','who','Person',[['','Everyone'],...who.map(([id,n])=>[id,n])])}
     <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="evl" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="evl" data-k="to"></label></div>
    <div class="tablewrap"><table class="dense"><thead><tr><th>Time</th><th>Who</th><th>Type</th><th>What</th><th>Detail</th><th>Page</th><th>Device</th></tr></thead><tbody>
-   ${pg.map(e=>`<tr><td><small>${fmtT(e.at)}</small></td><td>${E(e.actor)}<small class="muted" style="display:block">${E(e.role)}</small></td><td>${pill(e.cat,e.status==='fail'?'bad':tone[e.cat]||'')}</td><td><b>${E(e.label)}</b></td><td><small>${E(e.detail)||'—'}</small></td><td><small>${E(humanize(e.route))||'—'}${e.course?' · '+E((course(e.course)||{}).name||e.course):''}</small></td><td><small>${E(e.device)}</small></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No events for these filters.</td></tr>'}</tbody></table></div>${pager('evl',l.length)}
+   ${pg.map(e=>`<tr><td><small>${fmtT(e.at)}</small></td><td>${E(e.actor)}<small class="muted" style="display:block">${E(e.role)}</small></td><td>${pill(e.cat,e.status==='fail'?'bad':tone[e.cat]||'')}</td><td><b>${E(e.label)}</b></td><td class="wrap"><small>${E(e.detail)||'—'}</small></td><td><small>${E(humanize(e.route))||'—'}${e.course?' · '+E((course(e.course)||{}).name||e.course):''}</small></td><td class="wrap"><small>${E(e.device)}</small></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No events for these filters.</td></tr>'}</tbody></table></div>${pager('evl',l.length)}
    <p class="note">Read-only. The newest ${EV_MAX} events are kept in this demo; the live system keeps them on the server.</p></div>`}
 ACT.evCsv=()=>{need('activity.view');showCsv('NPCTE event log',['Time','Who','Role','Type','What','Detail','Page','Course','Status','Device'],evFiltered().map(e=>[fmtT(e.at),e.actor,e.role,e.cat,e.label,e.detail,e.route,e.course,e.status,e.device]))};
 /* ---------- settings ---------- */

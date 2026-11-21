@@ -5,6 +5,9 @@
    ===================================================================== */
 const MODES=[['CASH','By Cash'],['CHEQUE','By Cheque'],['UPI','By UPI']];
 const PAY_MODES=['CASH','CHEQUE','UPI'];
+/* change 9: an extra filter that appears only when Cash is chosen in a filter (Receipts, Transactions, Cash book) */
+const SPLIT_OPTS=[['','Cash: all'],['plain','Cash: all to bank (no split)'],['exp','Cash: with expense now'],['cih','Cash: with cash in hand'],['any','Cash: with expense or cash in hand']];
+const splitOk=(p,v)=>!v||(p.mode==='CASH'&&(v==='plain'?!payExp(p)&&!payCih(p):v==='exp'?payExp(p)>0:v==='cih'?payCih(p)>0:v==='any'?payExp(p)+payCih(p)>0:true));
 /* "Exp ₹5,000 · Cash in hand ₹5,000 · Bank ₹20,000" under a cash amount (office screens only) */
 const splitLine=p=>{if(!payExp(p)&&!payCih(p))return'';const l=[];if(payExp(p))l.push('Expense '+inr(payExp(p)));if(payCih(p)){const left=cihLeft(p);l.push('Cash in hand '+inr(payCih(p))+(p.status==='SUCCESS'&&left!==payCih(p)?` (${inr(left)} left)`:''))}l.push('Bank '+inr(payToBank(p)));return`<small class="muted split-line">${E(l.join(' · '))}</small>`};
 const modeName=m=>({CASH:'Cash',CHEQUE:'Cheque',UPI:'UPI',EXPENSE:'Expense'}[m]||m);
@@ -23,9 +26,9 @@ function viewFees(){
    One row per student (cards on a phone). "Collect" opens a panel: pick the semester, pick the mode
    from a dropdown (Cash / Cheque / UPI / Expense), pick the batch, save -> receipt. */
 const MODE_OK=k=>PAY_MODES.includes(k)&&can('fees.collect');
-function colFilter(){return ui.f['fees.collect']=Object.assign({q:'',course:'',sem:'',batch:'',st:'',sort:'name',dir:1,page:0},ui.f['fees.collect']||{})}
+function colFilter(){return ui.f['fees.collect']=Object.assign({q:'',course:'',sem:'',batch:'',ref:'',st:'',sort:'name',dir:1,page:0},ui.f['fees.collect']||{})}
 function colRows(){const f=colFilter();const q=f.q.trim().toLowerCase();
-  let l=vStudents().filter(s=>s.status==='ACTIVE').map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.batch||defaultBatch(s)===f.batch)
+  let l=vStudents().filter(s=>s.status==='ACTIVE').map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.batch||defaultBatch(s)===f.batch)&&refOk(s,f.ref)
     &&(!f.st||(f.st==='due'?sm.payable>0:f.st==='overdue'?sm.overdue:f.st==='paid'?sm.payable===0:true))&&(!q||[s.name,s.enrol,s.phone].some(v=>String(v).toLowerCase().includes(q))));
   const k={name:x=>x.s.name.toLowerCase(),course:x=>x.s.course+x.s.sem,due:x=>x.sm.payable,paid:x=>x.sm.paid,bal:x=>x.sm.total-x.sm.paid}[f.sort]||(x=>x.s.name);
   l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
@@ -36,13 +39,12 @@ function semCell(x){if(!x.amount)return'<span class="muted">—</span>';
 function feeCollect(){
   need('fees.view');const f=colFilter();const sc='fees.collect';const l=colRows();const pg=pageRows(f,l);const SEMS=SEMS_ALL();
   const T=today();const ok=vPayments().filter(p=>p.status==='SUCCESS'&&p.invoiceDate===T);
-  const bats=[...new Set(vStudents().map(defaultBatch))].sort().reverse();
   const tot={fee:sum(l,x=>x.sm.total),paid:sum(l,x=>x.sm.paid),due:sum(l,x=>x.sm.payable)};
   return`<div class="kpis k4 kpis-sm"><div class="kpi "><span class="label">Students</span><div class="v">${l.length}</div></div><div class="kpi "><span class="label">Total tuition fee</span><div class="v">${inr(tot.fee)}</div></div><div class="kpi good"><span class="label">Paid</span><div class="v">${inr(tot.paid)}</div></div><div class="kpi bad"><span class="label">Due now</span><div class="v">${inr(tot.due)}</div></div></div>
    <div class="today-strip"><b>Today</b>${PAY_MODES.map(m=>`<span>${modePill(m)} ${inr(sum(ok.filter(p=>p.mode===m),p=>p.amount))}</span>`).join('')}${sum(ok,p=>payExp(p)+payCih(p))?`<span class="muted">of cash: expense ${inr(sum(ok,payExp))} · cash in hand ${inr(sum(ok,payCih))}</span>`:''}</div>
    <div class="panel"><h2>Students and their fees<button class="btn exp-btn" data-act="expOpen" data-key="fees.collect">Export</button></h2>
    <div class="filters"><input type="search" placeholder="Name, enrolment no. or mobile" aria-label="Search students" data-live="sq" data-scope="${sc}" value="${E(f.q)}">
-    ${scopeCourses().length>1?sel(sc,'course','Course',COURSE_OPTS()):''}${sel(sc,'batch','Batch',[['','All batches'],...bats.map(b=>[b,b])])}${sel(sc,'sem','Semester',[['','All semesters'],...SEMS.map(n=>[n,'Semester '+n])])}
+    ${scopeCourses().length>1?sel(sc,'course','Course',COURSE_OPTS()):''}${sel(sc,'batch','Batch',stuBatchOpts())}${sel(sc,'sem','Semester',[['','All semesters'],...SEMS.map(n=>[n,'Semester '+n])])}${sel(sc,'ref','Admission reference',REF_OPTS())}
     ${sel(sc,'st','Status',[['','All students'],['due','Fee due now'],['overdue','Overdue'],['paid','Fully paid (so far)']])}</div>
    <div class="tablewrap"><table class="feetable"><thead><tr>${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course · Batch')}${SEMS.map(n=>`<th>Sem ${n}</th>`).join('')}${sortTh(sc,'paid','Paid',1)}${sortTh(sc,'due','Due now',1)}<th></th></tr></thead><tbody>
    ${pg.map(({s,sm})=>`<tr><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}"><b>${E(s.name)}</b></button><small class="muted mono" style="display:block">${E(s.enrol)}</small></td>
@@ -315,19 +317,19 @@ CHG.invDate=el=>{const kind=el.dataset.kind;const rec=db.payments.find(x=>x.id==
     notify('datechange',`Invoice date changed · ${rec.rc}`,`${s.name}: ${fmtD(rec.dateEdits.at(-1).from)} → ${fmtD(v)}`,{sid:s.id,roles:['Super Admin','Principal'],staff:'audit',tab:'activity'})}
   save();toast(`Invoice date saved: ${fmtD(v)}${kind==='p'?' · receipt regenerated':''}`);renderPage()};
 /* ---------- 3. pending dues ---------- */
-function duesFilter(){return ui.f['fees.dues']=Object.assign({q:'',course:'',sem:'',cat:'',fund:'',over:'',sort:'due',dir:-1,page:0},ui.f['fees.dues']||{})}
+function duesFilter(){return ui.f['fees.dues']=Object.assign({q:'',course:'',batch:'',sem:'',cat:'',fund:'',ref:'',over:'',sort:'due',dir:-1,page:0},ui.f['fees.dues']||{})}
 function duesFiltered(){const f=duesFilter();const q=f.q.toLowerCase();
-  let l=vStudents().filter(s=>s.status==='ACTIVE').map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>sm.payable>0&&(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.over||sm.overdue)&&(!q||[s.name,s.enrol,s.phone].some(v=>v.toLowerCase().includes(q))));
-  const k={due:x=>x.sm.payable,name:x=>x.s.name,course:x=>x.s.course+x.s.sem}[f.sort]||(x=>x.sm.payable);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
+  let l=vStudents().filter(s=>s.status==='ACTIVE').map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>sm.payable>0&&(!f.course||s.course===f.course)&&(!f.batch||defaultBatch(s)===f.batch)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&refOk(s,f.ref)&&(!f.over||sm.overdue)&&(!q||[s.name,s.enrol,s.phone].some(v=>v.toLowerCase().includes(q))));
+  const k={due:x=>x.sm.payable,name:x=>x.s.name,course:x=>x.s.course+x.s.sem,batch:x=>defaultBatch(x.s)}[f.sort]||(x=>x.sm.payable);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
 function feeDues(){
   const f=duesFilter();const sc='fees.dues';const l=duesFiltered();const pg=pageRows(f,l);ui.dueSel=ui.dueSel||new Set();
   return`<div class="panel"><h2>Pending dues ${pill(inr(sum(l,x=>x.sm.payable))+' · '+l.length+' students','warn')}<button class="btn exp-btn" data-act="expOpen" data-key="fees.dues">Export</button></h2>
-   <div class="filters"><input type="search" placeholder="Search" aria-label="Search dues" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'sem','Semester',SEM_OPTS_())}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'over','Overdue',[['','Due + overdue'],['1','Only overdue']])}</div>
+   <div class="filters"><input type="search" placeholder="Search" aria-label="Search dues" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'course','Course',COURSE_OPTS())}${sel(sc,'batch','Batch',stuBatchOpts())}${sel(sc,'sem','Semester',SEM_OPTS_())}${sel(sc,'cat','Category',CAT_OPTS)}${sel(sc,'fund','Funding type',FUND_OPTS)}${sel(sc,'ref','Admission reference',REF_OPTS())}${sel(sc,'over','Overdue',[['','Due + overdue'],['1','Only overdue']])}</div>
    ${can('notices.post')?`<div class="actions" style="margin-bottom:10px"><button class="btn" data-act="remindSel" ${ui.dueSel.size?'':'disabled'}>Send reminder to selected (${ui.dueSel.size})</button><button class="btn primary" data-act="remindAll" ${l.length?'':'disabled'}>Send reminder to all ${l.length} shown</button></div>`:''}
-   <div class="tablewrap"><table><thead><tr>${can('notices.post')?`<th><input type="checkbox" aria-label="Select all shown" data-change="dueAll" ${pg.length&&pg.every(x=>ui.dueSel.has(x.s.id))?'checked':''}></th>`:''}${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course · Sem')}<th>Category</th><th>Funding</th><th>Semesters due</th>${sortTh(sc,'due','Due now',1)}<th></th></tr></thead><tbody>
-   ${pg.map(({s,sm})=>`<tr>${can('notices.post')?`<td><input type="checkbox" aria-label="Select ${E(s.name)}" data-change="dueSel" data-id="${E(s.id)}" ${ui.dueSel.has(s.id)?'checked':''}></td>`:''}<td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}"><b>${E(s.name)}</b></button><small class="muted" style="display:block">${E(s.enrol)} · ${E(s.phone)}</small></td><td>${E(classLabel(s))}</td><td>${E(s.category)}</td><td>${E(fundLabel(s.funding))}</td>
-     <td>${sm.sems.filter(x=>x.started&&x.due>0).map(x=>pill(`S${x.sem} ${inr(x.due)}`,x.overdue?'bad':'warn')).join(' ')}</td><td class="num amt"><b>${inr(sm.payable)}</b></td>
-     <td><div class="actions nowrap">${can('fees.collect')?`<button class="btn sm primary" data-act="collectFor" data-id="${E(s.id)}">Collect</button>`:''}${can('notices.post')?`<button class="btn sm" data-act="remindOne" data-id="${E(s.id)}">Remind</button>`:''}</div></td></tr>`).join('')||'<tr><td colspan="8" class="empty">No pending dues for these filters. 🎉</td></tr>'}</tbody></table></div>${pager(sc,l.length)}
+   <div class="tablewrap"><table><thead><tr>${can('notices.post')?`<th><input type="checkbox" aria-label="Select all shown" data-change="dueAll" ${pg.length&&pg.every(x=>ui.dueSel.has(x.s.id))?'checked':''}></th>`:''}${sortTh(sc,'name','Student')}${sortTh(sc,'course','Course · Sem')}${sortTh(sc,'batch','Batch')}<th>Category</th><th>Funding</th><th>Semesters due</th>${sortTh(sc,'due','Due now',1)}<th></th></tr></thead><tbody>
+   ${pg.map(({s,sm})=>`<tr>${can('notices.post')?`<td><input type="checkbox" aria-label="Select ${E(s.name)}" data-change="dueSel" data-id="${E(s.id)}" ${ui.dueSel.has(s.id)?'checked':''}></td>`:''}<td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}"><b>${E(s.name)}</b></button><small class="muted" style="display:block">${E(s.enrol)} · ${E(s.phone)}</small></td><td>${E(classLabel(s))}</td><td class="mono">${E(defaultBatch(s))}</td><td>${E(s.category)}</td><td>${E(fundLabel(s.funding))}</td>
+     <td class="wrap">${sm.sems.filter(x=>x.started&&x.due>0).map(x=>pill(`S${x.sem} ${inr(x.due)}`,x.overdue?'bad':'warn')).join(' ')}</td><td class="num amt"><b>${inr(sm.payable)}</b></td>
+     <td><div class="actions nowrap">${can('fees.collect')?`<button class="btn sm primary" data-act="collectFor" data-id="${E(s.id)}">Collect</button>`:''}${can('notices.post')?`<button class="btn sm" data-act="remindOne" data-id="${E(s.id)}">Remind</button>`:''}</div></td></tr>`).join('')||'<tr><td colspan="9" class="empty">No pending dues for these filters. 🎉</td></tr>'}</tbody></table></div>${pager(sc,l.length)}
    <p class="note">Automatic alerts go to each student ${db.settings.reminderDays} days before a due date and again when it is overdue (change in Fee setup).</p></div>`;
 }
 CHG.dueSel=el=>{el.checked?ui.dueSel.add(el.dataset.id):ui.dueSel.delete(el.dataset.id);renderPage()};
@@ -349,16 +351,16 @@ FORM.sendRemind=(f,d)=>{need('notices.post');const ids=f.dataset.ids.split(',').
   ids.forEach(id=>{const s=stu(id);queueMail({kind:'reminder',studentId:id,to:[s.email],subject:`${n.title} - ${db.college.short}`,title:n.title,body:n.body})});log('Fee reminder sent','Notice',n.id,null,{to:ids.length+' students',title:n.title});ui.dueSel=new Set();save();closeLayer();renderPage();toast(`Reminder sent to ${ids.length} student${ids.length>1?'s':''}`)};
 
 /* ---------- 4. receipts ---------- */
-function rcFilter(){return ui.f['fees.receipts']=Object.assign({q:'',mode:'',status:'',from:'',to:'',sort:'entry',dir:-1,page:0},ui.f['fees.receipts']||{})}
-function receiptsFiltered(){const f=rcFilter();const q=f.q.toLowerCase();
-  let l=vPayments().filter(p=>(!f.mode||p.mode===f.mode)&&(!f.status||p.status===f.status)&&(!f.from||p.invoiceDate>=f.from)&&(!f.to||p.invoiceDate<=f.to)&&(!q||[p.rc,stu(p.studentId).name,stu(p.studentId).enrol,p.chequeNo,p.upiRef,batchOf(p),p.reason].some(v=>String(v||'').toLowerCase().includes(q))));
-  const k={entry:p=>p.entryAt,date:p=>p.invoiceDate,amount:p=>p.amount,rc:p=>p.rc,name:p=>stu(p.studentId).name}[f.sort]||(p=>p.entryAt);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
+function rcFilter(){return ui.f['fees.receipts']=Object.assign({q:'',mode:'',split:'',status:'',batch:'',ref:'',from:'',to:'',sort:'entry',dir:-1,page:0},ui.f['fees.receipts']||{})}
+function receiptsFiltered(){const f=rcFilter();const q=f.q.toLowerCase();if(f.mode!=='CASH')f.split='';
+  let l=vPayments().filter(p=>(!f.mode||p.mode===f.mode)&&splitOk(p,f.split)&&(!f.status||p.status===f.status)&&(!f.batch||batchOf(p)===f.batch)&&refOk(stu(p.studentId),f.ref)&&(!f.from||p.invoiceDate>=f.from)&&(!f.to||p.invoiceDate<=f.to)&&(!q||[p.rc,stu(p.studentId).name,stu(p.studentId).enrol,p.chequeNo,p.upiRef,batchOf(p),p.reason].some(v=>String(v||'').toLowerCase().includes(q))));
+  const k={entry:p=>p.entryAt,date:p=>p.invoiceDate,amount:p=>p.amount,rc:p=>p.rc,name:p=>stu(p.studentId).name,batch:p=>batchOf(p)}[f.sort]||(p=>p.entryAt);l.sort((a,b)=>{const A=k(a),B=k(b);return(A<B?-1:A>B?1:0)*f.dir});return l}
 function feeReceipts(){
   const f=rcFilter();const sc='fees.receipts';const l=receiptsFiltered();const pg=pageRows(f,l);
   return`<div class="panel"><h2>Receipts ${pill(inr(sum(l.filter(p=>p.status==='SUCCESS'),p=>p.amount))+' successful','good')}<button class="btn exp-btn" data-act="expOpen" data-key="fees.receipts">Export</button></h2>
-   <div class="filters"><input type="search" placeholder="Receipt no, name, batch, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI']])}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}
+   <div class="filters"><input type="search" placeholder="Receipt no, name, batch, cheque no, UTR" aria-label="Search receipts" data-live="sq" data-scope="${sc}" value="${E(f.q)}">${sel(sc,'mode','Mode',[['','All modes'],['CASH','Cash'],['CHEQUE','Cheque'],['UPI','UPI']])}${f.mode==='CASH'?sel(sc,'split','Cash split',SPLIT_OPTS):''}${sel(sc,'status','Status',[['','All status'],['SUCCESS','Success'],['CANCELLED','Cancelled']])}${sel(sc,'batch','Batch',payBatchOpts())}${sel(sc,'ref','Admission reference',REF_OPTS())}
     <label class="dl">From <input type="date" value="${E(f.from)}" data-change="sf" data-scope="${sc}" data-k="from"></label><label class="dl">To <input type="date" value="${E(f.to)}" data-change="sf" data-scope="${sc}" data-k="to"></label></div>
-   <div class="tablewrap"><table><thead><tr>${sortTh(sc,'rc','Receipt')}${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entered')}${sortTh(sc,'name','Student')}<th>Batch</th><th>Sem</th><th>Mode</th>${sortTh(sc,'amount','Amount',1)}<th>Status</th><th></th></tr></thead><tbody>
+   <div class="tablewrap"><table><thead><tr>${sortTh(sc,'rc','Receipt')}${sortTh(sc,'date','Invoice date')}${sortTh(sc,'entry','Entered')}${sortTh(sc,'name','Student')}${sortTh(sc,'batch','Batch')}<th>Sem</th><th>Mode</th>${sortTh(sc,'amount','Amount',1)}<th>Status</th><th></th></tr></thead><tbody>
    ${pg.map(p=>{const s=stu(p.studentId);return`<tr><td class="mono">${E(p.rc)}</td><td>${dateCell('p',p,p.invoiceDate)}</td><td><small>${fmtT(p.entryAt)}</small></td><td><button class="lnk" data-act="openStudent" data-id="${E(s.id)}">${E(s.name)}</button></td><td class="mono">${E(batchOf(p))}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}${splitLine(p)}</td><td>${payPill(p.status)}${p.depositId?' '+pill('Deposited'):''}</td>
     <td><div class="actions nowrap"><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button>${p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn sm danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel</button>`:''}</div></td></tr>`}).join('')||'<tr><td colspan="10" class="empty">No receipts for these filters.</td></tr>'}</tbody></table></div>${pager(sc,l.length)}
    <p class="note">Change the invoice date of a Cash or Cheque receipt right in the table: the receipt PDF is regenerated and the change is logged (old → new). UPI dates are fixed. A payment is never deleted; cancel it with a reason.</p></div>`;

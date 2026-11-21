@@ -5,12 +5,12 @@ const SEMS=[1,2,3,4];
 const fundLabel=f=>f==='SCHOLARSHIP'?'By Scholarship':'By Cash';
 const statusLabel={ACTIVE:'Active',LEFT:'Left',PASSED:'Passed'};
 const PAGE=25;
-function stuFilter(){return ui.f.students=Object.assign({q:'',course:'',sem:'',cat:'',fund:'',ref:'',status:'ACTIVE',dues:'',sort:'name',dir:1,page:0},ui.f.students||{})}
+function stuFilter(){return ui.f.students=Object.assign({q:'',course:'',batch:'',sem:'',cat:'',fund:'',ref:'',status:'ACTIVE',dues:'',sort:'name',dir:1,page:0},ui.f.students||{})}
 function studentsFiltered(){
   const f=stuFilter();const q=f.q.trim().toLowerCase();
-  let l=vStudents().map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.status||s.status===f.status)&&(!f.ref||(f.ref==='__none'?!s.refId:s.refId===f.ref))
+  let l=vStudents().map(s=>({s,sm:feeSum(s)})).filter(({s,sm})=>(!f.course||s.course===f.course)&&(!f.batch||defaultBatch(s)===f.batch)&&(!f.sem||s.sem===+f.sem)&&(!f.cat||s.category===f.cat)&&(!f.fund||s.funding===f.fund)&&(!f.status||s.status===f.status)&&refOk(s,f.ref)
     &&(!f.dues||(f.dues==='yes'?sm.payable>0:sm.payable===0))&&(!q||[s.name,s.enrol,s.phone,s.email,s.ref].some(v=>String(v||'').toLowerCase().includes(q))));
-  const key={name:x=>x.s.name.toLowerCase(),enrol:x=>x.s.enrol,course:x=>x.s.course+x.s.sem,cat:x=>x.s.category,fund:x=>x.s.funding,due:x=>x.sm.payable,paid:x=>x.sm.paid}[f.sort]||(x=>x.s.name);
+  const key={name:x=>x.s.name.toLowerCase(),enrol:x=>x.s.enrol,course:x=>x.s.course+x.s.sem,batch:x=>defaultBatch(x.s),cat:x=>x.s.category,fund:x=>x.s.funding,due:x=>x.sm.payable,paid:x=>x.sm.paid}[f.sort]||(x=>x.s.name);
   l.sort((a,b)=>{const A=key(a),B=key(b);return(A<B?-1:A>B?1:0)*f.dir});
   return l;
 }
@@ -44,6 +44,11 @@ const COURSE_OPTS=()=>[['','All courses'],...scopeCourses().map(c=>[c.id,c.name]
 const SEM_OPTS_=()=>[['','All semesters'],...SEMS_ALL().map(n=>[n,'Semester '+n])];
 const CAT_OPTS=[['','All categories'],...CATS.map(c=>[c,c])];
 const FUND_OPTS=[['','Cash + Scholarship'],['CASH','By Cash'],['SCHOLARSHIP','By Scholarship']];
+/* change 12: the same batch filter on every list. Student lists use the student's batch (admission year); receipt lists use the batch written on the receipt. */
+const BATCH_OPTS=list=>[['','All batches'],...[...new Set(list)].filter(Boolean).sort().reverse().map(b=>[b,b])];
+const stuBatchOpts=()=>BATCH_OPTS(vStudents().map(defaultBatch));const payBatchOpts=()=>BATCH_OPTS(vPayments().map(batchOf));
+/* change 8: the same admission-reference filter on every list ('' = all, '__none' = students without a reference) */
+const refOk=(s,v)=>!v||(!!s&&(v==='__none'?!s.refId:s.refId===v));
 /* reference filter (change 2): only the references used by students this login can see, with the count */
 const REF_OPTS=()=>{const n={};vStudents().forEach(s=>{if(s.refId)n[s.refId]=(n[s.refId]||0)+1});
   return[['','All references'],...(db.refs||[]).filter(r=>n[r.id]).sort((a,b)=>a.name.localeCompare(b.name)).map(r=>[r.id,`${r.name} (${n[r.id]})`]),['__none','No reference']]};
@@ -54,11 +59,11 @@ function viewStudents(){
   const act=vStudents().filter(s=>s.status==='ACTIVE');
   return head('Students',`${act.length} active · ${act.filter(s=>s.course==='BED').length} B.Ed · ${act.filter(s=>s.course==='MED').length} M.Ed · ${act.filter(s=>s.funding==='SCHOLARSHIP').length} on scholarship`,acts)+
   `<div class="panel"><div class="filters"><input type="search" placeholder="Search name, enrolment no, phone, email or reference" aria-label="Search students" data-live="sq" data-scope="students" value="${E(f.q)}">
-    ${sel('students','course','Course',COURSE_OPTS())}${sel('students','sem','Semester',SEM_OPTS_())}${sel('students','cat','Category',CAT_OPTS)}${sel('students','fund','Funding type',FUND_OPTS)}${sel('students','ref','Admission reference',REF_OPTS())}
+    ${sel('students','course','Course',COURSE_OPTS())}${sel('students','batch','Batch',stuBatchOpts())}${sel('students','sem','Semester',SEM_OPTS_())}${sel('students','cat','Category',CAT_OPTS)}${sel('students','fund','Funding type',FUND_OPTS)}${sel('students','ref','Admission reference',REF_OPTS())}
     ${sel('students','status','Status',[['','All status'],['ACTIVE','Active'],['LEFT','Left'],['PASSED','Passed']])}${sel('students','dues','Dues',[['','Dues: any'],['yes','Has dues'],['no','No dues']])}
     ${Object.entries(f).some(([k,v])=>!['sort','dir','page','status'].includes(k)&&v)?'<button class="btn sm" data-act="clearF" data-scope="students">Clear</button>':''}</div>
-  <div class="tablewrap"><table><thead><tr>${sortTh('students','name','Student')}${sortTh('students','enrol','Enrolment no')}${sortTh('students','course','Course · Sem')}${sortTh('students','cat','Category')}${sortTh('students','fund','Funding')}${sortTh('students','paid','Paid',1)}${sortTh('students','due','Due now',1)}<th>Status</th></tr></thead><tbody>
-  ${page.map(({s,sm})=>`<tr class="click" data-act="openStudent" data-id="${E(s.id)}" tabindex="0"><td><div class="who">${avatar(s)}<div><b>${E(s.name)}</b><small class="muted" style="display:block">${E(s.phone)}</small></div></div></td><td class="mono">${E(s.enrol)}</td><td>${E(classLabel(s))}</td><td>${E(s.category)}</td><td>${s.funding==='SCHOLARSHIP'?pill('Scholarship','acc'):pill('Cash')}</td><td class="num amt">${inr(sm.paid)}</td><td class="num amt">${sm.payable?`<b class="${sm.overdue?'t-bad':''}">${inr(sm.payable)}</b>`:'—'}</td><td>${s.status==='ACTIVE'?(sm.payable?(sm.overdue?pill('Overdue','bad'):pill('Due','warn')):pill('Paid up','good')):pill(statusLabel[s.status])}</td></tr>`).join('')||`<tr><td colspan="8" class="empty">No students match these filters.</td></tr>`}
+  <div class="tablewrap"><table><thead><tr>${sortTh('students','name','Student')}${sortTh('students','enrol','Enrolment no')}${sortTh('students','course','Course · Sem')}${sortTh('students','batch','Batch')}${sortTh('students','cat','Category')}${sortTh('students','fund','Funding')}${sortTh('students','paid','Paid',1)}${sortTh('students','due','Due now',1)}<th>Status</th></tr></thead><tbody>
+  ${page.map(({s,sm})=>`<tr class="click" data-act="openStudent" data-id="${E(s.id)}" tabindex="0"><td><div class="who">${avatar(s)}<div><b>${E(s.name)}</b><small class="muted" style="display:block">${E(s.phone)}</small></div></div></td><td class="mono">${E(s.enrol)}</td><td>${E(classLabel(s))}</td><td class="mono">${E(defaultBatch(s))}</td><td>${E(s.category)}</td><td>${s.funding==='SCHOLARSHIP'?pill('Scholarship','acc'):pill('Cash')}</td><td class="num amt">${inr(sm.paid)}</td><td class="num amt">${sm.payable?`<b class="${sm.overdue?'t-bad':''}">${inr(sm.payable)}</b>`:'—'}</td><td>${s.status==='ACTIVE'?(sm.payable?(sm.overdue?pill('Overdue','bad'):pill('Due','warn')):pill('Paid up','good')):pill(statusLabel[s.status])}</td></tr>`).join('')||`<tr><td colspan="9" class="empty">No students match these filters.</td></tr>`}
   </tbody></table></div>${pager('students',l.length)}</div>`;
 }
 ACT.clearF=el=>{const sc=el.dataset.scope;const keep=ui.f[sc];ui.f[sc]={sort:keep.sort,dir:keep.dir,page:0};if(sc==='students')ui.f[sc].status='ACTIVE';renderPage()};
@@ -268,10 +273,10 @@ function openStudent(id){
   drawer(`<button class="btn x" data-act="close">Close</button>
    <div class="who" style="margin:4px 0 6px">${s.photo?`<img class="av lg" src="${E(s.photo)}" alt="">`:`<div class="av lg">${E(initials(s.name))}</div>`}<div><h2 style="margin:0">${E(s.name)}</h2><small class="muted">${E(s.enrol)} · ${E(classLabel(s))} · ${E(statusLabel[s.status])}</small></div></div>
    <div class="actions" style="margin:12px 0">${can('fees.collect')&&sm.payable>0?`<button class="btn primary" data-act="collectFor" data-id="${E(s.id)}">Collect fee</button>`:''}${can('notices.post')&&sm.payable>0?`<button class="btn" data-act="remindOne" data-id="${E(s.id)}">Send fee message</button>`:''}${can('students.edit')?`<button class="btn" data-act="editStudent" data-id="${E(s.id)}">Edit</button>`:''}</div>
-   <div class="facts">${L('Mobile',s.phone)}${L('Email',s.email)}${L('Gender',{F:'Female',M:'Male',O:'Other'}[s.gender])}${L('Date of birth',fmtD(s.dob))}${L('Category',s.category)}${L('Funding',fundLabel(s.funding)+(s.scholarshipNote?' · '+s.scholarshipNote:''))}${L('Admission year',s.admissionYear)}${L('Admission reference',s.ref)}${L('Address',s.address)}</div>
+   <div class="facts">${L('Mobile',s.phone)}${L('Email',s.email)}${L('Gender',{F:'Female',M:'Male',O:'Other'}[s.gender])}${L('Date of birth',fmtD(s.dob))}${L('Category',s.category)}${L('Funding',fundLabel(s.funding)+(s.scholarshipNote?' · '+s.scholarshipNote:''))}${L('Batch',defaultBatch(s))}${L('Admission reference',s.ref)}${L('Address',s.address)}</div>
    <h3>Semester fees ${pill('Due now '+inr(sm.payable),sm.payable?(sm.overdue?'bad':'warn'):'good')}</h3>${semCards(s,{collect:true})}
-   <h3>Payments and receipts</h3><div class="tablewrap"><table><thead><tr><th>Receipt</th><th>Invoice date</th><th>Sem</th><th>Mode</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>
-   ${pays.map(p=>`<tr><td class="mono">${E(p.rc)}</td><td>${fmtD(p.invoiceDate)}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}${splitLine(p)}</td><td>${payPill(p.status)}</td><td><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">Receipt</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No payments yet.</td></tr>'}</tbody></table></div>
+   <h3>Payments and receipts</h3><div class="tablewrap"><table><thead><tr><th>Receipt</th><th>Invoice date</th><th>Batch</th><th>Sem</th><th>Mode</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>
+   ${pays.map(p=>`<tr><td class="mono">${E(p.rc)}</td><td>${fmtD(p.invoiceDate)}</td><td class="mono">${E(batchOf(p))}</td><td>${p.sem}</td><td>${modePill(p.mode)}</td><td class="num amt">${inr(p.amount)}${splitLine(p)}</td><td>${payPill(p.status)}</td><td><button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">Receipt</button></td></tr>`).join('')||'<tr><td colspan="8" class="empty">No payments yet.</td></tr>'}</tbody></table></div>
    <h3>Login</h3><div class="panel" style="padding:12px"><div class="rline"><span>Login ID</span><b class="mono">${E(u?u.username:'—')} · ${E(s.email)}</b></div>
     <div class="rline"><span>Credentials email</span><span>${mail?mailPill(mail.status)+' <small class="muted">'+E(fmtT(mail.sentAt||mail.at||mail.ts))+'</small>':pill('Not sent','warn')}</span></div>
     <div class="rline"><span>Password</span><span>${u?(u.password===studentPwOf(s)?pill('Default rule','good')+' <small class="muted">mobile 5 digits @ batch year</small>':pill('Set by the office','acc')):'—'}</span></div>
