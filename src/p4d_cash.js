@@ -1,7 +1,7 @@
 /* =====================================================================
    Cash (change 4 → 6 → 7, 21-11-2026; spec §5.6). Everything about CASH in one place: Audit → Cash.
    Cheque and UPI go to the bank directly, so the office manages only cash:
-     - fee cash still to deposit (the "to bank" part of cash receipts, not yet deposited)
+     - fee cash still to deposit (the "to bank" part of cash invoices, not yet deposited)
      - cash in hand (part of a cash fee kept in the college, one pool per course)
      - expenses: "expense now" (taken when the fee is collected) and expenses paid later from cash in hand
        (they use the OLDEST student money first, so every rupee stays linked to a student)
@@ -25,7 +25,7 @@ function cashNow(cid){const d=sum(depPending(cid),feeCashLeft),h=sum(cihOpen(cid
 function cashTotals(cid){const ids=cashIds(cid);const pays=db.payments.filter(p=>p.status==='SUCCESS'&&p.mode==='CASH'&&ids.includes(payCourse(p)));
   const o={n:pays.length,collected:sum(pays,p=>p.amount),expNow:sum(pays,payExp),expCih:sum(pays,cihUsed),depFee:sum(pays.filter(p=>p.depositId),payToBank),depCih:sum(pays,cihDeposited),pending:sum(pays,feeCashLeft),cih:sum(pays,cihLeft)};
   o.exp=o.expNow+o.expCih;o.dep=o.depFee+o.depCih;o.drawer=o.pending+o.cih;return o}
-/* the receipts inside one bank deposit (fee cash parts + cash-in-hand lines; old deposits may also hold cheques) */
+/* the invoices inside one bank deposit (fee cash parts + cash-in-hand lines; old deposits may also hold cheques) */
 const depLines=d=>[...db.payments.filter(p=>p.depositId===d.id).map(p=>({p,amount:p.mode==='CASH'?payToBank(p):p.amount,kind:p.mode==='CASH'?'Fee cash':modeName(p.mode)})),
   ...(d.cihLines||[]).map(a=>({p:payById(a.pid),amount:a.amount,kind:'Cash in hand'}))].filter(x=>x.p);
 const cashF=()=>ui.f['cash.book']=Object.assign({course:'',batch:'',kind:'',split:'',sub:'',ref:'',q:'',page:0},ui.f['cash.book']||{});
@@ -38,7 +38,7 @@ function cashBook(ids){const ev=[];
   cashbox().spends.filter(x=>ids.includes(x.course)).forEach(x=>{const off=x.status!=='ACTIVE';
     ev.push({key:'sp'+x.id,id:x.id,date:x.date,at:x.at,kind:'Expense',sub:'cih',bats:[...new Set(x.alloc.map(a=>payById(a.pid)).filter(Boolean).map(batchOf))],ref:x.ref,text:x.items.map(i=>i.reason).join('; '),who:allocText(x),studs:x.alloc.map(a=>stu((payById(a.pid)||{}).studentId)).filter(Boolean),inA:0,outA:off?0:x.amount,shown:x.amount,cancelled:off,course:x.course,by:x.by,rec:x})});
   db.deposits.forEach(d=>{const l=depLines(d).filter(y=>y.p.mode==='CASH'&&ids.includes(payCourse(y.p)));const out=sum(l,y=>y.amount);if(!out)return;
-    ev.push({key:'dp'+d.id,id:d.id,date:d.depositedOn,at:d.at||0,kind:'Bank deposit',bats:[...new Set(l.map(y=>batchOf(y.p)))],ref:d.ref||'Deposit',text:`${d.bankRef} · ${l.length} receipt${l.length===1?'':'s'}`,who:[...new Set(l.map(y=>lotWho(y.p)))].join(', '),studs:l.map(y=>stu(y.p.studentId)).filter(Boolean),inA:0,outA:out,course:d.course||payCourse(l[0].p),courses:[...new Set(l.map(y=>payCourse(y.p)))],by:d.by,rec:d})});
+    ev.push({key:'dp'+d.id,id:d.id,date:d.depositedOn,at:d.at||0,kind:'Bank deposit',bats:[...new Set(l.map(y=>batchOf(y.p)))],ref:d.ref||'Deposit',text:`${d.course?'To '+courseAc(d.course)+' · ':''}${d.bankRef} · ${l.length} invoice${l.length===1?'':'s'}`,who:[...new Set(l.map(y=>lotWho(y.p)))].join(', '),studs:l.map(y=>stu(y.p.studentId)).filter(Boolean),inA:0,outA:out,course:d.course||payCourse(l[0].p),courses:[...new Set(l.map(y=>payCourse(y.p)))],by:d.by,rec:d})});
   ev.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.at-b.at);let bal=0;ev.forEach(e=>{bal+=e.inA-e.outA;e.bal=bal});return ev}
 function cashBookRows(){const f=cashF();const{from,to}=depPeriod();const q=f.q.trim().toLowerCase();if(f.kind!=='Fee cash')f.split='';if(f.kind!=='Expense')f.sub='';
   return cashBook(cashIds(f.course)).filter(e=>(!from||e.date>=from)&&(!to||e.date<=to)&&(!f.kind||e.kind===f.kind)&&(!f.batch||(e.bats||[]).includes(f.batch))&&(!f.split||(e.pay&&splitOk(e.pay,f.split)))&&(!f.sub||e.sub===f.sub)&&(!f.ref||e.studs.some(s=>refOk(s,f.ref)))&&(!q||[e.ref,e.text,e.who].some(v=>String(v).toLowerCase().includes(q))))}
@@ -52,11 +52,11 @@ function auditCash(){
   const got=sum(inR,e=>e.inA),spent=sum(inR.filter(e=>e.kind==='Expense'),e=>e.outA),banked=sum(inR.filter(e=>e.kind==='Bank deposit'),e=>e.outA);
   const nDep=depPending(cid).length,nCih=cihOpen(cid).length;const T=cashTotals(cid);
   const pct=v=>T.collected?Math.max(0,v/T.collected*100):0;const seg=(cls,v,l)=>v>0?`<i class="${cls}" style="width:${pct(v).toFixed(2)}%" title="${E(l)}: ${inr(v)} (${Math.round(pct(v))}%)"></i>`:'';
-  return`<div class="panel cash-now"><h2>Cash fees · where the money is${multi?` <small class="muted">${E(cs.map(c=>c.name+' '+inr(cashTotals(c.id).collected)).join(' · '))}</small>`:''}</h2>
+  return`<div class="panel cash-now"><h2>Cash fees · where the money is${multi?` <small class="muted">${E(cs.map(c=>courseAc(c.id)+' '+inr(cashTotals(c.id).collected)).join(' · '))}</small>`:''}</h2>
     <div class="cn-grid five">
-     <div class="cn c-total"><span class="label">Cash fees collected</span><b>${inr(T.collected)}</b><small>${T.n} cash receipt${T.n===1?'':'s'} · all time</small></div>
+     <div class="cn c-total"><span class="label">Cash fees collected</span><b>${inr(T.collected)}</b><small>${T.n} cash invoice${T.n===1?'':'s'} · all time</small></div>
      <div class="cn c-dep"><span class="label">Deposited to bank</span><b>${inr(T.dep)}</b><small>fee cash ${inr(T.depFee)} · cash in hand ${inr(T.depCih)}</small></div>
-     <div class="cn c-pend"><span class="label">To deposit</span><b>${inr(T.pending)}</b><small>${nDep} receipt${nDep===1?'':'s'} not yet in the bank</small></div>
+     <div class="cn c-pend"><span class="label">To deposit</span><b>${inr(T.pending)}</b><small>${nDep} invoice${nDep===1?'':'s'} not yet in the bank</small></div>
      <div class="cn c-exp"><span class="label">Spent as expense</span><b>${inr(T.exp)}</b><small>at collection ${inr(T.expNow)} · from cash in hand ${inr(T.expCih)}</small></div>
      <div class="cn c-cih"><span class="label">Cash in hand (college drawer)</span><b>${inr(T.cih)}</b><small>${nCih?`<button class="lnk" data-act="cihList">${nCih} student${nCih===1?'':'s'}' money</button>`:'none'}${now.old?` · <span class="t-warn">${inr(now.old)} older than 6 months</span>`:''}</small></div></div>
     ${T.collected?`<div class="cn-bar" role="img" aria-label="Of ${inr(T.collected)}: deposited ${inr(T.dep)}, to deposit ${inr(T.pending)}, expenses ${inr(T.exp)}, cash in hand ${inr(T.cih)}">${seg('c-dep',T.dep,'Deposited')}${seg('c-pend',T.pending,'To deposit')}${seg('c-exp',T.exp,'Expenses')}${seg('c-cih',T.cih,'Cash in hand')}</div>`:''}
@@ -67,7 +67,7 @@ function auditCash(){
    <div class="panel"><h2>Cash book</h2>
     <div class="filters"><div class="chips" role="group" aria-label="Period">${[['week','This week'],['lastweek','Last week'],['month','This month'],['lastmonth','Last month'],['all','All'],['custom','Custom']].map(([k,t])=>`<button type="button" class="chip" aria-pressed="${P.f.p===k}" data-act="depP" data-p="${k}">${t}</button>`).join('')}</div>
      ${P.f.p==='custom'?`<label class="dl">From <input type="date" value="${E(P.from)}" data-change="sf" data-scope="dep" data-k="from"></label><label class="dl">To <input type="date" value="${E(P.to)}" data-change="sf" data-scope="dep" data-k="to"></label>`:P.from?`<span class="muted">${fmtD(P.from)} to ${fmtD(P.to)}</span>`:''}</div>
-    <div class="filters"><input type="search" placeholder="Student, receipt, ref or reason" aria-label="Search the cash book" data-live="sq" data-scope="cash.book" value="${E(f.q)}">
+    <div class="filters"><input type="search" placeholder="Student, invoice, ref or reason" aria-label="Search the cash book" data-live="sq" data-scope="cash.book" value="${E(f.q)}">
      ${cs.length>1?sel('cash.book','course','Course',[['','All courses'],...cs.map(c=>[c.id,c.name])]):''}${sel('cash.book','batch','Batch',BATCH_OPTS(cashBook(cashIds(f.course)).flatMap(e=>e.bats||[])))}${sel('cash.book','kind','Entry',[['','All entries'],['Fee cash','Fee cash received'],['Expense','Expenses'],['Bank deposit','Bank deposits']])}${f.kind==='Fee cash'?sel('cash.book','split','Cash split',SPLIT_OPTS):''}${f.kind==='Expense'?sel('cash.book','sub','Expense type',[['','All expenses'],['now','Expense now (at fee collection)'],['cih','From cash in hand']]):''}${sel('cash.book','ref','Admission reference',REF_OPTS())}</div>
     <div class="cb-sum"><span>Opening <b>${inr(open)}</b></span><span>+ Cash received <b>${inr(got)}</b></span><span>− Expenses <b>${inr(spent)}</b></span><span>− To bank <b>${inr(banked)}</b></span><span class="cb-close">= Closing <b>${inr(close)}</b></span></div>
     <div class="actions" style="margin:10px 0"><span class="muted">${l.length} entries</span><span style="flex:1"></span><button class="btn exp-btn" data-act="expOpen" data-key="audit.cash">Export</button></div>
@@ -85,7 +85,7 @@ function cashRow(e,multi){
     e.kind==='Bank deposit'?`<button class="btn sm" data-act="cashDepPrint" data-id="${E(e.id)}">Slip</button>`:'',
     isBoss()&&e.kind==='Bank deposit'?`<button class="btn sm" data-act="cashDepUndo" data-id="${E(e.id)}">Undo</button>`:'',
     isBoss()&&e.sub==='cih'&&!e.cancelled?`<button class="btn sm danger" data-act="cashSpendCancel" data-id="${E(e.id)}">Cancel</button>`:''].join('');
-  return`<tr class="${e.cancelled?'muted':''}"><td style="white-space:nowrap">${fmtD(e.date)}</td><td>${pillOf}</td><td class="mono">${refCell}</td><td class="mono">${E((e.bats||[]).join(', ')||'—')}</td><td class="wrap">${det}</td>${multi?`<td>${E((e.courses||[e.course]).map(id=>(course(id)||{}).name||'').join(' + '))}</td>`:''}
+  return`<tr class="${e.cancelled?'muted':''}"><td style="white-space:nowrap">${fmtD(e.date)}</td><td>${pillOf}</td><td class="mono">${refCell}</td><td class="mono">${E((e.bats||[]).join(', ')||'—')}</td><td class="wrap">${det}</td>${multi?`<td>${E((e.courses||[e.course]).map(courseAc).join(' + '))}</td>`:''}
    <td class="num amt">${e.inA?inr(e.inA):''}</td><td class="num amt">${e.cancelled?`<s>${inr(e.shown)}</s>`:e.outA?inr(e.outA):''}</td><td class="num amt"><b>${inr(e.bal)}</b></td><td><div class="actions nowrap">${acts}</div></td></tr>`}
 ACT.cashRegPrint=()=>{need('audit.view');const f=cashF();const P=depPeriod();const l=cashBookRows();const all=cashBook(cashIds(f.course));const before=P.from?all.filter(e=>e.date<P.from):[];const open=before.length?before.at(-1).bal:0;
   printReport('Cash book',`${cashIds(f.course).map(id=>course(id).name).join(' + ')} · ${P.from?fmtD(P.from):'Start'} to ${P.to?fmtD(P.to):fmtD(today())}${f.kind?' · '+f.kind:''}`,['Date','Entry','Ref','Details','Students','In','Out','Balance'],
@@ -98,9 +98,9 @@ ACT.cihList=()=>{need('audit.view');const f=cashF();const l=cihOpen(f.course);
   dialog(`<h3>Cash in hand · ${inr(sum(l,cihLeft))}</h3><p class="muted" style="margin:0 0 10px">Students whose money is still in the office (oldest first). Expenses use the top ones first.</p><div class="list">
    ${l.map(p=>{const s=stu(p.studentId),age=diffDays(today(),p.invoiceDate);return`<div class="li"><div><b>${E(s.name)}</b> <small class="muted mono">${E(s.enrol)}</small><small>${E(p.rc)} · batch ${E(batchOf(p))} · ${fmtD(p.invoiceDate)} · kept ${inr(payCih(p))}${age>CIH_OLD_DAYS?' · '+Math.floor(age/30)+' months old':''}</small></div><div class="actions nowrap"><b class="amt">${inr(cihLeft(p))}</b><button class="btn sm" data-act="cihTrail" data-id="${E(p.id)}">Where it went</button></div></div>`}).join('')||'<p class="note">No cash in hand.</p>'}</div>
    <div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn primary" data-act="closeDialog">Close</button></div>`,'Cash in hand')};
-ACT.cihTrail=el=>{need('audit.view');const p=payById(el.dataset.id);if(!p)throw new Error('Receipt not found');guardStudent(p.studentId);
+ACT.cihTrail=el=>{need('audit.view');const p=payById(el.dataset.id);if(!p)throw new Error('Invoice not found');guardStudent(p.studentId);
   const sp=cashbox().spends.filter(x=>x.alloc.some(a=>a.pid===p.id)),dp=db.deposits.filter(d=>(d.cihLines||[]).some(a=>a.pid===p.id));const part=(l,id)=>sum(l.filter(a=>a.pid===id),a=>a.amount);
-  dialog(`<h3>${E(lotWho(p))} · cash in hand</h3><p class="muted" style="margin:0 0 10px">Receipt ${E(p.rc)} · ${fmtD(p.invoiceDate)} · kept ${inr(payCih(p))}</p><div class="list">
+  dialog(`<h3>${E(lotWho(p))} · cash in hand</h3><p class="muted" style="margin:0 0 10px">Invoice ${E(p.rc)} · ${fmtD(p.invoiceDate)} · kept ${inr(payCih(p))}</p><div class="list">
    ${sp.map(x=>`<div class="li"><div><b>${E(x.ref)} · ${E(x.items.map(i=>i.reason).join('; '))}</b><small>Expense on ${fmtD(x.date)} by ${E(x.by)}${x.status==='CANCELLED'?' · cancelled, money returned':''}</small></div><span class="amt ${x.status==='CANCELLED'?'muted':''}">${inr(part(x.alloc,p.id))}</span></div>`).join('')}
    ${dp.map(d=>`<div class="li"><div><b>${E(d.ref||'Deposit')} · deposited to the bank</b><small>${fmtD(d.depositedOn)} · ${E(d.bankRef)} · by ${E(d.by)}</small></div><span class="amt">${inr(part(d.cihLines,p.id))}</span></div>`).join('')}
    <div class="li"><div><b>Still in cash in hand</b></div><b class="amt">${inr(cihLeft(p))}</b></div></div>
@@ -143,10 +143,10 @@ FORM.cashSpendCancel=(f,d)=>{if(!isBoss())throw new Error('Only the Principal ca
 /* ---------- deposit to the bank: one slip = one course (one bank account); fee cash ticked, students' cash in hand optional ---------- */
 function cdepFormHtml(){const cs=cashCourses();const cid=ui.cdep.course;const fee=depPending(cid),cih=cihOpen(cid);
   const row=(p,name,amt,of,on)=>`<tr><td><input type="checkbox" name="${name}" value="${E(p.id)}" ${on?'checked':''} data-change="cdepCount" aria-label="Deposit ${E(lotWho(p))} ${E(p.rc)}"></td><td>${E(lotWho(p))} <small class="muted mono">${E(stu(p.studentId).enrol)}</small></td><td class="mono">${E(p.rc)}</td><td class="mono">${E(batchOf(p))}</td><td>${fmtD(p.invoiceDate)}</td><td class="num amt">${inr(amt)}${of?`<small class="muted split-line">of ${inr(of)}</small>`:''}</td></tr>`;
-  const head=(g,on,t)=>`<thead><tr><th><input type="checkbox" ${on?'checked':''} data-change="cdepAll" data-g="${g}" aria-label="Select all ${t}"></th><th>Student</th><th>Receipt</th><th>Batch</th><th>Date</th><th class="num">Amount</th></tr></thead>`;
+  const head=(g,on,t)=>`<thead><tr><th><input type="checkbox" ${on?'checked':''} data-change="cdepAll" data-g="${g}" aria-label="Select all ${t}"></th><th>Student</th><th>Invoice</th><th>Batch</th><th>Date</th><th class="num">Amount</th></tr></thead>`;
   return`<button class="btn x" data-act="close">Close</button><h2>Deposit cash to the bank</h2><p class="muted" style="margin:4px 0 0">Tick what goes into this bank slip. Fee cash is ticked; tick students' cash in hand too if you deposit it now. Each line stays in that student's name.</p>
    <form data-form="cashDeposit" class="form" style="margin-top:12px">
-    ${cs.length>1?F('course','Bank account of',{val:cid,opts:cs.map(c=>[c.id,c.name]),req:true,attrs:'data-change="cdepCourse"'}):''}
+    ${cs.length>1?F('course','Bank account',{val:cid,opts:cs.map(c=>[c.id,courseAc(c.id)]),req:true,attrs:'data-change="cdepCourse"'}):''}
     <div class="span"><h3 style="margin:4px 0 6px">Fee cash to deposit · ${fee.length}</h3><div class="tablewrap"><table>${head('feep',true,'fee cash')}<tbody>${fee.map(p=>row(p,'feep',feeCashLeft(p),feeCashLeft(p)!==p.amount?p.amount:0,true)).join('')||'<tr><td colspan="6" class="empty">No fee cash waiting.</td></tr>'}</tbody></table></div></div>
     <div class="span"><h3 style="margin:10px 0 6px">Cash in hand · ${cih.length}</h3><div class="tablewrap"><table>${head('lot',false,'cash in hand')}<tbody>${cih.map(p=>row(p,'lot',cihLeft(p),0,false)).join('')||'<tr><td colspan="6" class="empty">No cash in hand.</td></tr>'}</tbody></table></div></div>
     ${fee.length||cih.length?`<div class="field span"><b id="cdepSum">${cdepSumText(fee,[])}</b></div>
@@ -156,7 +156,7 @@ const cdepSumText=(fee,cih)=>{const a=sum(fee,feeCashLeft),b=sum(cih,cihLeft);re
 ACT.cashDeposit=()=>{need('audit.deposit','deposit cash');const cs=cashCourses();if(!cs.length)throw new Error('No course to manage');const want=cashF().course;
   ui.cdep={course:cs.some(c=>c.id===want)?want:(cs.find(c=>cashNow(c.id).total>0)||cs[0]).id};drawer(cdepFormHtml(),true,'Deposit cash to the bank')};
 CHG.cdepCourse=el=>{ui.cdep.course=el.value;drawer(cdepFormHtml(),true,'Deposit cash to the bank')};
-/* ticked lines (d.fees / d.lots = comma lists of receipt ids are accepted too, for tests and a future API) */
+/* ticked lines (d.fees / d.lots = comma lists of invoice ids are accepted too, for tests and a future API) */
 const cdepChecked=d=>{const pick=(k,n)=>(d&&d[k]!==undefined?String(d[k]).split(',').filter(Boolean):$$(`input[name=${n}]:checked`).map(i=>i.value)).map(payById).filter(Boolean);return{fee:pick('fees','feep'),cih:pick('lots','lot')}};
 CHG.cdepCount=()=>{const c=cdepChecked();const s=$('#cdepSum');if(s)s.textContent=cdepSumText(c.fee,c.cih)};
 CHG.cdepAll=el=>{$$(`input[name=${el.dataset.g}]`).forEach(i=>i.checked=el.checked);CHG.cdepCount()};
@@ -172,6 +172,6 @@ FORM.cashDeposit=(f,d)=>{need('audit.deposit','deposit cash');const cs=cashCours
 ACT.cashDepUndo=el=>{if(!isBoss())throw new Error('Only the Principal can undo a deposit');const dp=db.deposits.find(x=>x.id===el.dataset.id);if(!dp||(dp.course&&!mayCourse(dp.course)))throw new Error('Not found');
   confirmBox('Undo deposit',`${dp.ref||dp.bankRef}: ${inr(dp.total)} goes back to "cash in the office".`,'Undo',()=>{db.payments.forEach(p=>{if(p.depositId===dp.id)p.depositId=''});db.deposits=db.deposits.filter(x=>x!==dp);log('Deposit undone','Deposit',dp.ref||dp.id,{total:inr(dp.total)},null);save();renderPage();toast('Deposit undone')},true)};
 ACT.cashDepPrint=el=>{need('audit.view');const dp=db.deposits.find(x=>x.id===el.dataset.id);if(!dp)throw new Error('Not found');const l=depLines(dp);
-  printReport('Bank deposit '+(dp.ref||''),`${dp.course?course(dp.course).name+' · ':''}deposited ${fmtD(dp.depositedOn)} · ${dp.bankRef}`,['Student','Enrolment no','Receipt','Received on','Type','Amount'],
+  printReport('Bank deposit '+(dp.ref||''),`${dp.course?courseAc(dp.course)+' · ':''}deposited ${fmtD(dp.depositedOn)} · ${dp.bankRef}`,['Student','Enrolment no','Invoice','Received on','Type','Amount'],
    l.map(x=>{const s=stu(x.p.studentId);return[s.name,s.enrol,x.p.rc,fmtD(x.p.invoiceDate),x.kind,inr(x.amount)]}),
    `<p class="pt">Total ${inr(sum(l,x=>x.amount))} · ${l.length} lines · marked by ${E(dp.by)}</p><p class="pt">Deposited by: ____________________ &nbsp; Checked by: ____________________</p>`)};

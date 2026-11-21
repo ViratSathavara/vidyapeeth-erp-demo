@@ -2,7 +2,7 @@ const rs=p=>'Rs. '+(Math.round(p||0)/100).toLocaleString('en-IN',{maximumFractio
 const pdfBytes=str=>{const u=new Uint8Array(str.length);for(let i=0;i<str.length;i++)u[i]=str.charCodeAt(i)&255;return u};
 const fmtSize=n=>n<1024?n+' B':(n/1024).toFixed(1)+' KB';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-/* The PDF is rebuilt from the payment every time it is opened, so an edited invoice date always shows on the receipt.
+/* The PDF is rebuilt from the payment every time it is opened, so an edited invoice date always shows on the invoice.
    NOTE: this browser PDF uses Helvetica (Latin only). The real server PDF embeds Noto Sans Gujarati (spec §1). */
 /* amount in words, Indian system (Lakh, Crore): 1500000 paise -> "Rupees Fifteen Thousand Only" */
 function inWords(paise){
@@ -20,10 +20,10 @@ const amt2=p=>(Math.round(p||0)/100).toLocaleString('en-IN',{minimumFractionDigi
 /* header text of the printed invoice (college's final design); kept in db.college.rcpt so it can be changed without code */
 const RCPT_DEFAULT=()=>({fullName:"The New Progressive College of Teachers' Education, Mehsana",naac:"Re-Accredited 'B' 2.86 CGPA by NAAC",trustLine:'Run by The New Progressive Education Trust',
   address:"'Pooja' Building, Opp. Municipal Ground, Mehsana - 384 001.",mobCollege:'99982 16718',mobTrust:'90999 20009',email:'hngu163@ngu.ac.in',web:'www.npcte.org',signFor:"For The New Progressive College of Teachers' Education"});
-/* The PDF is rebuilt from the payment every time it is opened, so an edited invoice date always shows on the receipt.
+/* The PDF is rebuilt from the payment every time it is opened, so an edited invoice date always shows on the invoice.
    Design: NPCTE-Fee-Invoice-Final.pdf (A4). Fonts are the standard PDF fonts; the Gujarati college name is an image.
    Student copy (portal download and email): the bill only, without the mode of payment or office details. */
-/* numbers and labels of one invoice, shared by the PDF and the on-screen receipt */
+/* numbers and labels of one invoice, shared by the PDF and the on-screen invoice */
 function rcptInfo(p,studentCopy){
   const s=stu(p.studentId),c=db.college,R=Object.assign(RCPT_DEFAULT(),c.rcpt||{});const cancelled=p.status==='CANCELLED';
   const fee=(semFee(s,p.sem)||{}).amount||0;
@@ -35,16 +35,17 @@ function rcptInfo(p,studentCopy){
     if(p.mode==='CHEQUE'&&(p.bank||p.chequeDate))notes.push(`Cheque${p.chequeNo?' No. '+p.chequeNo:''}${p.bank?', '+p.bank:''}${p.chequeDate?', dated '+fmtD(p.chequeDate):''}.`);
     if(p.mode==='UPI'&&p.upiRef)notes.push('UPI reference '+p.upiRef+(p.paidAt&&!p.imported?', paid '+fmtT(p.paidAt):'')+'.');
     if(payExp(p)||payCih(p))notes.push(`Cash split: expense Rs. ${amt2(payExp(p))} · cash in hand Rs. ${amt2(payCih(p))} · to bank Rs. ${amt2(payToBank(p))}.`);
-    if(p.note)notes.push('Office note: '+p.note);
+    if(remarksText(p))notes.push('Remarks: '+remarksText(p)); /* change 17: office copy only */
     notes.push(`Entered by ${p.by||'-'} on ${fmtT(p.entryAt)}.`)}
   if((p.dateEdits||[]).length)notes.push('Invoice date changed: '+p.dateEdits.map(x=>`${fmtD(x.from)} → ${fmtD(x.to)} (${x.by})`).join('; ')+'.');
   return{s,c,R,cancelled,fee,earlier,paidNow,balance:Math.max(0,fee-earlier-paidNow),cname:`${course(s.course).name} - Semester ${p.sem}`,
     mode:'By '+modeName(p.mode)+(p.mode==='CHEQUE'&&p.chequeNo?` No. ${p.chequeNo}`:''),payDate:p.mode==='UPI'&&!p.imported?istDate(p.paidAt||p.entryAt):p.invoiceDate,notes};
 }
-function receiptPdf(p,studentCopy){if(studentCopy===undefined)studentCopy=isStudentUser(cur());
+/* gIn: draw on a page of a bigger PDF (change 18: all invoices of a list in one PDF) instead of making a file */
+function receiptPdf(p,studentCopy,gIn){if(studentCopy===undefined)studentCopy=isStudentUser(cur());
   const I=rcptInfo(p,studentCopy),{s,c,R,cancelled,fee,earlier,paidNow,balance,cname,mode,payDate}=I;const ts=new Date(p.entryAt||Date.now());
   const stamp=`${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
-  return makePdf(g=>{
+  const draw=g=>{
     const NAVY='#2b2c7e',INK='#1f2328',MUT='#6b7280',BOX='#eef0f6',LINE='#d3d6e6',GREY='#6a6a64',L=138,RT=565.3,CX=351.6,W=427.3;
     /* left band with the emblem and NPCTE written upwards */
     g.rect(0,0,112,842,GREY);g.rect(14,24,84,96,'#ffffff');g.image('logo',18,28,76,88);
@@ -95,10 +96,12 @@ function receiptPdf(p,studentCopy){if(studentCopy===undefined)studentCopy=isStud
     /* faint emblem over the middle of the page */
     g.image('wm',203.6,285.9,300,305,{alpha:.07});
     if(cancelled)g.stamp('CANCELLED',{size:84,color:'#f6caca',x:352,y:480});
-  },{title:`Fee invoice ${p.rc}`,author:c.name,date:stamp});
+  };
+  if(gIn){draw(gIn);return''}
+  return makePdf(draw,{title:`Fee invoice ${p.rc}`,author:c.name,date:stamp});
 }
 async function savePdf(p){download(p.rc.replace(/[^\w-]+/g,'_')+'.pdf',pdfBytes(receiptPdf(p)),'application/pdf');}
-ACT.dlPdf=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)throw new Error('Receipt not found');guardStudent(p.studentId);if(p.needsRc)throw new Error('The invoice is not issued yet: the office must add the invoice no.');savePdf(p)};
+ACT.dlPdf=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)throw new Error('Invoice not found');guardStudent(p.studentId);if(p.needsRc)throw new Error('The invoice is not issued yet: the office must add the invoice no.');savePdf(p)};
 
 /* ---------- email: real sending through /api/send-mail (SMTP, e.g. Gmail) when the server is set up, otherwise demo ----------
    Every email is listed in db.outbox (status Queued / Sending / Sent / Sent (demo) / Failed / Skipped).
@@ -150,7 +153,7 @@ function mailContent(rec,pw){
     /* change 1: the password follows the rule (mobile 5 digits @ batch start year) unless the office set another one; students cannot change it */
     const rule=pw&&pw===studentPwOf(s);
     return{subject:rec.subject,title:rec.why==='new'?`Welcome to the ${c.short} student portal`:rec.why==='reset'?'Your new portal password':'Your portal login details',name:s.name,
-      intro:rec.why==='new'?`Your student account at ${c.name} is ready. Use the login details below to sign in to the student portal, where you can see your fees, pay by UPI, download receipts and read college notices.`:rec.why==='reset'?'Your student portal password was reset by the college office. Use the details below to sign in.':'As requested, here are your student portal login details.',
+      intro:rec.why==='new'?`Your student account at ${c.name} is ready. Use the login details below to sign in to the student portal, where you can see your fees, pay by UPI, download invoices and read college notices.`:rec.why==='reset'?'Your student portal password was reset by the college office. Use the details below to sign in.':'As requested, here are your student portal login details.',
       rows:[['Name',s.name],['Enrolment no.',s.enrol],['Course',`${cr?cr.name:s.course} · Semester ${s.sem}`],['Batch',defaultBatch(s)],['Login ID',s.enrol,1],['Or sign in with',s.email],['Password',pw||'(not available, ask the office to resend)',1]],
       button:{label:'Open student portal',url:portalUrl()},notesTitle:'How to sign in',
       notes:['Open the portal and sign in with your enrolment no. (or email) and the password above.',...(rule?['Your password is the first 5 digits of your mobile number, then @, then the year your batch starts (for example 94290@2026).']:[]),'The password cannot be changed from the portal. If you forget it, contact the college office.','Add the portal to your phone: in Chrome tap "Install app", on iPhone Safari tap Share → "Add to Home Screen".','Never share your password. The college will never ask for it.']}}
@@ -160,12 +163,12 @@ function mailContent(rec,pw){
       rows:[['Name',u.name],['Role',u.role],['Courses',(u.courses||[]).map(id=>(course(id)||{}).name||id).join(', ')||'All'],['Username',u.username,1],['Password',pw||'(ask the administrator)',1]],
       button:{label:'Open the ERP',url:portalUrl()},notes:['You must choose your own password at the first sign-in.','Do not share your login with anyone.'],sign:'Administrator'}}
   if(rec.kind==='receipt'){const p=db.payments.find(x=>x.id===rec.paymentId);const I=rcptInfo(p,true);const cancelled=p.status==='CANCELLED';
-    return{subject:rec.subject,title:cancelled?'Fee receipt cancelled':'Fee payment received',name:s.name,
-      intro:cancelled?`Receipt ${p.rc} has been cancelled by the college office. The amount is no longer counted as paid.`:`Thank you. We have received your tuition fee payment. Your receipt is attached to this email as a PDF.`,
-      big:cancelled?{label:'Cancelled receipt',value:inr(p.amount),sub:p.cancelReason,tone:'bad'}:{label:'Amount paid',value:inr(p.amount),sub:inWords(p.amount)},
-      rows:[['Receipt no.',p.rc,1],['Invoice date',longD(p.invoiceDate)],['Student ID',s.enrol],['Course',I.cname.replace(' - ',' – ')],['Batch',batchOf(p)],['Semester fee',inr(I.fee)],['Balance due for this semester',inr(I.balance),1]],
-      button:{label:'View in student portal',url:portalUrl()},notes:cancelled?['If you think this is a mistake, please contact the accounts office.']:['Keep this receipt for your records.','Any balance can be paid by UPI from the student portal or at the college office.'],
-      pdf:receiptPdf(p,true),filename:`NPCTE-receipt-${p.rc}`.replace(/[^\w.-]+/g,'_')+'.pdf'}}
+    return{subject:rec.subject,title:cancelled?'Fee invoice cancelled':'Fee payment received',name:s.name,
+      intro:cancelled?`Invoice ${p.rc} has been cancelled by the college office. The amount is no longer counted as paid.`:`Thank you. We have received your tuition fee payment. Your invoice is attached to this email as a PDF.`,
+      big:cancelled?{label:'Cancelled invoice',value:inr(p.amount),sub:p.cancelReason,tone:'bad'}:{label:'Amount paid',value:inr(p.amount),sub:inWords(p.amount)},
+      rows:[['Invoice no.',p.rc,1],['Invoice date',longD(p.invoiceDate)],['Student ID',s.enrol],['Course',I.cname.replace(' - ',' – ')],['Batch',batchOf(p)],['Semester fee',inr(I.fee)],['Balance due for this semester',inr(I.balance),1]],
+      button:{label:'View in student portal',url:portalUrl()},notes:cancelled?['If you think this is a mistake, please contact the accounts office.']:['Keep this invoice for your records.','Any balance can be paid by UPI from the student portal or at the college office.'],
+      pdf:receiptPdf(p,true),filename:`NPCTE-invoice-${p.rc}`.replace(/[^\w.-]+/g,'_')+'.pdf'}}
   if(rec.kind==='reminder'){const sm=feeSum(s);const due=sm.sems.filter(x=>x.started&&x.due>0);
     return{subject:rec.subject,title:rec.title||'Fee reminder',name:s.name,intro:rec.body||'This is a reminder that your tuition fee is due.',
       big:{label:'Due now',value:inr(sm.payable),sub:sm.overdue?'Overdue':''},
@@ -175,7 +178,7 @@ function mailContent(rec,pw){
     return{subject:rec.subject,title:'Fee payment request',name:s.name,intro:`The college office has sent you a UPI payment request for your tuition fee. Tap the button below to pay with Google Pay, PhonePe, Paytm or any UPI app.`,
       big:{label:'Amount to pay',value:inr(o.amount),sub:`Semester ${o.sem}`},
       rows:[['Student ID',s.enrol],['Course',`${course(s.course).name} · Semester ${o.sem}`],['Valid until',fmtT(o.createdAt+UPI_TTL)]],
-      button:{label:'Pay '+inr(o.amount)+' now',url:payPageUrl(o)},notes:['The link works only until the time above. After that, pay from the student portal.','Your receipt is emailed to you as soon as the bank confirms the payment.']}}
+      button:{label:'Pay '+inr(o.amount)+' now',url:payPageUrl(o)},notes:['The link works only until the time above. After that, pay from the student portal.','Your invoice is emailed to you as soon as the bank confirms the payment.']}}
   throw new Error('Unknown email');
 }
 function queueMail(o){
@@ -208,7 +211,7 @@ async function deliver(id,pw){
 function credMailHtml(s){if(!s||!s.cred)return'';const o=db.outbox.find(x=>x.id===s.cred.mailId)||s.cred;
   return`<span data-credmail="${E(s.id)}">${mailPill(o.status)} <span class="muted">Login email to ${E(o.to||s.email)}${o.error?' · '+E(o.error):''}${o.sentAt?' · '+E(fmtT(o.sentAt)):''}</span></span>`}
 function mailPill(st){return pill(st,/^Sent/.test(st)?'good':st==='Failed'?'bad':st==='Skipped'?'warn':'')}
-function mailLineHtml(p){const o=db.outbox.find(x=>x.paymentId===p.id);if(!o)return`<span class="muted">Receipt email not sent yet</span>`;return`${mailPill(o.status)} <span class="muted">${o.error?E(o.error):'PDF to '+E(o.to.join(', '))}${o.sentAt?' · '+E(fmtT(o.sentAt)):''}</span>`}
+function mailLineHtml(p){const o=db.outbox.find(x=>x.paymentId===p.id);if(!o)return`<span class="muted">Invoice email not sent yet</span>`;return`${mailPill(o.status)} <span class="muted">${o.error?E(o.error):'PDF to '+E(o.to.join(', '))}${o.sentAt?' · '+E(fmtT(o.sentAt)):''}</span>`}
 const mailLine=p=>`<div class="maillive" data-mailpay="${E(p.id)}" style="margin-top:10px;font-size:13px">${mailLineHtml(p)}</div>`;
 function refreshMailUi(){$$('.maillive').forEach(el=>{const p=db.payments.find(x=>x.id===el.dataset.mailpay);if(p)el.innerHTML=mailLineHtml(p)})}
-ACT.emailReceipt=el=>{need('fees.view');const p=db.payments.find(x=>x.id===el.dataset.id);if(p&&p.needsRc)throw new Error('Add the invoice no. first');const s=stu(p.studentId);const r=queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Fee receipt ${p.rc} - ${db.college.short}`});save();refreshMailUi();toast(r.status==='Skipped'?'No email address on file':'Receipt is being emailed to '+s.email,r.status==='Skipped')};
+ACT.emailReceipt=el=>{need('fees.view');const p=db.payments.find(x=>x.id===el.dataset.id);if(p&&p.needsRc)throw new Error('Add the invoice no. first');const s=stu(p.studentId);const r=queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Fee invoice ${p.rc} - ${db.college.short}`});save();refreshMailUi();toast(r.status==='Skipped'?'No email address on file':'Invoice is being emailed to '+s.email,r.status==='Skipped')};

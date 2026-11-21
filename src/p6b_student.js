@@ -17,8 +17,8 @@ function viewStudentHome(){
 function viewStudentFees(){
   const s=me();const sm=feeSum(s);const pays=db.payments.filter(p=>p.studentId===s.id).sort((a,b)=>b.entryAt-a.entryAt);
   return head('My fees',`Tuition fee: total ${inr(sm.total)} · paid ${inr(sm.paid)} · due now ${inr(sm.payable)}`)+payRequestsHtml(s)+semCards(s,{pay:true})+
-  `<div class="panel" style="margin-top:16px"><h2>Receipts</h2><div class="list">${pays.map(p=>`<div class="li"><div><b>${p.needsRc?'Payment received':E(p.rc)} · ${inr(p.amount)}</b><small>Tuition fee · Semester ${p.sem} · Batch ${E(batchOf(p))} · invoice ${fmtD(p.invoiceDate)}</small></div><div class="actions nowrap">${p.status==='SUCCESS'?(p.needsRc?pill('Invoice being issued','warn'):''):payPill(p.status)}<button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button>${p.needsRc?'':`<button class="btn sm" data-act="dlPdf" data-id="${E(p.id)}">PDF</button>`}</div></div>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
-  <p class="note">Paying with UPI: the payment counts as soon as the bank confirms it. The college office then checks it and issues your invoice (receipt). Its invoice date is the next day (college rule).</p>`;
+  `<div class="panel" style="margin-top:16px"><h2>Invoices</h2><div class="list">${pays.map(p=>`<div class="li"><div><b>${p.needsRc?'Payment received':E(p.rc)} · ${inr(p.amount)}</b><small>Tuition fee · Semester ${p.sem} · Batch ${E(batchOf(p))} · invoice ${fmtD(p.invoiceDate)}</small></div><div class="actions nowrap">${p.status==='SUCCESS'?(p.needsRc?pill('Invoice being issued','warn'):''):payPill(p.status)}<button class="btn sm" data-act="viewReceipt" data-id="${E(p.id)}">View</button>${p.needsRc?'':`<button class="btn sm" data-act="dlPdf" data-id="${E(p.id)}">PDF</button>`}</div></div>`).join('')||'<p class="note">No payments yet.</p>'}</div></div>
+  <p class="note">Paying with UPI: the payment counts as soon as the bank confirms it. The college office then checks it and issues your invoice. Its invoice date is the next day (college rule).</p>`;
 }
 /* payment requests the office sent to this student (UPI QR orders still open) */
 function payRequestsHtml(s){expireOrders();const l=db.upiOrders.filter(o=>o.studentId===s.id&&o.sentAt&&orderLive(o));if(!l.length)return'';
@@ -26,7 +26,7 @@ function payRequestsHtml(s){expireOrders();const l=db.upiOrders.filter(o=>o.stud
 ACT.payReq=el=>{const o=orderOf(el.dataset.id);guardStudent(o&&o.studentId);if(!orderLive(o))throw new Error('This request has expired. Ask the office for a new one, or pay from your fee card.');upiDialog(o)};
 ACT.payNow=el=>{const s=me();const m=semSummary(s,+el.dataset.sem);if(!(m.due>0))throw new Error('Nothing due for this semester');
   dialog(`<h3>Pay semester ${m.sem} tuition fee</h3><p class="muted" style="margin:0 0 10px">${m.started?'Due':'Upcoming (pay in advance)'} ${inr(m.due)}. You can pay the full amount or a part.</p>
-   <form data-form="upiPay" data-sem="${m.sem}" class="grid" style="gap:10px">${F('amount','Amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}"`})}
+   <form data-form="upiPay" data-sem="${m.sem}" class="grid" style="gap:10px">${F('amount','Amount (₹)',{val:m.due/100,req:true,attrs:`inputmode="decimal" max="${m.due/100}"`})}${F('note','Remarks (optional)',{attrs:'maxlength="200" placeholder="Anything the office should know"'})}
    <p class="note" style="margin:0">Invoice date will be ${fmtD(upiInvoiceDate(Date.now()))}.</p><div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Cancel</button><button class="btn primary">Continue to UPI</button></div></form>`,'Pay fee')};
 function viewStudentNotices(){
   const s=me(),u=cur();const l=studentNotices(s);const r=new Set(u.readNotices||[]);const un=l.filter(n=>!r.has(n.id)).length;

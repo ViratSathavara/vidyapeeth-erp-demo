@@ -7,7 +7,7 @@
    ===================================================================== */
 const NT_MAX=80;
 const NT_CATS=[
- {k:'payment',l:'Payment received',g:'fees'},{k:'payfail',l:'Payment failed',g:'fees'},{k:'cancel',l:'Receipt cancelled',g:'fees'},
+ {k:'payment',l:'Payment received',g:'fees'},{k:'payfail',l:'Payment failed',g:'fees'},{k:'cancel',l:'Invoice cancelled',g:'fees'},
  {k:'datechange',l:'Invoice date changed',g:'fees'},{k:'reminder',l:'Fee reminder',g:'fees'},{k:'due',l:'Fee due / overdue',g:'fees'},
  {k:'notice',l:'Notice',g:'notices'},{k:'credentials',l:'Login details',g:'other'},{k:'mailfail',l:'Email failed',g:'other'},
  {k:'enquiry',l:'Admission enquiry',g:'other'},{k:'security',l:'Security',g:'other'},{k:'system',l:'System',g:'other'}];

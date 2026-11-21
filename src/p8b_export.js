@@ -25,16 +25,16 @@ EXPORTS['fees.collect']={title:'Fee collection',perm:'fees.view',rows:()=>colRow
 EXPORTS['fees.dues']={title:'Pending dues',perm:'fees.view',rows:()=>duesFiltered(),cols:()=>[...stuCols().map(c=>['phone','cat','fund'].includes(c.k)?{...c,def:true}:c),
   XC('sems','Semesters due','text',r=>r.sm.sems.filter(x=>x.started&&x.due>0).map(x=>`Sem ${x.sem} ${inr(x.due)}${x.overdue?' (overdue)':''}`).join('; '),1,'Fees'),
   XC('oldest','Oldest due date','date',r=>(r.sm.sems.find(x=>x.started&&x.due>0)||{}).dueDate||'',0,'Fees'),XC('over','Overdue','text',r=>yesNo(r.sm.overdue),1,'Fees'),XC('due','Due now','money',r=>r.sm.payable,1,'Fees')]};
-const payCols=g=>[XC('rc','Receipt no','text',p=>rcShow(p),1,'Invoice'),XC('date','Invoice date','date',p=>p.invoiceDate,1,'Invoice'),XC('entry','Entry time','datetime',p=>p.entryAt,0,'Invoice'),
+const payCols=g=>[XC('rc','Invoice no','text',p=>rcShow(p),1,'Invoice'),XC('date','Invoice date','date',p=>p.invoiceDate,1,'Invoice'),XC('entry','Entry time','datetime',p=>p.entryAt,0,'Invoice'),
   XC('name','Student name','text',p=>stu(p.studentId).name,1,'Student'),XC('enrol','Enrolment no','text',p=>stu(p.studentId).enrol,1,'Student'),XC('course','Course','text',p=>course(stu(p.studentId).course).name,1,'Course'),
   XC('batch','Batch','text',p=>batchOf(p),1,'Course'),XC('sem','Semester','int',p=>p.sem,1,'Course'),XC('cat','Category','text',p=>stu(p.studentId).category,0,'Student'),XC('fund','Funding','text',p=>fundLabel(stu(p.studentId).funding),0,'Student'),
   XC('ref','Admission reference','text',p=>stu(p.studentId).ref||'',0,'Student'),
   XC('mode','Mode','text',p=>modeName(p.mode),1,'Payment'),XC('amount','Amount','money',p=>p.amount,1,'Payment'),XC('exp','Expense now','money',p=>payExp(p),0,'Payment'),XC('cih','Cash in hand','money',p=>payCih(p),0,'Payment'),XC('tobank','To bank','money',p=>payToBank(p),0,'Payment'),XC('status','Status','text',p=>({SUCCESS:'Success',CANCELLED:'Cancelled',FAILED:'Failed'}[p.status]||p.status),1,'Payment'),
   XC('dep','Deposited','text',p=>payToBank(p)>0?yesNo(p.depositId):'',0,'Payment'),XC('chq','Cheque no','text',p=>p.chequeNo||'',0,'Payment'),XC('bank','Bank','text',p=>p.bank||'',0,'Payment'),
   XC('chqd','Cheque date','date',p=>p.chequeDate||'',0,'Payment'),XC('upi','UPI ref','text',p=>p.upiRef||'',0,'Payment'),XC('reason','Expense / reason','text',p=>p.reason||'',0,'Payment'),
-  XC('note','Office note','text',p=>p.note||'',0,'Payment'),XC('by','Entered by','text',p=>p.by||'',0,'Payment'),XC('cancel','Cancel reason','text',p=>p.cancelReason||'',0,'Payment')];
+  XC('note','Remarks','text',p=>remarksText(p),0,'Payment'),XC('by','Entered by','text',p=>p.by||'',0,'Payment'),XC('cancel','Cancel reason','text',p=>p.cancelReason||'',0,'Payment')];
 const modeTotals=(l,get)=>{const ok=l.filter(x=>get(x).status==='SUCCESS');return[...PAY_MODES.map(m=>[modeName(m)+' (successful)',sum(ok.filter(x=>get(x).mode===m),x=>get(x).amount)]),['Of cash: expense now',sum(ok,x=>payExp(get(x)))],['Of cash: cash in hand',sum(ok,x=>payCih(get(x)))]]};
-EXPORTS['fees.receipts']={title:'Receipts',perm:'fees.view',rows:()=>receiptsFiltered(),cols:()=>payCols(),okRow:p=>p.status==='SUCCESS',summary:l=>modeTotals(l,p=>p)};
+EXPORTS['fees.receipts']={title:'Invoices',perm:'fees.view',rows:()=>receiptsFiltered(),cols:()=>payCols(),okRow:p=>p.status==='SUCCESS',summary:l=>modeTotals(l,p=>p)};
 EXPORTS['audit.tx']={title:'Transactions audit',perm:'audit.view',rows:()=>txFiltered().map(r=>r.rec),cols:()=>payCols(),okRow:p=>p.status==='SUCCESS',summary:l=>modeTotals(l,p=>p),
   sub:()=>{const f=txFilter();return`${f.from?fmtD(f.from):'Start'} to ${f.to?fmtD(f.to):fmtD(today())}${f.modes.length?' · '+f.modes.map(modeName).join(', '):''}`}};
 /* change 7: the cash book (Audit → Cash) */
@@ -91,9 +91,12 @@ function expFiltersHtml(k){const F=EXP_FILTERS[k];if(!F)return'';
     if(d.type==='modes')return`<fieldset class="field fs-plain"><legend class="label">${E(d.label)}</legend><div class="chkrow">${PAY_MODES.map(m=>`<label class="chk"><input type="checkbox" value="${m}" data-change="expFm" ${a} ${v.includes(m)?'checked':''}> ${E(modeName(m))}</label>`).join('')}</div></fieldset>`;
     return`<label class="field exp-q">${lab}<input type="search" value="${E(v)}" data-live="expFl" ${a} placeholder="Name, number, reason…"></label>`}).join('')}
 const expRows=X=>withFilters(ui.expF,()=>X.rows());
-function expRecount(){const box=$('.exp');if(!box)return;const k=box.dataset.key,X=EXPORTS[k];const n=expRows(X).length;
-  const c=$('#expN');if(c)c.textContent=n.toLocaleString('en-IN')+' row'+(n===1?'':'s');const ft=$('#expFtext');if(ft)ft.textContent=expFilterText(k);
-  const b=$('[data-act=expGo]');if(b){b.textContent=`Export ${n.toLocaleString('en-IN')} row${n===1?'':'s'}`;b.disabled=!n||!$$('input[name=expCol]:checked').length}}
+const expFmtNow=()=>($('input[name=expFmt]:checked')||{}).value||'xlsx';
+CHG.expFmtCh=()=>{const f=expFmtNow();const w=$('#expFields');if(w)w.hidden=f==='inv'||f==='rep';expRecount()};
+function expRecount(){const box=$('.exp');if(!box)return;const k=box.dataset.key,X=EXPORTS[k];const fm=expFmtNow();const rows=expRows(X);
+  const n=fm==='inv'&&X.inv?withFilters(ui.expF,()=>X.inv(rows)).length:rows.length;const unit=fm==='inv'?'invoice':fm==='rep'?'student report':'row';
+  const c=$('#expN');if(c)c.textContent=n.toLocaleString('en-IN')+' '+unit+(n===1?'':'s');const ft=$('#expFtext');if(ft)ft.textContent=expFilterText(k);
+  const b=$('[data-act=expGo]');if(b){b.textContent=`Export ${n.toLocaleString('en-IN')} ${unit}${n===1?'':'s'}`;b.disabled=!n||(fm!=='inv'&&fm!=='rep'&&!$$('input[name=expCol]:checked').length)}}
 const expFSet=(sc,k,v)=>{ui.expF[sc]=ui.expF[sc]||{};ui.expF[sc][k]=v;expRecount()};
 CHG.expF=el=>expFSet(el.dataset.sc,el.dataset.k,el.value);
 LIVE.expFl=el=>expFSet(el.dataset.sc,el.dataset.k,el.value);
@@ -102,12 +105,67 @@ const expFDraw=k=>{const w=$('#expFilters');if(w)w.innerHTML=expFiltersHtml(k);e
 ACT.expFReset=()=>{const k=$('.exp').dataset.key;ui.expF=expSnap(k);expFDraw(k)};
 ACT.expFClear=()=>{const k=$('.exp').dataset.key;const F=EXP_FILTERS[k];F.list().forEach(d=>{const s=xfScope(F,d);ui.expF[s]=ui.expF[s]||{};ui.expF[s][d.k]=d.type==='modes'?[]:''});expFDraw(k)};
 
+/* ---------- change 18: every invoice of the listed rows in one PDF, in the same order as the list (office copy) ----------
+   Student lists: each student's invoices (oldest first) in the list's order. Invoice lists: the rows themselves.
+   Left out: UPI payments still waiting for their invoice no. Cancelled invoices are included, marked CANCELLED. */
+const INV_MAX=1000,REP_MAX=500;
+const invOk=p=>!!p&&!!p.rc&&!p.needsRc&&(p.status==='SUCCESS'||p.status==='CANCELLED');
+const invOrder=(a,b)=>a.invoiceDate<b.invoiceDate?-1:a.invoiceDate>b.invoiceDate?1:(a.entryAt||0)-(b.entryAt||0);
+const invsOfStudent=s=>db.payments.filter(p=>p.studentId===s.id&&invOk(p)).sort(invOrder);
+const uniqP=l=>{const seen=new Set();return l.filter(p=>p&&!seen.has(p.id)&&seen.add(p.id))};
+const pdfStamp=()=>{const d=new Date();return`${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`};
+function invoicesPdf(list,title){return makePdf(g=>list.forEach((p,i)=>{if(i)g.newPage();receiptPdf(p,false,g)}),{title,author:db.college.name,date:pdfStamp()})}
+['students','fees.collect','fees.dues'].forEach(k=>{EXPORTS[k].inv=rows=>uniqP(rows.flatMap(r=>invsOfStudent(r.s)));EXPORTS[k].rep=rows=>rows.map(r=>r.s)});
+['fees.receipts','audit.tx'].forEach(k=>{EXPORTS[k].inv=rows=>uniqP(rows.filter(invOk))});
+EXPORTS['audit.cash'].inv=rows=>uniqP(rows.filter(e=>e.kind==='Fee cash').map(e=>e.pay).filter(invOk));
+
+/* ---------- change 19: a student's full report (details, semester fees, invoices) as PDF or Excel ---------- */
+const stuDetails=s=>[['Enrolment no.',s.enrol],['Name',s.name],['Mobile',s.phone],['Email',s.email],['Gender',{F:'Female',M:'Male',O:'Other'}[s.gender]||''],['Date of birth',s.dob?fmtD(s.dob):''],
+  ['Course',courseAc(s.course)],['Batch',defaultBatch(s)],['Semester',String(s.sem)],['Category',s.category],['Funding',fundLabel(s.funding)+(s.scholarshipNote?' · '+s.scholarshipNote:'')],
+  ['Admission reference',s.ref||''],['Status',statusLabel[s.status]],['Address',s.address||'']];
+const stuPays=s=>db.payments.filter(p=>p.studentId===s.id&&p.status!=='FAILED').sort(invOrder);
+function drawStudentReport(g,s,PW,PH){
+  const MX=36,W=PW-MX*2,NAVY='#14284b',INK='#1b2437',MUT='#5b6679',LINE='#d7dce5',BOX='#eef1f7';const c=db.college,sm=feeSum(s);let y=0;
+  const fit=(t,w,size,bold)=>{t=pdfSafe(t);if(pdfW(t,size,bold)<=w)return t;while(t.length>1&&pdfW(t+'...',size,bold)>w)t=t.slice(0,-1);return t+'...'};
+  const head=()=>{g.rect(0,0,PW,52,NAVY);g.rect(0,52,PW,3,'#b8862b');g.text(MX,24,c.name,{size:12,bold:true,color:'#ffffff'});g.text(MX,40,`${c.short} ERP · ${(c.rcpt&&c.rcpt.address)||c.address}`,{size:8,color:'#d7def0'});
+    g.text(PW-MX,24,'Student report',{size:12,bold:true,color:'#f3d9a4',align:'right'});g.text(PW-MX,40,`Generated ${fmtT(Date.now())} by ${cur()?cur().name:'-'}`,{size:8,color:'#d7def0',align:'right'});y=80};
+  const need=h=>{if(y+h>PH-36){g.newPage();head();g.text(MX,y,fit(s.name+' · '+s.enrol+' (continued)',W,10,true),{size:10,bold:true,color:INK});y+=18}};
+  head();
+  g.text(MX,y,fit(s.name,W,16,true),{size:16,bold:true,color:INK});y+=18;g.text(MX,y,fit(`${s.enrol} · ${course(s.course).name} · Batch ${defaultBatch(s)} · Semester ${s.sem} · ${statusLabel[s.status]}`,W,9.5),{size:9.5,color:MUT});y+=20;
+  /* details: two columns */
+  const det=stuDetails(s),half=Math.ceil(det.length/2),cw=W/2;g.rect(MX,y-12,W,half*16+12,BOX);
+  det.forEach(([k,v],i)=>{const col=i<half?0:1,row=i%half;const x=MX+10+col*cw,yy=y+row*16+2;g.text(x,yy,k,{size:8,color:MUT});g.text(x+92,yy,fit(v||'-',cw-108,9),{size:9,color:INK})});y+=half*16+16;
+  /* semester fees */
+  const table=(title,cols,rows,foot)=>{need(44);g.text(MX,y,title,{size:11,bold:true,color:NAVY});y+=10;
+    const ws=cols.map(c=>c[1]*W),hd=()=>{g.rect(MX,y,W,18,NAVY);let x=MX;cols.forEach((c,i)=>{const r=c[2];g.text(r?x+ws[i]-5:x+5,y+12.5,c[0],{size:8,bold:true,color:'#ffffff',align:r?'right':'left'});x+=ws[i]});y+=18};hd();
+    rows.forEach((r,j)=>{if(y+16>PH-36){g.newPage();head();hd()}if(j%2)g.rect(MX,y,W,16,'#f6f7fb');let x=MX;r.forEach((v,i)=>{const rt=cols[i][2];g.text(rt?x+ws[i]-5:x+5,y+11.5,fit(v,ws[i]-10,8.5),{size:8.5,color:INK,align:rt?'right':'left'});x+=ws[i]});y+=16});
+    if(!rows.length){g.text(MX+5,y+12,'None',{size:8.5,color:MUT});y+=18}
+    if(foot){g.line(MX,y,MX+W,y,LINE,.8);y+=13;g.text(MX+5,y,foot,{size:9,bold:true,color:INK});y+=8}y+=14};
+  table('Semester fees',[['Sem',.1],['Fee',.18,1],['Paid',.18,1],['Due',.18,1],['Due date',.18],['Status',.18]],
+    sm.sems.map(m=>[String(m.sem),amt2(m.amount),amt2(m.paid),amt2(m.due),m.dueDate?fmtD(m.dueDate):'-',m.overdue?'Overdue':m.status]),
+    `Total fee Rs. ${amt2(sm.total)} · paid Rs. ${amt2(sm.paid)} · due now Rs. ${amt2(sm.payable)}`);
+  const pays=stuPays(s);
+  table('Invoices',[['Invoice no.',.14],['Date',.12],['Sem',.06],['Batch',.11],['Mode',.1],['Amount',.13,1],['Status',.12],['Remarks',.22]],
+    pays.map(p=>[p.rc||'Pending',fmtD(p.invoiceDate),String(p.sem),batchOf(p),modeName(p.mode),amt2(p.amount),p.needsRc?'To confirm':p.status==='SUCCESS'?'Paid':p.status==='CANCELLED'?'Cancelled':p.status,remarksText(p)]));
+}
+function studentReportsPdf(list,title){const PW=595,PH=842;return makePdf(g=>list.forEach((s,i)=>{if(i)g.newPage();drawStudentReport(g,s,PW,PH)}),{title,author:db.college.name,date:pdfStamp()})}
+function studentXlsx(s){const sm=feeSum(s);const pays=stuPays(s);
+  const semCols=[XC('sem','Semester','int',m=>m.sem),XC('fee','Fee','money',m=>m.amount),XC('paid','Paid','money',m=>m.paid),XC('due','Due','money',m=>m.due),XC('dd','Due date','date',m=>m.dueDate||''),XC('st','Status','text',m=>m.overdue?'Overdue':m.status)];
+  const invCols=[XC('rc','Invoice no','text',p=>rcShow(p)),XC('date','Invoice date','date',p=>p.invoiceDate),XC('sem','Semester','int',p=>p.sem),XC('batch','Batch','text',p=>batchOf(p)),XC('mode','Mode','text',p=>modeName(p.mode)),
+    XC('amount','Amount','money',p=>p.amount),XC('status','Status','text',p=>p.needsRc?'To confirm':({SUCCESS:'Paid',CANCELLED:'Cancelled'}[p.status]||p.status)),XC('ref','Cheque no / UPI ref','text',p=>p.chequeNo||p.upiRef||''),XC('rem','Remarks','text',p=>remarksText(p))];
+  const X={okRow:p=>p.status==='SUCCESS'};
+  return xlsxBook([{name:'Details',meta:stuDetails(s)},{name:'Semester fees',cols:semCols,t:expTable({},semCols,sm.sems)},{name:'Invoices',cols:invCols,t:expTable(X,invCols,pays)}])}
+ACT.stuDl=el=>{need('students.view','download student data');const s=stu(el.dataset.id);if(!s)throw new Error('Student not found');guardStudent(s.id);const f=el.dataset.f;const name=`npcte-student-${s.enrol}-${today()}`;
+  if(f==='xlsx')download(name+'.xlsx',studentXlsx(s),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  else download(name+'.pdf',pdfBytes(studentReportsPdf([s],'Student report '+s.enrol)),'application/pdf');
+  log('Student data downloaded','Student',s.enrol,null,{format:f==='xlsx'?'Excel':'PDF'});save();toast(`${s.name}: ${f==='xlsx'?'Excel':'PDF'} downloaded`)};
+
 /* ---------- the dialog ---------- */
 const EXP_KEY=k=>'npcte_export_'+k;
 function expSaved(k){try{return JSON.parse(lsGet(EXP_KEY(k))||'null')}catch(e){return null}}
 ACT.expOpen=el=>{const k=el.dataset.key,X=EXPORTS[k];if(!X)throw new Error('Nothing to export');need(X.perm,'export '+X.title.toLowerCase());
   ui.expF=expSnap(k);const hasF=!!EXP_FILTERS[k];
-  const cols=X.cols(),n=expRows(X).length,sv=expSaved(k)||{};const on=new Set(sv.cols&&sv.cols.some(c=>cols.some(x=>x.k===c))?sv.cols:cols.filter(c=>c.def).map(c=>c.k));const fmt=sv.fmt||'xlsx';
+  const cols=X.cols(),n=expRows(X).length,sv=expSaved(k)||{};const on=new Set(sv.cols&&sv.cols.some(c=>cols.some(x=>x.k===c))?sv.cols:cols.filter(c=>c.def).map(c=>c.k));const fmt=['inv','rep'].includes(sv.fmt)&&!X[sv.fmt]?'xlsx':(sv.fmt||'xlsx');
   const groups=[...new Set(cols.map(c=>c.g))];
   drawer(`<button class="btn x" data-act="close">Close</button><h2>Export · ${E(X.title)}</h2>
    <p class="muted" style="margin:2px 0 14px"><b id="expN">${n.toLocaleString('en-IN')} row${n===1?'':'s'}</b> · sorted as on screen, all pages${hasF?' · filters below (start from the screen; changes here are for this file only)':''}</p>
@@ -115,19 +173,28 @@ ACT.expOpen=el=>{const k=el.dataset.key,X=EXPORTS[k];if(!X)throw new Error('Noth
     ${hasF?`<div class="exp-head"><span class="label">Filters</span><span class="actions"><button type="button" class="btn sm" data-act="expFReset">Use screen filters</button><button type="button" class="btn sm" data-act="expFClear">Clear filters</button></span></div>
     <div class="exp-filters" id="expFilters">${expFiltersHtml(k)}</div><p class="note exp-ftext">In the file: <span id="expFtext">${E(expFilterText(k))}</span></p>`:''}
     <span class="label">File type</span>
-    <div class="exp-fmt" role="radiogroup" aria-label="File type">${[['xlsx','Excel','.xlsx · dates and amounts as real values'],['csv','CSV','.csv · plain text, opens anywhere'],['pdf','PDF','.pdf · ready to print or share']].map(([v,t,d])=>`<label class="exp-opt"><input type="radio" name="expFmt" value="${v}" ${fmt===v?'checked':''}><span><b>${t}</b><small>${d}</small></span></label>`).join('')}</div>
-    <div class="exp-head"><span class="label">Fields to include <b id="expCount"></b></span><span class="actions"><button type="button" class="btn sm" data-act="expSet" data-v="all">Select all</button><button type="button" class="btn sm" data-act="expSet" data-v="none">Clear</button><button type="button" class="btn sm" data-act="expSet" data-v="def">Default</button></span></div>
+    <div class="exp-fmt" role="radiogroup" aria-label="File type">${[['xlsx','Excel','.xlsx · dates and amounts as real values'],['csv','CSV','.csv · plain text, opens anywhere'],['pdf','PDF','.pdf · ready to print or share'],...(X.inv?[['inv','Invoices (PDF)','every invoice of this list, one per page, same order']]:[]),...(X.rep?[['rep','Student reports (PDF)','one report per student: details, fees, invoices']]:[])].map(([v,t,d])=>`<label class="exp-opt"><input type="radio" name="expFmt" value="${v}" data-change="expFmtCh" ${fmt===v?'checked':''}><span><b>${t}</b><small>${d}</small></span></label>`).join('')}</div>
+    <div id="expFields" ${fmt==='inv'||fmt==='rep'?'hidden':''}><div class="exp-head"><span class="label">Fields to include <b id="expCount"></b></span><span class="actions"><button type="button" class="btn sm" data-act="expSet" data-v="all">Select all</button><button type="button" class="btn sm" data-act="expSet" data-v="none">Clear</button><button type="button" class="btn sm" data-act="expSet" data-v="def">Default</button></span></div>
     ${groups.map(g=>`<fieldset class="exp-g">${g?`<legend>${E(g)}</legend>`:''}<div class="exp-cols">${cols.filter(c=>c.g===g).map(c=>`<label class="exp-col"><input type="checkbox" name="expCol" value="${E(c.k)}" data-def="${c.def?1:0}" data-change="expCount" ${on.has(c.k)?'checked':''}><span>${E(c.label)}</span></label>`).join('')}</div></fieldset>`).join('')}
-    <p class="note">Columns come out in the order shown here. Amounts are in rupees; ${X.okRow?'totals count successful payments only':'money columns get a total row'}.</p>
+    <p class="note">Columns come out in the order shown here. Amounts are in rupees; ${X.okRow?'totals count successful payments only':'money columns get a total row'}.</p></div>
     <div class="actions exp-go"><button type="button" class="btn primary big" data-act="expGo" ${n?'':'disabled'}>Export ${n.toLocaleString('en-IN')} row${n===1?'':'s'}</button><button type="button" class="btn" data-act="close">Cancel</button></div>
    </div>`,true,'Export '+X.title);
   CHG.expCount();
 };
-CHG.expCount=()=>{const all=$$('input[name=expCol]'),n=all.filter(i=>i.checked).length;const c=$('#expCount');if(c)c.textContent=`(${n} of ${all.length})`;const b=$('[data-act=expGo]');if(b)b.disabled=!n||/^Export 0 /.test(b.textContent)};
+CHG.expCount=()=>{const all=$$('input[name=expCol]'),n=all.filter(i=>i.checked).length;const c=$('#expCount');if(c)c.textContent=`(${n} of ${all.length})`;const b=$('[data-act=expGo]');const f=expFmtNow();if(b)b.disabled=(!n&&f!=='inv'&&f!=='rep')||/^Export 0 /.test(b.textContent)};
 ACT.expSet=el=>{const v=el.dataset.v;$$('input[name=expCol]').forEach(i=>i.checked=v==='all'||(v==='def'&&i.dataset.def==='1'));CHG.expCount()};
 ACT.expGo=()=>{const box=$('.exp');const k=box.dataset.key,X=EXPORTS[k];need(X.perm,'export');
-  const keys=$$('input[name=expCol]:checked').map(i=>i.value);if(!keys.length)throw new Error('Tick at least one field');
-  const fmt=($('input[name=expFmt]:checked')||{}).value||'xlsx';const all=X.cols();const cols=keys.map(k=>all.find(c=>c.k===k)).filter(Boolean);
+  const keys=$$('input[name=expCol]:checked').map(i=>i.value);const fmt=expFmtNow();
+  /* change 18 / 19: all invoices of the list, or one report per student, in one PDF (same order as the list, same filters) */
+  if(fmt==='inv'||fmt==='rep'){const ftext=EXP_FILTERS[k]?expFilterText(k):'';
+    const list=withFilters(ui.expF,()=>{const rows=X.rows();return fmt==='inv'?X.inv(rows):X.rep(rows)});
+    if(!list.length)throw new Error(fmt==='inv'?'No invoices in this list':'No students in this list');
+    const max=fmt==='inv'?INV_MAX:REP_MAX;if(list.length>max)throw new Error(`${list.length} ${fmt==='inv'?'invoices':'students'}: narrow the filters (at most ${max} in one PDF)`);
+    const slug=X.title.toLowerCase().replace(/[^a-z0-9]+/g,'-'),kind=fmt==='inv'?'invoices':'student-reports';const nm=`npcte-${slug===kind?slug:slug+'-'+kind}-${today()}`;
+    download(nm+'.pdf',pdfBytes(fmt==='inv'?invoicesPdf(list,X.title+' - invoices'):studentReportsPdf(list,X.title+' - student reports')),'application/pdf');
+    lsSet(EXP_KEY(k),JSON.stringify({cols:keys,fmt}));log('List exported',X.title,'',null,{rows:list.length,format:fmt==='inv'?'Invoices PDF':'Student reports PDF',filters:ftext||'screen'});save();
+    closeLayer();toast(`${X.title}: ${list.length} ${fmt==='inv'?'invoices':'student reports'} in one PDF`);return}
+  if(!keys.length)throw new Error('Tick at least one field');const all=X.cols();const cols=keys.map(k=>all.find(c=>c.k===k)).filter(Boolean);
   lsSet(EXP_KEY(k),JSON.stringify({cols:keys,fmt}));
   const name=`npcte-${X.title.toLowerCase().replace(/[^a-z0-9]+/g,'-')}-${today()}`;const ftext=EXP_FILTERS[k]?expFilterText(k):'';
   /* the whole file is built with the export's filters in place (rows, sub-title, totals) */
@@ -169,7 +236,8 @@ const xmlEsc=s=>String(s).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'').replace(/[
 const colName=i=>{let s='';i++;while(i){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26)}return s};
 const xlDate=iso=>{const [y,m,d]=String(iso).slice(0,10).split('-').map(Number);return(Date.UTC(y,m-1,d)-Date.UTC(1899,11,30))/864e5};
 const xlDateTime=ts=>{const d=istDate(ts);const p=new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(ts));const g=t=>+p.find(x=>x.type===t).value;return xlDate(d)+(g('hour')*60+g('minute'))/1440};
-function xlsxOf(title,cols,t,meta){
+/* change 19: a workbook with any number of sheets: {name, cols, t} = a table with header + filter, {name, meta} = two columns */
+function xlsxBook(sheets){
   const S={head:1,date:2,datetime:3,money:4,int:5,tot:6,totMoney:7,text:0};
   const cell=(r,i,v,c,total)=>{const ref=colName(i)+r;if(v===''||v==null)return'';
     if(typeof v==='string'&&(total||c.type==='text'||!c))return`<c r="${ref}" t="inlineStr"${total?` s="${S.tot}"`:''}><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`;
@@ -178,14 +246,17 @@ function xlsxOf(title,cols,t,meta){
     if(c.type==='date')return`<c r="${ref}" s="${S.date}"><v>${xlDate(v)}</v></c>`;
     if(c.type==='datetime')return`<c r="${ref}" s="${S.datetime}"><v>${xlDateTime(v).toFixed(6)}</v></c>`;
     return`<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`};
-  const head=`<row r="1">${cols.map((c,i)=>`<c r="${colName(i)}1" t="inlineStr" s="${S.head}"><is><t>${xmlEsc(c.label)}</t></is></c>`).join('')}</row>`;
-  const body=t.body.map((r,j)=>`<row r="${j+2}">${r.map((v,i)=>cell(j+2,i,v,cols[i])).join('')}</row>`).join('');
-  const foot=t.foot.map((r,j)=>{const n=t.body.length+3+j;return`<row r="${n}">${r.map((v,i)=>v==null?'':cell(n,i,v,cols[i],true)).join('')}</row>`}).join('');
-  const width=cols.map((c,i)=>{const w=Math.max(c.label.length+2,...t.body.slice(0,300).map(r=>expText(c,r[i]).length+1),c.type==='money'?14:c.type==='datetime'?19:c.type==='date'?12:6);return Math.min(60,w)});
-  const last=colName(cols.length-1)+(t.body.length+1);
-  const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  const tableXml=(cols,t)=>{
+    const head=`<row r="1">${cols.map((c,i)=>`<c r="${colName(i)}1" t="inlineStr" s="${S.head}"><is><t>${xmlEsc(c.label)}</t></is></c>`).join('')}</row>`;
+    const body=t.body.map((r,j)=>`<row r="${j+2}">${r.map((v,i)=>cell(j+2,i,v,cols[i])).join('')}</row>`).join('');
+    const foot=t.foot.map((r,j)=>{const n=t.body.length+3+j;return`<row r="${n}">${r.map((v,i)=>v==null?'':cell(n,i,v,cols[i],true)).join('')}</row>`}).join('');
+    const width=cols.map((c,i)=>{const w=Math.max(c.label.length+2,...t.body.slice(0,300).map(r=>expText(c,r[i]).length+1),c.type==='money'?14:c.type==='datetime'?19:c.type==='date'?12:6);return Math.min(60,w)});
+    const last=colName(cols.length-1)+(t.body.length+1);
+    return`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
-<cols>${width.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${head}${body}${foot}</sheetData><autoFilter ref="A1:${last}"/></worksheet>`;
+<cols>${width.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${head}${body}${foot}</sheetData><autoFilter ref="A1:${last}"/></worksheet>`};
+  const kvXml=meta=>`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="22" customWidth="1"/><col min="2" max="2" width="90" customWidth="1"/></cols><sheetData>${meta.map(([a,b],i)=>`<row r="${i+1}"><c r="A${i+1}" t="inlineStr" s="${S.tot}"><is><t>${xmlEsc(a)}</t></is></c><c r="B${i+1}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(b??'')}</t></is></c></row>`).join('')}</sheetData></worksheet>`;
   const styles=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <${"s"}tyleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <numFmts count="3"><numFmt numFmtId="164" formatCode="dd\\-mm\\-yyyy"/><numFmt numFmtId="165" formatCode="dd\\-mm\\-yyyy\\ hh:mm\\ AM/PM"/><numFmt numFmtId="166" formatCode="[&gt;=10000000]&quot;₹&quot;##\\,##\\,##\\,##0.00;[&gt;=100000]&quot;₹&quot;##\\,##\\,##0.00;&quot;₹&quot;##,##0.00"/></numFmts>
@@ -195,17 +266,16 @@ function xlsxOf(title,cols,t,meta){
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
 <cellXfs count="8"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="1" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="166" fontId="2" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/></cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></${"s"}tyleSheet>`;
-  const sn=xmlEsc(title.replace(/[\\\/?*\[\]:]/g,' ').slice(0,31));
-  /* change 13: a second sheet "Filters" saying which filters made this file */
-  const ms=meta&&meta.length?`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="2" width="110" customWidth="1"/></cols><sheetData>${meta.map(([a,b],i)=>`<row r="${i+1}"><c r="A${i+1}" t="inlineStr" s="${S.tot}"><is><t>${xmlEsc(a)}</t></is></c><c r="B${i+1}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(b)}</t></is></c></row>`).join('')}</sheetData></worksheet>`:'';
+  const used=new Set();const sn=s=>{let n=xmlEsc(String(s).replace(/[\\\/?*\[\]:]/g,' ').slice(0,31))||'Sheet';let k=n,i=2;while(used.has(k.toLowerCase()))k=n.slice(0,28)+' '+(i++);used.add(k.toLowerCase());return k};
+  const sh=sheets.map((x,i)=>({name:sn(x.name),xml:x.meta?kvXml(x.meta):tableXml(x.cols,x.t),table:!x.meta,last:x.meta?'':`$${colName(x.cols.length-1)}$${x.t.body.length+1}`,i}));
   return zipOf([
-    ['[Content_Types].xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>${ms?'<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>':''}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
+    ['[Content_Types].xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sh.map(x=>`<Override PartName="/xl/worksheets/sheet${x.i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
     ['_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
-    ['xl/workbook.xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sn}" sheetId="1" r:id="rId1"/>${ms?'<sheet name="Filters" sheetId="2" r:id="rId3"/>':''}</sheets><definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'${sn.replace(/'/g,"''")}'!$A$1:$${colName(cols.length-1)}$${t.body.length+1}</definedName></definedNames></workbook>`],
-    ['xl/_rels/workbook.xml.rels',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${ms?'<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>':''}</Relationships>`],
-    ['xl/worksheets/sheet1.xml',sheet],...(ms?[['xl/worksheets/sheet2.xml',ms]]:[]),['xl/styles.xml',styles]]);
+    ['xl/workbook.xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sh.map(x=>`<sheet name="${x.name}" sheetId="${x.i+1}" r:id="rId${x.i+10}"/>`).join('')}</sheets><definedNames>${sh.filter(x=>x.table).map(x=>`<definedName name="_xlnm._FilterDatabase" localSheetId="${x.i}" hidden="1">'${x.name.replace(/'/g,"''")}'!$A$1:${x.last}</definedName>`).join('')}</definedNames></workbook>`],
+    ['xl/_rels/workbook.xml.rels',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${sh.map(x=>`<Relationship Id="rId${x.i+10}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${x.i+1}.xml"/>`).join('')}</Relationships>`],
+    ...sh.map(x=>[`xl/worksheets/sheet${x.i+1}.xml`,x.xml]),['xl/styles.xml',styles]]);
 }
+function xlsxOf(title,cols,t,meta){return xlsxBook([{name:title,cols,t},...(meta&&meta.length?[{name:'Filters',meta}]:[])])}
 
 /* ---------- PDF: a table over as many pages as needed, landscape when the table is wide ---------- */
 function expPdf(X,cols,t,ftext){

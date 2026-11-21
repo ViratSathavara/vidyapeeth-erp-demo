@@ -5,8 +5,8 @@ const DEMO_ACCTS=()=>{const s=db.students[0];return[['admin','admin123','Super A
 const LOGO=()=>`<div class="seal" aria-hidden="true">N</div>`;
 function renderLogin(msg){
   document.body.classList.remove('rail-lock','portal');const c=db.college;document.title='Sign in · '+c.short+' ERP';
-  $('#root').innerHTML=`<div class="login"><section class="login-art"><div><div class="brandline">${LOGO()}<span>${E(c.trust)}</span></div><h1>${E(c.name)}</h1><p>B.Ed and M.Ed college office: students, semester fees, receipts, audit and notices in one place. Students use the same address as an app on their phone.</p></div>
-   <div class="points"><span>Cash, Cheque, UPI and Expense in one ledger</span><span>Receipt PDF and email for every payment</span><span>Live notifications for staff and students</span></div>
+  $('#root').innerHTML=`<div class="login"><section class="login-art"><div><div class="brandline">${LOGO()}<span>${E(c.trust)}</span></div><h1>${E(c.name)}</h1><p>B.Ed and M.Ed college office: students, semester fees, invoices, audit and notices in one place. Students use the same address as an app on their phone.</p></div>
+   <div class="points"><span>Cash, Cheque, UPI and Expense in one ledger</span><span>Invoice PDF and email for every payment</span><span>Live notifications for staff and students</span></div>
    <small class="artfoot">${E(c.address)} · ${E(c.phone)}</small></section>
    <section class="login-form"><div><h2>Sign in</h2><p class="muted" style="margin:4px 0 0">Staff use their username. Students use their enrolment number or email.</p></div>
    <div id="loginInstall" class="install-holder"></div>

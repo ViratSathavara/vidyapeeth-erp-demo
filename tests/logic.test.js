@@ -38,7 +38,7 @@ ok(A.handleUpiWebhook(A.gwEvent(o.id,'captured'))===null,'idempotent');
 const due0=A.semSummary(s,m.sem).due;A.cancelPayment(p,'Wrong entry');ok(A.semSummary(s,m.sem).due===due0+100000,'cancel restores due');
 // new student fee default & edit sem2
 login('principal');
-const d={enrol:'BED26-901',name:'Test Student',gender:'F',dob:'',phone:'9876543210',email:'t.s@example.com',address:'',course:'BED',admissionYear:'2026',sem:'1',category:'General',funding:'CASH',fee1:'30000',fee2:'25000',fee3:'30000',fee4:'30000',due1:'',due2:'',due3:'',due4:''};
+const d={enrol:'EN26000901',name:'Test Student',gender:'F',dob:'',phone:'9876543210',email:'t.s@example.com',address:'',course:'BED',admissionYear:'2026',sem:'1',category:'General',funding:'CASH',fee1:'30000',fee2:'25000',fee3:'30000',fee4:'30000',due1:'',due2:'',due3:'',due4:''};
 A.ui.photo='';const v=A.readStudentForm(null,d,null);ok(v.fees[1].amount===2500000&&v.fees[0].amount===3000000,'sem2 25000');
 const ns=A.makeStudent({...v,fees:v.fees.map(x=>x.amount),dues:v.fees.map(x=>x.due)});ok(A.feeSum(ns).total===11500000,'total 1,15,000');
 // SC shows funding; general hides
@@ -117,20 +117,20 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  login('clerk');
  const base={gender:'F',dob:'',address:'',course:'BED',admissionYear:'2026',sem:'1',category:'General',funding:'CASH',fee1:'30000',fee2:'30000',fee3:'30000',fee4:'30000',due1:'',due2:'',due3:'',due4:''};
  const nOut=db.outbox.length,nRefs=db.refs.length;
- quiet(()=>A.FORM.addStudent({dataset:{}},{...base,enrol:'bed26-777',name:'Ref Test One',phone:'9429086515',email:'ref.one@example.com',ref:'  Trustee   Shah '}));
- const s1=db.students.find(x=>x.enrol==='BED26-777');const u1=s1&&db.users.find(u=>u.id===s1.userId);
- ok(s1&&u1&&u1.username==='bed26-777','enrolment no. typed by the office is used as login ID');
+ quiet(()=>A.FORM.addStudent({dataset:{}},{...base,enrol:'en26000777',name:'Ref Test One',phone:'9429086515',email:'ref.one@example.com',ref:'  Trustee   Shah '}));
+ const s1=db.students.find(x=>x.enrol==='EN26000777');const u1=s1&&db.users.find(u=>u.id===s1.userId);
+ ok(s1&&u1&&u1.username==='en26000777','enrolment no. typed by the office is used as login ID');
  ok(u1&&u1.password==='94290@2026'&&u1.mustChange===false,'new student password follows the rule, no forced change');
  ok(db.outbox.length===nOut+1&&db.outbox[0].kind==='credentials'&&db.outbox[0].to[0]==='ref.one@example.com','credentials email queued on create');
  const r1=s1&&A.refByName('trustee shah');ok(r1&&s1.refId===r1.id&&s1.ref==='Trustee Shah'&&/^REF\d{3}$/.test(r1.id)&&db.refs.length===nRefs+1,'new reference saved with an id');
- let th=false;try{A.readStudentForm(null,{...base,enrol:'BED26-777',name:'Dup',phone:'9876500000',email:'dup@example.com'},null)}catch(e){th=/already used/.test(e.message)}ok(th,'duplicate enrolment no. refused');
+ let th=false;try{A.readStudentForm(null,{...base,enrol:'EN26000777',name:'Dup',phone:'9876500000',email:'dup@example.com'},null)}catch(e){th=/already used/.test(e.message)}ok(th,'duplicate enrolment no. refused');
  th=false;try{A.readStudentForm(null,{...base,enrol:'',name:'No Enrol',phone:'9876500000',email:'ne@example.com'},null)}catch(e){th=/enrolment/i.test(e.message)}ok(th,'enrolment no. required');
- quiet(()=>A.FORM.addStudent({dataset:{}},{...base,enrol:'BED26-778',name:'Ref Test Two',phone:'9876512345',email:'ref.two@example.com',ref:'TRUSTEE SHAH'}));
- const s2=db.students.find(x=>x.enrol==='BED26-778');ok(s2&&s2.refId===r1.id&&db.refs.length===nRefs+1,'same reference name reuses the saved id');
+ quiet(()=>A.FORM.addStudent({dataset:{}},{...base,enrol:'EN26000778',name:'Ref Test Two',phone:'9876512345',email:'ref.two@example.com',ref:'TRUSTEE SHAH'}));
+ const s2=db.students.find(x=>x.enrol==='EN26000778');ok(s2&&s2.refId===r1.id&&db.refs.length===nRefs+1,'same reference name reuses the saved id');
  A.ui.f.students={ref:r1.id,status:''};const fl=A.studentsFiltered();ok(fl.length===2&&fl.every(x=>x.s.refId===r1.id),'students list filters by reference');
  A.ui.f.students={ref:'',status:'ACTIVE'};ok(/All references/.test(A.viewStudents()),'reference filter shown');
  // sign in with enrolment no. and with email
- A.sesSet('');quiet(()=>A.FORM.login({},{u:'BED26-777',p:'94290@2026'}));ok(A.cur()&&A.cur().id===u1.id,'student signs in with enrolment no.');
+ A.sesSet('');quiet(()=>A.FORM.login({},{u:'EN26000777',p:'94290@2026'}));ok(A.cur()&&A.cur().id===u1.id,'student signs in with enrolment no.');
  A.sesSet('');quiet(()=>A.FORM.login({},{u:'ref.one@example.com',p:'94290@2026'}));ok(A.cur()&&A.cur().id===u1.id,'student signs in with email');
  // student cannot change the password, and the profile has no change-password form
  th=false;try{A.FORM.myPw({reset(){}},{old:'94290@2026',p1:'newpass123',p2:'newpass123'})}catch(e){th=/office/.test(e.message)}ok(th&&u1.password==='94290@2026','student cannot change own password');
@@ -145,7 +145,7 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  quiet(()=>A.FORM.stuPwReset({dataset:{id:s1.id}},{kind:'default'}));ok(u1.password==='94290@2026','reset back to the default rule');
  ok(db.audit.some(a=>a.action==='Student password reset'&&!JSON.stringify(a).includes('Office@123')),'reset logged without the password');
  // migration of data saved by the old version: seed password -> rule, emailed password untouched, references built, Principal gets the permission
- const old=db.students.find(x=>x.enrol!=='BED26-777'&&x.enrol!=='BED26-778');const uo=db.users.find(u=>u.id===old.userId);uo.password='student123';uo.mustChange=true;u1.password='Emailed#1';
+ const old=db.students.find(x=>x.enrol!=='EN26000777'&&x.enrol!=='EN26000778');const uo=db.users.find(u=>u.id===old.userId);uo.password='student123';uo.mustChange=true;u1.password='Emailed#1';
  db.mig={};delete db.refs;old.ref='Old Ref';db.roles.Principal=db.roles.Principal.filter(p=>p!=='students.password');A.save();A.load();const D=A.db;
  const uo2=D.users.find(u=>u.id===uo.id),so2=D.students.find(x=>x.id===old.id);
  ok(uo2.password===A.studentPassword(so2.phone,so2.admissionYear)&&uo2.mustChange===false,'migration: seed password moves to the rule');
@@ -303,4 +303,43 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  ok(D.audit.some(a=>a.action==='UPI payment confirmed'&&a.entityId==='6103'),'confirmation is in the activity log');
  // old receipts keep their numbers
  ok(D.payments.filter(p=>p.imported||/^\d{4}$/.test(p.rc)).length>0,'existing receipt numbers unchanged');}
+// ---- changes 15-20 (22-11-2026) ----
+{const D=A.db;const lg=un=>{const u=D.users.find(x=>x.username===un);A.sesSet(u.id);return u};lg('clerk');A.setPickedCourse('');
+ const pages=pdf=>(pdf.match(/\/Type \/Page /g)||[]).length;
+ // 15: Invoice instead of Receipt in what people read
+ ok(A.feeTabs().some(t=>t[0]==='receipts'&&t[1]==='Invoices')&&!A.feeTabs().some(t=>/Receipt/.test(t[1])),'tab reads "Invoices" (code id unchanged)');
+ A.ui.tab.fees='receipts';const hv=A.viewFees();ok(/>Invoices/.test(hv)&&!/>Receipts?</.test(hv),'Invoices screen has no "Receipt" wording');
+ // 16: bank accounts
+ ok(A.courseAc('BED')==='B.Ed · A/c 710'&&A.courseAc('MED')==='M.Ed · A/c 953','B.Ed A/c 710, M.Ed A/c 953');
+ A.ui.tab.audit='cash';A.ui.f.dep={p:'all'};ok(/A\/c 710/.test(A.viewAudit())&&/A\/c 953/.test(A.viewAudit()),'Cash tab shows the account numbers');
+ lg('admin');let th=false;try{A.FORM.course({dataset:{id:'BED'}},{name:'B.Ed',years:'2',active:'on',acct:'71'})}catch(e){th=/3 digits/.test(e.message)}ok(th&&A.courseAc('BED')==='B.Ed · A/c 710','bank account must be 3 digits');lg('clerk');
+ // 17: remarks
+ const sB=D.students.find(s=>s.course==='BED'&&s.status==='ACTIVE'&&A.feeSum(s).sems.some(m=>m.due>=300000));const sem=A.feeSum(sB).sems.find(m=>m.due>=300000).sem;
+ ok(/Remarks \(optional\)/.test(A.collectForm(sB,A.semSummary(sB,sem),'CASH'))&&/Remarks \(optional\)/.test(A.collectForm(sB,A.semSummary(sB,sem),'CHEQUE'))&&/Remarks \(optional\)/.test(A.collectForm(sB,A.semSummary(sB,sem),'UPI')),'cash, cheque and UPI forms have Remarks');
+ A.ui.col={sid:sB.id,sem,mode:'CASH'};A.ui.split=null;try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'1000',batch:'2025-27',invoiceDate:'2026-11-20',rc:'7301',note:'Paid by father'})}catch(e){if(!/null|innerHTML|firstElementChild/.test(e.message))console.log('collect',e.message)}
+ const pc=D.payments.find(x=>x.rc==='7301');ok(pc&&pc.note==='Paid by father'&&A.remarksText(pc)==='Paid by father','cash remark saved');
+ A.sesSet(sB.userId);const o=A.provider.createOrder(sB,sem,100000,'student');o.source='portal';o.studentNote='Paying semester fee late, sorry';const up=A.handleUpiWebhook(A.gwEvent(o.id,'captured'));
+ ok(up.studentNote==='Paying semester fee late, sorry','student remark kept on the UPI payment');lg('clerk');
+ ok(/Remark: Paying semester fee late/.test(A.feeConfirm()),'the confirm list shows the student remark');
+ try{A.FORM.rcConfirm({dataset:{id:up.id}},{rc:'7302',cnote:'UTR checked in bank statement'})}catch(e){if(!/null|innerHTML|firstElementChild/.test(e.message))console.log('confirm',e.message)}
+ ok(up.rc==='7302'&&up.confirmNote==='UTR checked in bank statement'&&A.remarksText(up)==='Student: Paying semester fee late, sorry · At confirmation: UTR checked in bank statement','confirm remark saved with the student remark');
+ A.ui.f['fees.receipts']={};const rv=A.viewFees();ok(/Paid by father/.test(rv)&&/UTR checked in bank statement/.test(rv),'Invoices table shows the remarks');
+ ok(A.receiptPdf(pc,false).includes('Remarks: Paid by father')&&!A.receiptPdf(pc,true).includes('Paid by father'),'remarks on the office copy only, not the student copy');
+ // 18: all invoices of a list in one PDF, same order as the list
+ const X=A.EXPORTS['fees.receipts'];const pb=D.payments.find(x=>x.status==='SUCCESS'&&x.rc).batch;A.ui.expF={'fees.receipts':{batch:pb}};
+ const rows=A.withFilters(A.ui.expF,()=>X.rows());const inv=A.withFilters(A.ui.expF,()=>X.inv(rows));
+ ok(inv.length>0&&inv.every(q=>A.batchOf(q)===pb&&q.rc)&&inv.map(q=>q.id).join()===rows.filter(q=>q.rc&&!q.needsRc).map(q=>q.id).join(),'invoices PDF follows the filtered list and its order');
+ const pdf=A.invoicesPdf(inv,'test');ok(pdf.startsWith('%PDF')&&pages(pdf)===inv.length,'one page per invoice ('+inv.length+')');
+ const XS=A.EXPORTS.students;A.ui.expF={students:{batch:A.feeSum&&D.students[0]&&(D.students[0].admissionYear+'-'+String(D.students[0].admissionYear+2).slice(2)),status:''}};
+ const srows=A.withFilters(A.ui.expF,()=>XS.rows());const sinv=A.withFilters(A.ui.expF,()=>XS.inv(srows));const order=srows.map(r=>r.s.id).filter(id=>sinv.some(q=>q.studentId===id));
+ ok(sinv.length>0&&[...new Set(sinv.map(q=>q.studentId))].join()===order.join(),'students list: each student\'s invoices in the list\'s order');
+ ok(!sinv.some(q=>q.needsRc),'invoices still waiting for their number are left out');
+ // 19: one student's data, and student reports for a filtered list
+ const xl=Buffer.from(A.studentXlsx(sB)).toString('latin1');ok(['name="Details"','name="Semester fees"','name="Invoices"'].every(s=>xl.includes(s))&&xl.includes(sB.enrol)&&xl.includes('sheet3.xml'),'student Excel: Details, Semester fees, Invoices');
+ const rp=A.studentReportsPdf([sB],'x');ok(rp.startsWith('%PDF')&&rp.includes(sB.enrol)&&rp.includes('Student report')&&rp.includes('Semester fees'),'student report PDF');
+ const reps=A.withFilters(A.ui.expF,()=>XS.rep(srows));const rpdf=A.studentReportsPdf(reps,'x');ok(reps.length===srows.length&&pages(rpdf)>=reps.length,'student reports: one per student in the filtered list');
+ // 20: enrolment number format
+ th=false;try{A.readEnrol('BED26-001',null)}catch(e){th=/EN followed by 8 digits/.test(e.message)}ok(th,'old format refused for a new student');
+ ok(A.readEnrol('en24022099',null)==='EN24022099','EN + 8 digits accepted (upper-cased)');
+ const old=D.students.find(s=>!/^EN\d{8}$/.test(s.enrol));ok(A.readEnrol(old.enrol,old)===old.enrol.toUpperCase(),'an existing old number can stay when the student is edited');}
 console.log('pass',pass,'fail',fail);
