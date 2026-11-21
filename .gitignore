@@ -4,3 +4,4 @@ _legacy-demo/
 __pycache__/
 *.pyc
 *.xlsx
+.env
