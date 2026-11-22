@@ -465,3 +465,39 @@ input.inl[type=date]{width:152px;padding-right:28px;background-position:right 7p
 .rc-field .rc-note{display:block;font-size:12.5px;color:var(--muted);line-height:1.4}.rc-field .rc-note b{color:var(--fg)}
 .rc-state{display:block;font-size:12.5px;font-weight:600;min-height:1em}.rc-state.ok{color:var(--good)}.rc-state.bad{color:var(--bad)}
 .rc-field input{font-family:var(--mono);letter-spacing:.08em;max-width:220px}
+
+/* ---------- change 22 (22-11-2026): phones show cards, tablets and up keep the table ----------
+   One card per row, the same structure for every list: title (student / name / invoice) on top, then the fields
+   in two columns (small column name above the value), long text across the full width, buttons in a row at the
+   bottom, and a row-select tick box in the top-right corner. Cells are labelled by labelTables() in p2a_ui.js. */
+@media (max-width:640px){
+  .tablewrap{overflow:visible;background:none}
+  .tablewrap>table{min-width:0;display:block}
+  .tablewrap>table>thead{display:none}
+  .tablewrap>table>tbody{display:grid;gap:10px}
+  .tablewrap>table>tbody>tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 14px;position:relative;padding:12px 14px;background:var(--bg);border:1px solid var(--line);border-radius:14px}
+  .tablewrap>table>tbody>tr.click:hover{background:var(--sunk)}
+  .tablewrap>table>tbody>tr.click:active{transform:scale(.995)}
+  .tablewrap>table>tbody>tr>td,.tablewrap>table>tbody>tr>th{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0;max-width:none;padding:0;border:0;background:transparent!important;white-space:normal;overflow-wrap:anywhere;text-align:left;font-size:14px;line-height:1.35}
+  .tablewrap>table>tbody>tr>td::before,.tablewrap>table>tbody>tr>th::before{content:attr(data-label);font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);line-height:1.2}
+  .tablewrap>table>tbody>tr>td[data-label=""]::before,.tablewrap>table>tbody>tr>td:not([data-label])::before{display:none}
+  .tablewrap>table>tbody>tr>td[data-full]{grid-column:1/-1}
+  .tablewrap>table>tbody>tr>td[data-empty]{display:none}
+  .tablewrap>table>tbody>tr>td[data-primary]{grid-column:1/-1;order:-1;flex-direction:row;align-items:center;flex-wrap:wrap;gap:6px 10px;font-weight:700;font-size:15px;padding:0 34px 10px 0;border-bottom:1px solid var(--line)}
+  .tablewrap>table>tbody>tr>td[data-primary]::before{display:none}
+  .tablewrap>table>tbody>tr>td[data-check]{position:absolute;top:10px;right:10px;width:auto;z-index:1}
+  .tablewrap>table>tbody>tr>td[data-check]::before{display:none}
+  .tablewrap>table>tbody>tr>td[data-check] input{width:22px;height:22px}
+  .tablewrap>table>tbody>tr>td[data-actions]{grid-column:1/-1;order:99;flex-direction:row;flex-wrap:wrap;gap:8px;padding-top:10px;border-top:1px dashed var(--line)}
+  .tablewrap>table>tbody>tr>td[data-actions] .actions{flex-wrap:wrap;white-space:normal}
+  .tablewrap>table>tbody>tr>td.empty{grid-column:1/-1;align-items:center;text-align:center;color:var(--muted);padding:14px 0}
+  .tablewrap>table>tbody>tr:has(>td.empty:only-child){background:transparent;border-style:dashed}
+  .tablewrap>table>tbody>tr>td .split-line{white-space:normal}
+  .tablewrap>table>tbody>tr>td .who{text-align:left}
+  .tablewrap>table>tbody>tr>td .pill{white-space:normal;height:auto}
+  .tablewrap>table>tbody>tr>td input[type=date],.tablewrap>table>tbody>tr>td input[type=number],.tablewrap>table>tbody>tr>td input[type=text],.tablewrap>table>tbody>tr>td select{width:100%;max-width:100%}
+  /* tick-box grids (permissions, notifications): the column name sits next to its tick box */
+  .tablewrap>table.matrix>tbody>tr>td:has(>input[type=checkbox]){flex-direction:row-reverse;justify-content:flex-end;align-items:center;gap:8px}
+  .tablewrap>table.matrix>tbody>tr>td:has(>input[type=checkbox])::before{font-size:12px;text-transform:none;letter-spacing:0;color:var(--fg)}
+  .tablewrap>table.matrix>tbody>tr>td:first-child{min-width:0;max-width:none}
+}

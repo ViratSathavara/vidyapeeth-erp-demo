@@ -269,7 +269,8 @@ Same website, installable like the ABCD learning app:
 
 ## 12. Non-functional requirements
 
-- **Responsive & mobile-first:** every screen usable at 360 px; **tables keep their columns at every width (change 10): a wide table scrolls sideways inside its own box with edge shadows, cells stay on one line, only long free text wraps in a fixed width**; no horizontal page scroll; big tap targets.
+- **Responsive & mobile-first:** every screen usable at 360 px; **phones (up to 640 px) show every list as cards (change 22)**: main item on top, the other columns as labelled fields in two columns, long text full width, buttons at the bottom, row tick box top-right; **tablets and larger keep the table (change 10)**: a wide table scrolls sideways inside its own box with edge shadows, cells stay on one line, only long free text wraps in a fixed width; no horizontal page scroll; big tap targets.
+- **Typing (change 21):** a redraw while someone types (live search, filters) never replaces the box being typed in, so phone keyboards and Gujarati / Hindi typing tools do not repeat the word; live checks that rewrite a value wait until the word is finished.
 - **User-friendly:** simple English labels (Gujarati UI toggle = later phase), clear empty states, confirm dialogs for cancel actions, toasts for success/error, light/dark mode.
 - **Security:** bcrypt passwords, JWT httpOnly + secure cookies, CSRF protection, rate-limit login, server-side permission checks on every route, input validation (zod), no secrets in frontend, Helmet, CORS locked to the app domain, daily DB backup.
 - **Performance:** paginated tables (server-side), indexes on studentId, invoiceDate, mode, collegeId.

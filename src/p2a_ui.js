@@ -167,6 +167,35 @@ ACT.closeDialog=el=>{const d=$('#dlg .dialog[data-hold]:not(.leaving)');if(d&&el
 ACT.tab=el=>{ui.tab[el.dataset.key]=el.dataset.id;ev('Page','Opened tab',humanize(el.dataset.key)+' › '+el.textContent.trim().slice(0,40));renderPage();playEnter('swap')};
 ACT.go=el=>{closeLayer();go(el.dataset.to)};
 
+/* ---------- phones (up to 640px): every data table is shown as cards (change 22) ----------
+   Each cell gets its column name (data-label). Per row: the main cell (student / name / invoice) is the card
+   title, plain cells are fields in a two-column grid, long text spans the full width, buttons go to a row at the
+   bottom, and a row-select tick box sits in the top-right corner. Tablets and larger keep the table (CSS only). */
+const CARD_TITLE=/^(student|name|invoice|notice|title|user|login|reference|permission|role|event)/i;
+function labelTables(root=document){
+  $$('.tablewrap>table',root).forEach(t=>{
+    const heads=$$('thead th',t).map(h=>h.textContent.replace(/[▲▼↑↓]/g,'').trim());
+    $$('tbody tr:not([data-l])',t).forEach(tr=>{
+      tr.dataset.l='1';const tds=[...tr.children].filter(c=>c.tagName==='TD'||c.tagName==='TH');let col=0;
+      tds.forEach((td,i)=>{
+        const span=td.colSpan||1;const lab=span>1?'':(heads[col]||'');td.dataset.label=lab;col+=span;
+        const txt=td.textContent.replace(/\s+/g,' ').trim();
+        const hasUi=td.querySelector('input,select,textarea,button,svg,img,.bar,.stack');
+        if(span>1||tds.length===1)td.dataset.full='1';
+        else if(!txt&&!hasUi)td.dataset.empty='1';
+        else if(i===0&&!txt&&td.querySelector('input[type=checkbox]')&&!td.querySelector('button'))td.dataset.check='1';
+        else if(!lab&&td.querySelector('button,.btn')&&!td.querySelector('input:not([type=hidden]),select'))td.dataset.actions='1';
+        else if(td.classList.contains('wrap')||txt.length>34)td.dataset.full='1';
+      });
+      const ok=td=>!td.dataset.check&&!td.dataset.empty&&!td.dataset.actions&&!(td.colSpan>1);
+      const prim=tds.find(td=>ok(td)&&td.querySelector('.who'))||tds.find(td=>ok(td)&&CARD_TITLE.test(td.dataset.label||''))||tds.find(ok);
+      if(prim&&tds.length>1){prim.dataset.primary='1';delete prim.dataset.full}
+    });
+  });
+}
+new MutationObserver(()=>labelTables()).observe(document.documentElement,{childList:true,subtree:true});
+document.addEventListener('DOMContentLoaded',()=>labelTables());
+
 /* ---------- motion helpers ---------- */
 const calm=()=>matchMedia('(prefers-reduced-motion:reduce)').matches;
 function playEnter(kind){
