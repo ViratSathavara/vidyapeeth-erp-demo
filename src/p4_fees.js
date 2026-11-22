@@ -398,7 +398,7 @@ function rcNoteHtml(cid){const L=lastRc(cid);if(!L)return'No invoice no. used ye
   return`Last invoice no.: <b class="mono">${E(L.last.rc)}</b> <span class="muted">(${fmtD(at)} · ${E(L.last.rcBy||L.last.by||'')})</span>${L.hi!==L.last&&rcKey(L.hi.rc)!==rcKey(L.last.rc)?` · highest used: <b class="mono">${E(L.hi.rc)}</b>`:''}`}
 function rcField(cid,exceptId){return`<div class="field rc-field"><label class="label" for="f_rc">Invoice no. *</label><input id="f_rc" name="rc" inputmode="numeric" pattern="[0-9]{4,5}" minlength="4" maxlength="5" required autocomplete="off" placeholder="4 or 5 digits" data-live="rcLive" data-c="${E(cid)}" ${exceptId?`data-x="${E(exceptId)}"`:''} aria-describedby="rcNote rcState">
   <small class="rc-note" id="rcNote">${rcNoteHtml(cid)}</small><small class="rc-state" id="rcState" role="status"></small></div>`}
-LIVE.rcLive=el=>{const s=$('#rcState');if(!s)return;const v=el.value.replace(/\D/g,'');if(v!==el.value)el.value=v;
+LIVE.rcLive=(el,e)=>{const s=$('#rcState');if(!s)return;const v=el.value.replace(/\D/g,'');if(v!==el.value&&!(e&&e.isComposing))el.value=v; /* never rewrite the box while the keyboard is still composing a word */
   if(v.length<4){s.textContent='';s.className='rc-state';return}
   try{rcCheck(v,el.dataset.c,el.dataset.x);s.textContent='✓ '+v+' is free';s.className='rc-state ok'}catch(e){s.textContent=e.message;s.className='rc-state bad'}};
 /* ---------- change 14: UPI payments waiting for the office to confirm them and add the invoice no. ---------- */

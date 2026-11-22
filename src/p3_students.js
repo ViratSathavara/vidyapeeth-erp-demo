@@ -38,7 +38,7 @@ ACT.pgTo=el=>{ui.f[el.dataset.scope].page=+el.dataset.p;renderPage();pgTop()};
 CHG.pgSel=el=>{ui.f[el.dataset.scope].page=+el.value;renderPage();pgTop()};
 CHG.pgPer=el=>{const f=ui.f[el.dataset.scope];const first=(f.page||0)*perOf(f);f.per=+el.value;f.page=Math.floor(first/f.per);renderPage()};
 CHG.sf=el=>{const f=ui.f[el.dataset.scope];f[el.dataset.k]=el.value;f.page=0;renderPage()};
-LIVE.sq=el=>{const f=ui.f[el.dataset.scope];f.q=el.value;f.page=0;clearTimeout(LIVE._t);LIVE._t=setTimeout(()=>{renderPage();const i=$(`[data-live=sq][data-scope="${el.dataset.scope}"]`);if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}},200)};
+LIVE.sq=el=>{const f=ui.f[el.dataset.scope];f.q=el.value;f.page=0;clearTimeout(LIVE._t);LIVE._t=setTimeout(()=>{renderPage();const i=$(`[data-live=sq][data-scope="${el.dataset.scope}"]`);if(i&&i!==document.activeElement){i.focus();i.setSelectionRange(i.value.length,i.value.length)}},200)}; /* the box being typed in is kept by renderPage, so the caret and the keyboard's word are not touched */
 const sel=(scope,k,label,opts)=>{const f=ui.f[scope];return`<select aria-label="${E(label)}" data-change="sf" data-scope="${E(scope)}" data-k="${E(k)}">${opts.map(([v,l])=>`<option value="${E(v)}" ${String(f[k])===String(v)?'selected':''}>${E(l)}</option>`).join('')}</select>`};
 const COURSE_OPTS=()=>[['','All courses'],...scopeCourses().map(c=>[c.id,c.name])];
 const SEM_OPTS_=()=>[['','All semesters'],...SEMS_ALL().map(n=>[n,'Semester '+n])];

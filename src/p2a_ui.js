@@ -158,6 +158,8 @@ document.addEventListener('submit',e=>{const f=e.target.closest('form[data-form]
   const go=()=>{const ok=run('Form',humanize(name)+' form',name,h,f,data);if(ok&&name!=='login')ev('Form',humanize(name)+' form','Saved');return ok};
   if(ONCE_FORMS.has(name))onceRun(f,go);else go()}});
 document.addEventListener('input',e=>{const el=e.target.closest('[data-live]');if(el&&LIVE[el.dataset.live])safe(LIVE[el.dataset.live],el,e)});
+/* phone keyboards and Gujarati/Hindi typing tools finish a word with compositionend; run the live handler once more with the final text */
+document.addEventListener('compositionend',e=>{const el=e.target.closest&&e.target.closest('[data-live]');if(el&&LIVE[el.dataset.live])safe(LIVE[el.dataset.live],el,{type:'input',isComposing:false})});
 document.addEventListener('change',e=>{const el=e.target.closest('[data-change]');if(el&&CHG[el.dataset.change]){if(!/^ev/.test(el.dataset.change))ev('Change',humanize(el.dataset.change),((el.name||el.id||'').replace(/^f_/,'')+' = '+(el.type==='checkbox'?(el.checked?'on':'off'):String(el.value).slice(0,60))).trim());run('Change',humanize(el.dataset.change),'',CHG[el.dataset.change],el,e)}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('.toast')?.remove();if($('#dlg').innerHTML){if($('#dlg .dialog[data-hold]:not(.leaving)'))return;closeDialog()}else if($('#layer').innerHTML)closeLayer();else railClose()}});
 ACT.close=closeLayer;

@@ -131,7 +131,35 @@ ACT.skip=()=>{if(!focusH1()){const pg=$('#page');if(pg){pg.tabIndex=-1;softFocus
 function courseSwitch(){const my=myCourses();if(my.length<2)return'';const p=pickedCourse();
   return`<label class="cswitch" title="Show data for"><span class="sr">Show data for</span><select data-change="pickCourse" aria-label="Show data for course"><option value="">${my.length===db.courses.length?'All courses':'All my courses'}</option>${my.map(id=>`<option value="${E(id)}" ${p===id?'selected':''}>${E(course(id).name)}</option>`).join('')}</select></label>`}
 CHG.pickCourse=el=>{setPickedCourse(el.value);ui.f={};ui.col=null;renderApp();toTop();toast('Showing '+scopeLabel())};
-function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();keepFocus(pg,()=>{pg.innerHTML=n?n[3]():'';enhanceFilters(pg)});renderNav()}
+/* Redraw a container but leave the field being typed in untouched (same element, same focus, same caret).
+   Replacing a focused input while a phone keyboard / Gujarati-Hindi typing tool is still composing a word
+   makes the keyboard type the word again ("vir" -> "virvir"). The same field is found in the new html; the
+   elements from the page down to that field stay, everything around them is replaced by the new html (so the
+   rest of the page may change freely, e.g. a table becoming "no results"). If the field is not in the new
+   html, or the path to it is shaped differently, it falls back to a plain redraw. */
+const FIELD_KEYS=['data-live','data-scope','data-cbx','name','id','type'];
+function swapKeep(pg,tmp,keep){
+  const twin=[...tmp.querySelectorAll(keep.tagName)].find(x=>FIELD_KEYS.every(k=>x.getAttribute(k)===keep.getAttribute(k)));if(!twin)return false;
+  const chain=(el,top)=>{const l=[];for(let x=el;x&&x!==top;x=x.parentNode)l.unshift(x);return l};
+  const oc=chain(keep,pg),nc=chain(twin,tmp);if(oc.length!==nc.length||oc[0].parentNode!==pg)return false;
+  if(oc.some((o,i)=>o.tagName!==nc[i].tagName))return false;
+  for(let i=0;i<oc.length;i++){
+    const oP=i?oc[i-1]:pg,nP=i?nc[i-1]:tmp,keepKid=oc[i],kids=[...nP.childNodes],at=kids.indexOf(nc[i]);
+    [...oP.childNodes].forEach(c=>{if(c!==keepKid)oP.removeChild(c)});
+    kids.slice(0,at).forEach(c=>oP.insertBefore(c,keepKid));kids.slice(at+1).forEach(c=>oP.appendChild(c));
+    const o=oc[i],n=nc[i];if(o===keep)break; /* the field itself keeps its own value, caret and attributes */
+    [...o.attributes].forEach(a=>{if(!n.hasAttribute(a.name))o.removeAttribute(a.name)});[...n.attributes].forEach(a=>{if(o.getAttribute(a.name)!==a.value)o.setAttribute(a.name,a.value)});
+  }
+  return true;
+}
+function redrawKeepTyping(pg,html,after){
+  const a=document.activeElement;
+  if(a&&pg.contains(a)&&a.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]),textarea')){
+    const tmp=document.createElement('div');tmp.innerHTML=html;if(after)after(tmp);if(swapKeep(pg,tmp,a))return;
+  }
+  pg.innerHTML=html;if(after)after(pg);
+}
+function renderPage(){const u=cur();if(!u)return renderLogin();let n=navFor(u).find(x=>x[0]===ui.route);if(!n){n=navFor(u)[0];ui.route=n[0]}const pg=$('#page');if(!pg)return renderApp();keepFocus(pg,()=>redrawKeepTyping(pg,n?n[3]():'',enhanceFilters));renderNav()}
 function go(route,tab){if(tab)ui.tab[route]=tab;const prev=ui.route;ui.route=route;ev('Page','Opened page',humanize(route)+(ui.tab[route]?' › '+humanize(ui.tab[route]):''));renderPage();window.scrollTo(0,0);playEnter('enter');const a=document.activeElement;if(route!==prev||!a||a===document.body)focusH1()}
 ACT.nav=el=>{closeLayer();railClose();go(el.dataset.id)};
 function refresh(){save();renderPage()}
@@ -154,7 +182,7 @@ function enhanceFilters(root){
     const body=document.createElement('div');body.className='fx-body';rest.forEach(k=>body.appendChild(k));
     const tog=document.createElement('button');tog.type='button';tog.className='btn fx-tog';tog.setAttribute('aria-expanded',String(!!ui.fxOpen[key]));
     tog.innerHTML=`<span class="fx-ic" aria-hidden="true"></span>Filters${n?` <b class="fx-n">${n}</b>`:''}`;
-    tog.addEventListener('click',()=>{const o=!el.classList.contains('open');el.classList.toggle('open',o);tog.setAttribute('aria-expanded',String(o));ui.fxOpen[key]=o});
+    tog.addEventListener('click',()=>{const el=tog.closest('.filters');if(!el)return;const o=!el.classList.contains('open');el.classList.toggle('open',o); /* looked up on click: a redraw while typing may move this button into the bar that was kept */tog.setAttribute('aria-expanded',String(o));ui.fxOpen[key]=o});
     el.classList.add('fx');if(ui.fxOpen[key])el.classList.add('open');
     if(search)search.after(tog);else el.prepend(tog);tog.after(body);
   });
