@@ -880,9 +880,36 @@ table.dense th,table.dense td{padding:7px 8px;font-size:13px}
 .inv-exp{margin-top:12px;border:1px solid #d3d6e6;border-radius:8px;padding:8px 12px}.inv-exp .lnk{color:var(--in)}
 .inv-notes{margin-top:14px}.inv-notes b{font-size:12.5px}
 .inv-notes ul{margin:4px 0 0;padding-left:16px;color:var(--mu);font-size:12px}.inv-notes li{margin:2px 0;overflow-wrap:anywhere}
-.inv-sign{margin:16px 0 0 auto;max-width:300px;text-align:right;display:flex;flex-direction:column;gap:6px}
-.inv-sign i{font:italic 11px/1.3 Georgia,"Times New Roman",serif;color:var(--mu);border-bottom:1px solid var(--ink);padding-bottom:6px}
+.inv-sign{margin:16px 0 0 auto;max-width:300px;text-align:right;display:flex;flex-direction:column;gap:4px}
+.inv-sign i{font:italic 11px/1.3 Georgia,"Times New Roman",serif;color:var(--mu)}
+.inv-sig{height:54px;display:flex;align-items:flex-end;justify-content:center;border-bottom:1px solid var(--ink);padding-bottom:2px}
+.inv-sig img{max-height:50px;max-width:100%;width:auto;height:auto;display:block}
+.inv-sign b{font-size:11.5px;font-weight:600;color:var(--ink);margin-top:2px}
 .inv-sign span{font-size:11px;color:var(--mu)}
+/* change 23: official signature (profile panel, signature dialog, staff logins) — paper stays white in dark mode so the ink reads like the invoice */
+.sig-paper{background:#fff;border:1px solid #d9dce6;border-radius:12px;min-height:96px;display:flex;align-items:flex-end;justify-content:center;padding:12px 16px 16px;background-image:linear-gradient(#fff calc(100% - 17px),#c9cede calc(100% - 17px),#c9cede calc(100% - 16px),#fff calc(100% - 16px))}
+.sig-paper.empty{align-items:center;padding:12px 16px}
+.sig-paper img{max-height:76px;max-width:100%;width:auto;height:auto;display:block}
+.sig-paper.empty{background-image:none;border-style:dashed;border-color:var(--field-line,#c9cede);background:var(--sunk)}.sig-paper.empty span{color:var(--muted,#6b7280);font-size:13px}
+.sig-pane{margin-top:12px}
+.sig-drop{display:flex;flex-direction:column;gap:4px;align-items:flex-start;border:1.5px dashed var(--field-line,#c9cede);border-radius:12px;padding:14px 16px;cursor:pointer;background:var(--sunk)}
+.sig-drop b{color:var(--accent);font-size:14.5px}.sig-drop small{color:var(--muted,#6b7280);line-height:1.45}
+.sig-drop:hover{border-color:var(--accent)}.sig-drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.sig-drop.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--sunk))}
+/* change 24: crop box over the uploaded photo */
+.sig-crop-area{display:flex;justify-content:center;background:var(--sunk);border:1px solid var(--line);border-radius:12px;padding:14px}
+.sig-crop{position:relative;display:inline-block;line-height:0;max-width:100%;touch-action:none;user-select:none;-webkit-user-select:none}
+.sig-src{display:block;max-width:100%;max-height:min(46vh,380px);width:auto;height:auto;border-radius:4px}
+.sig-shade{position:absolute;inset:0;overflow:hidden;border-radius:4px;pointer-events:none}
+.sig-hole{position:absolute;box-shadow:0 0 0 9999px rgba(10,15,28,.55)}
+.sig-box{position:absolute;outline:2px solid var(--gold);outline-offset:0;cursor:move;touch-action:none;box-sizing:border-box}
+.sig-box:focus-visible{outline:3px solid var(--gold);box-shadow:0 0 0 5px color-mix(in srgb,var(--gold) 35%,transparent)}
+.sig-h{position:absolute;width:18px;height:18px;background:#fff;border:2px solid var(--gold);border-radius:4px;touch-action:none}
+.sig-h::before{content:"";position:absolute;inset:-12px} /* 42px touch target */
+.sig-h.nw{left:-10px;top:-10px;cursor:nwse-resize}.sig-h.se{right:-10px;bottom:-10px;cursor:nwse-resize}
+.sig-h.ne{right:-10px;top:-10px;cursor:nesw-resize}.sig-h.sw{left:-10px;bottom:-10px;cursor:nesw-resize}
+.sig-prev-wrap{margin-top:14px;display:grid;gap:6px}.sig-prev-wrap .err:empty{display:none}
+.sig-thumb{display:inline-flex;align-items:center;gap:8px}.sig-thumb span.sig-chip{background:#fff;border:1px solid #d9dce6;border-radius:8px;padding:2px 8px;height:34px;display:inline-flex;align-items:center}.sig-thumb img{max-height:28px;max-width:110px;width:auto;height:auto;display:block}
 .inv-foot{margin:14px 0 0;text-align:center;color:var(--mu);font-size:10.5px}
 @media (max-width:560px){
  .inv{grid-template-columns:minmax(0,1fr)}
@@ -1195,6 +1222,9 @@ function migrate(){
     (cashbox().deposits||[]).forEach(d=>db.deposits.push({id:d.id,ref:d.ref,type:'CASH',course:d.course,periodFrom:d.depositedOn,periodTo:d.depositedOn,total:d.total,feeTotal:0,cihTotal:d.total,count:d.lines.length,depositedOn:d.depositedOn,bankRef:d.bankRef,by:d.by,byId:d.byId||'',at:d.at,cihLines:d.lines,demo:d.demo}));
     cashbox().deposits=[];Object.keys(db.roles).forEach(r=>{db.roles[r]=(db.roles[r]||[]).filter(k=>k!=='cash.view'&&k!=='cash.deposit')})}
   cashbox();
+  /* change 23: official signatures. Staff logins that existed before get a sample (dummy) signature once, to be replaced with their own. */
+  if(!Array.isArray(db.signs))db.signs=[];
+  if(!db.mig.sign23&&typeof sampleSigns==='function'&&sampleSigns())db.mig.sign23=1;
   /* change 5: example cash-in-hand data, once, only if nothing of the kind exists yet (a browser that already uses cash in hand is left alone) */
   if(!db.mig.cashDemo){db.mig.cashDemo=1;if(!db.payments.some(p=>payCih(p)>0)&&!cashbox().spends.length&&!db.deposits.some(d=>(d.cihLines||[]).length)){const n=seedCashDemo();if(n)log('Sample cash in hand data added','System','',null,null,n+' cash invoices with cash in hand, with expenses and a bank deposit')}}
 }
@@ -1373,7 +1403,7 @@ function recordPayment(s,o){
   const p={id:uid('p'),studentId:s.id,sem:o.sem,mode:o.mode,amount:o.amount,invoiceDate,entryAt,paidAt:o.paidAt||entryAt,
     chequeNo:o.chequeNo||'',bank:o.bank||'',chequeDate:o.chequeDate||'',upiRef:o.upiRef||'',providerTxnId:o.providerTxnId||'',note:o.note||'',
     batch:o.batch||defaultBatch(s),reason:o.reason||'',category:o.category||'',status:'SUCCESS',cancelReason:'',rc,depositId:'',by:u?u.name:'Payment gateway',byId:u?u.id:'',dateEdits:[]};
-  if(rc){p.rcAt=entryAt;p.rcBy=u?u.name:''}else p.needsRc=true;
+  if(rc){p.rcAt=entryAt;p.rcBy=u?u.name:'';p.rcById=u?u.id:'';if(u&&u.signId)p.signId=u.signId}else p.needsRc=true; /* change 23: the invoice keeps the signature of the staff member who issued it */
   if(o.mode==='CASH'){if((o.expenseItems||[]).length)p.expenseItems=o.expenseItems;if(o.cih>0)p.cih=o.cih}
   db.payments.push(p);
   log('Payment recorded','Payment',p.rc||('UPI '+(p.upiRef||'')),null,{student:s.enrol,batch:p.batch,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate),
@@ -1547,7 +1577,8 @@ function seed(){
       {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
     students:[],refs:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
-    cashbox:{spends:[],deposits:[]},counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1,cash:1,cashDemo:1,cash7:1}};
+    cashbox:{spends:[],deposits:[]},counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1,cash:1,cashDemo:1,cash7:1},signs:[]};
+  if(typeof sampleSigns==='function'&&sampleSigns())db.mig.sign23=1; /* change 23: sample (dummy) signatures for the starting staff logins */
   /* real college data (fee registers 2026-27), available only after the password gate has decrypted it */
   if(typeof REAL!=='undefined'&&REAL){seedReal(REAL)}else{
   /* sample names only (demo) */
@@ -2210,10 +2241,10 @@ function renderApp(){
     <div class="tb-brand">${LOGO()}<b>${E(db.college.short)}</b></div><div class="crumb" id="crumb"></div>
     <div class="tb-end">${portal?'':courseSwitch()}<span id="tbInstall" class="install-holder"></span>${bellHtml()}<button class="iconbtn" data-act="theme" type="button" title="Switch between light and dark theme" aria-label="Dark mode">${isDark()?ICON_SUN:ICON_MOON}<span class="lbl sr">${isDark()?'Light mode':'Dark mode'}</span></button>
     ${portal?'':`<button class="iconbtn" data-act="logout" type="button" title="Sign out" aria-label="Sign out">${ICON_OUT}</button>`}</div></div>
-    <div id="installSlot" class="install-holder"></div><div id="notifySlot" class="install-holder"></div><div id="page"></div></main>
+    <div id="installSlot" class="install-holder"></div><div id="notifySlot" class="install-holder"></div>${portal?'':'<div id="signSlot" class="install-holder"></div>'}<div id="page"></div></main>
    ${portal?`<nav class="btabs" id="btabs" aria-label="Student menu"></nav>`:''}</div>`;
   renderNav();renderPage();playEnter('enter');
-  if(typeof renderInstallUI==='function')renderInstallUI();renderNotifyBar();
+  if(typeof renderInstallUI==='function')renderInstallUI();renderNotifyBar();if(typeof renderSignBar==='function')renderSignBar();
   if(userDriven&&(!document.activeElement||document.activeElement===document.body))focusH1();
 }
 function renderNav(){
@@ -2900,8 +2931,9 @@ function receiptHtml(p){
      <div class="inv-tot">${row('Total fee',I.fee)}${I.earlier>0?row('Paid earlier',I.earlier):''}${row('Amount paid now',I.paidNow)}${row('Balance due',I.balance,'bal')}</div></div>
     ${exp}
     <div class="inv-notes"><b>Notes</b><ul>${I.notes.map(n=>`<li>${E(n)}</li>`).join('')}</ul></div>
-    <div class="inv-sign"><i>${E(R.signFor)}</i><span>Authorised Signatory</span></div>
-    <p class="inv-foot">This is a computer-generated invoice and does not require a physical signature.</p>
+    ${(()=>{const sg=typeof invSigner==='function'?invSigner(p):null; /* change 23: signature of the person who issued this invoice */
+      return`<div class="inv-sign"><i>${E(R.signFor)}</i><div class="inv-sig">${sg&&sg.sign?signImg(sg.sign,'Signature of '+(sg.name||'the issuer')):''}</div>${sg&&sg.name?`<b>${E(sg.name)}</b>`:''}<span>Authorised Signatory</span></div>
+    <p class="inv-foot">${sg&&sg.sign?'This is a computer-generated invoice.':'This is a computer-generated invoice and does not require a physical signature.'}</p>`})()}
    </div>
   </article>`;
 }
@@ -3026,7 +3058,7 @@ ACT.rcConfirm=el=>{need('fees.confirm','confirm UPI payments');const p=db.paymen
     <div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Not now</button><button class="btn primary">Confirm and issue invoice</button></div></form>`,'Confirm UPI payment');const i=$('#f_rc');if(i)i.focus()};
 FORM.rcConfirm=(f,d)=>{need('fees.confirm','confirm UPI payments');const p=db.payments.find(x=>x.id===f.dataset.id);if(!p||!p.needsRc)throw new Error('This payment already has its invoice no.');guardStudent(p.studentId);if(p.status!=='SUCCESS')throw new Error('Only a successful payment can be confirmed');
   const s=stu(p.studentId);const rc=rcCheck(d.rc,payCourse(p),p.id);const u=cur();
-  p.rc=rc;p.needsRc=false;p.rcAt=Date.now();p.rcBy=u.name;p.confirmedBy=u.name;p.confirmedAt=p.rcAt;const cn=capText(d.cnote,'Remarks',200);if(cn)p.confirmNote=cn;
+  p.rc=rc;p.needsRc=false;p.rcAt=Date.now();p.rcBy=u.name;p.rcById=u.id;p.confirmedBy=u.name;p.confirmedAt=p.rcAt;if(u.signId)p.signId=u.signId; /* change 23: signed by the person who confirmed it */const cn=capText(d.cnote,'Remarks',200);if(cn)p.confirmNote=cn;
   log('UPI payment confirmed','Payment',rc,{invoiceNo:''},{invoiceNo:rc,student:s.enrol,amount:inr(p.amount),utr:p.upiRef||''});
   if(db.settings.mail.sendReceipts)queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Fee invoice ${p.rc} - ${db.college.short}`});
   notify('payment',`Your fee invoice ${rc} is ready`,`${inr(p.amount)} · Semester ${p.sem}. Open Fees to download it.`,{students:[s.id],portal:'sfees',tone:'good',self:true});
@@ -3040,7 +3072,7 @@ phone:{'w': 72, 'h': 72, 'gray': false, 'jpg': '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBD
 const TIMES_W={tb:[250, 333, 555, 500, 500, 1000, 833, 278, 333, 333, 500, 570, 250, 333, 250, 278, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 333, 333, 570, 570, 570, 500, 930, 722, 667, 722, 722, 667, 611, 778, 778, 389, 500, 778, 667, 944, 722, 778, 611, 778, 722, 556, 667, 722, 722, 1000, 722, 722, 667, 333, 278, 333, 581, 500, 333, 500, 556, 444, 556, 444, 333, 500, 556, 278, 333, 556, 278, 833, 556, 500, 556, 556, 444, 389, 333, 556, 500, 722, 500, 500, 444, 394, 220, 394, 520],tbi:[250, 389, 555, 500, 500, 833, 778, 278, 333, 333, 500, 570, 250, 333, 250, 278, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 333, 333, 570, 570, 570, 500, 832, 667, 667, 667, 722, 667, 667, 722, 778, 389, 500, 667, 611, 889, 722, 722, 611, 722, 667, 556, 611, 722, 667, 889, 667, 611, 611, 333, 278, 333, 570, 500, 333, 500, 500, 444, 500, 444, 333, 500, 556, 278, 278, 500, 278, 778, 556, 500, 500, 500, 389, 389, 278, 556, 444, 667, 500, 444, 389, 348, 220, 348, 570],ti:[250, 333, 420, 500, 500, 833, 778, 214, 333, 333, 500, 675, 250, 333, 250, 278, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 333, 333, 675, 675, 675, 500, 920, 611, 611, 667, 722, 611, 611, 722, 722, 333, 444, 667, 556, 833, 667, 722, 611, 722, 611, 500, 556, 722, 611, 833, 611, 556, 556, 389, 278, 389, 422, 500, 333, 500, 500, 444, 500, 444, 278, 500, 500, 278, 278, 444, 278, 722, 500, 500, 500, 500, 389, 389, 278, 500, 444, 667, 444, 444, 389, 400, 275, 400, 541]};
 /* ---------- PDF writer (A4, standard fonts, JPEG images, no libraries so it works offline) ----------
    Fonts: Helvetica / Helvetica-Bold (default) and Times-Bold / Times-BoldItalic / Times-Italic (o.font 'tb' 'tbi' 'ti').
-   Images: JPEG (DCTDecode) from RCPT_IMG (p4c_assets.js), with an optional soft mask and opacity. */
+   Images: JPEG (DCTDecode) from RCPT_IMG (p4c_assets.js), with an optional soft mask and opacity; 1-bit stencil masks for signatures (change 23). */
 const HELV=[278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
 function pdfSafe(t){
   return String(t??'').replace(/₹/g,'Rs. ').replace(/[–—]/g,'-').replace(/[·•]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/…/g,'...')
@@ -3066,10 +3098,11 @@ function makePdf(draw,meta){
     stamp(t,o={}){const{size=70,color='#f3c4c4',x=300,y=470}=o;const w=pdfW(t,size,true);const c=Math.cos(Math.PI/4),s=Math.sin(Math.PI/4);
       out.push(`q ${c.toFixed(4)} ${s.toFixed(4)} ${(-s).toFixed(4)} ${c.toFixed(4)} ${x} ${H-y} cm BT /F2 ${size} Tf ${col(color)} rg ${(-w/2).toFixed(1)} 0 Td (${pdfEsc(t)}) Tj ET Q`)},
     /* JPEG image from RCPT_IMG; o.alpha = opacity 0..1. Returns false when the image is not available. */
-    image(name,x,y,w,h,o={}){const im=typeof RCPT_IMG!=='undefined'&&RCPT_IMG[name];if(!im)return false;
-      let k=imgs.findIndex(v=>v.name===name);if(k<0){imgs.push({name,im});k=imgs.length-1}
+    /* change 23: name can also be an image object; {bits,w,h} is a 1-bit stencil (a signature) painted in o.color */
+    image(name,x,y,w,h,o={}){const im=typeof name==='object'?name:typeof RCPT_IMG!=='undefined'&&RCPT_IMG[name];if(!im)return false;
+      let k=imgs.findIndex(v=>v.im===im);if(k<0){imgs.push({name,im});k=imgs.length-1}
       let g='';if(o.alpha!=null&&o.alpha<1){let j=gs.indexOf(o.alpha);if(j<0){gs.push(o.alpha);j=gs.length-1}g=`/GS${j+1} gs `}
-      out.push(`q ${g}${w} 0 0 ${h} ${x} ${H-y-h} cm /Im${k+1} Do Q`);return true},
+      out.push(`q ${g}${im.bits?col(o.color||'#000000')+' rg ':''}${w} 0 0 ${h} ${x} ${H-y-h} cm /Im${k+1} Do Q`);return true},
     wrap(x,y,t,width,o={}){const size=o.size||10,words=pdfSafe(t).split(/\s+/);let line='',yy=y;words.forEach(w=>{const tr=line?line+' '+w:w;if(pdfW(tr,size,o.bold,o.font)>width&&line){api.text(x,yy,line,o);yy+=size+(o.lead||4);line=w}else line=tr});if(line){api.text(x,yy,line,o);yy+=size+(o.lead||4)}return yy}
   };
   draw(api);
@@ -3089,7 +3122,8 @@ function makePdf(draw,meta){
   ];
   const add=o=>{objs.push(o);return objs.length};
   const jpeg=(b64,w,h,gray,extra='')=>{const bin=atob(b64);return add(`<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /${gray?'DeviceGray':'DeviceRGB'} /BitsPerComponent 8 /Filter /DCTDecode${extra} /Length ${bin.length} >>\nstream\n${bin}\nendstream`)};
-  const xo=imgs.map((v,i)=>{const m=v.im.mask?jpeg(v.im.mask,v.im.w,v.im.h,true):0;return`/Im${i+1} ${jpeg(v.im.jpg,v.im.w,v.im.h,v.im.gray,m?` /SMask ${m} 0 R`:'')} 0 R`});
+  const stencil=im=>{const bin=atob(im.bits);return add(`<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ImageMask true /BitsPerComponent 1 /Decode [1 0] /Length ${bin.length} >>\nstream\n${bin}\nendstream`)};
+  const xo=imgs.map((v,i)=>{if(v.im.bits)return`/Im${i+1} ${stencil(v.im)} 0 R`;const m=v.im.mask?jpeg(v.im.mask,v.im.w,v.im.h,true):0;return`/Im${i+1} ${jpeg(v.im.jpg,v.im.w,v.im.h,v.im.gray,m?` /SMask ${m} 0 R`:'')} 0 R`});
   const gso=gs.map((a,i)=>`/GS${i+1} ${add(`<< /Type /ExtGState /ca ${a} /CA ${a} >>`)} 0 R`);
   const res=`/Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 8 0 R /F4 9 0 R /F5 10 0 R >>${xo.length?` /XObject << ${xo.join(' ')} >>`:''}${gso.length?` /ExtGState << ${gso.join(' ')} >>`:''} >>`;
   const pageObj=c=>`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] ${res} /Contents ${c} 0 R >>`;
@@ -3192,11 +3226,17 @@ function receiptPdf(p,studentCopy,gIn){if(studentCopy===undefined)studentCopy=is
     let ny=Math.max(646.2,y+50);g.text(L,ny,'Notes',{size:9,bold:true,color:INK});ny+=16.3;
     const notes=I.notes.slice();
     if(!studentCopy&&(p.expenseItems||[]).length)notes.splice(notes.length-1,0,'Expense details: '+p.expenseItems.map(x=>`${x.reason} Rs. ${amt2(x.amount)}${x.doc?' (bill attached)':''}`).join('; ')+'.');
-    notes.forEach(t=>{if(ny>782)return;g.rect(L+0.5,ny-4.2,2.6,2.6,MUT);ny=g.wrap(L+10.4,ny,t,W-10.4,{size:8.5,color:MUT,lead:4.5})});
-    /* signature and footer */
-    const sy=Math.max(711.5,ny+16);
-    if(sy<790){g.text(RT,sy,R.signFor,{font:'ti',size:8.5,color:MUT,align:'right'});g.line(395.3,sy+8.5,RT,sy+8.5,INK,.8);g.text(RT,sy+22,'Authorised Signatory',{size:8.5,color:MUT,align:'right'})}
-    g.text(CX,818,'This is a computer-generated invoice and does not require a physical signature.',{size:7.5,color:MUT,align:'center'});
+    /* change 23: the signature block sits bottom-right; note lines that reach it are wrapped narrower so they never run under it */
+    const SG=typeof invSigner==='function'?invSigner(p):null,SX=Math.min(395.3,RT-g.width(R.signFor,{font:'ti',size:8.5})-4),full=W-10.4,narrow=Math.max(150,SX-14-(L+10.4));
+    notes.forEach(t=>{if(ny>800)return;const lines=Math.ceil(g.width(t,{size:8.5})/full);g.rect(L+0.5,ny-4.2,2.6,2.6,MUT);ny=g.wrap(L+10.4,ny,t,ny+lines*13>714?narrow:full,{size:8.5,color:MUT,lead:4.5})});
+    /* signature and footer: "For <college>", the issuer's signature on the line, the issuer's name, "Authorised Signatory" */
+    const sy=Math.max(706,Math.min(728,ny+14)),LX=Math.min(SX,RT-170);
+    g.text(RT,sy,R.signFor,{font:'ti',size:8.5,color:MUT,align:'right'});
+    if(SG&&SG.sign){const s=SG.sign,bw=RT-LX,bh=34;const k=Math.min(bw/s.w,bh/s.h),iw=s.w*k,ih=s.h*k;g.image(s,(LX+RT)/2-iw/2,sy+42-ih,iw,ih,{color:SIGN_INK})}
+    g.line(LX,sy+45,RT,sy+45,INK,.8);
+    if(SG&&SG.name)g.text(RT,sy+57,SG.name,{size:8.5,bold:true,color:INK,align:'right'});
+    g.text(RT,SG&&SG.name?sy+69:sy+58,'Authorised Signatory',{size:8.5,color:MUT,align:'right'});
+    g.text(CX,818,SG&&SG.sign?'This is a computer-generated invoice.':'This is a computer-generated invoice and does not require a physical signature.',{size:7.5,color:MUT,align:'center'});
     /* faint emblem over the middle of the page */
     g.image('wm',203.6,285.9,300,305,{alpha:.07});
     if(cancelled)g.stamp('CANCELLED',{size:84,color:'#f6caca',x:352,y:480});
@@ -3681,8 +3721,8 @@ CHG.perm=el=>{need('roles.manage');const r=el.dataset.r,p=el.dataset.p;if(r==='C
   const l=db.roles[r]=db.roles[r]||[];const had=l.includes(p);if(el.checked&&!had)l.push(p);if(!el.checked&&had)l.splice(l.indexOf(p),1);log('Permission changed','Role',r,{[p]:had},{[p]:el.checked});save();toast(`${r}: ${PERMS.find(x=>x[0]===p)[1]} ${el.checked?'allowed':'removed'}`)};
 ACT.permReset=()=>{need('roles.manage');confirmBox('Restore default permissions','Principal and Clerk go back to the permissions in the spec.','Restore',()=>{const before=JSON.stringify(db.roles);const d=DEFAULT_ROLES();if(cur().role!=='Super Admin')d.Principal=db.roles.Principal;db.roles=d;log('Permissions reset','Role','',{roles:before},{roles:JSON.stringify(d)});save();renderPage();toast('Defaults restored')})};
 function setUsers(){if(cur().role!=='Super Admin')throw new Error('Only the Super Admin manages staff logins');const l=db.users.filter(u=>u.role!=='Student');
-  return`<div class="scard"><h2>Staff logins <button class="btn primary" data-act="newUser">Add Principal / Clerk login</button></h2><div class="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Courses</th><th>Username</th><th>Email</th><th>Last sign-in</th><th>Status</th><th></th></tr></thead><tbody>
-  ${l.map(u=>`<tr><td><b>${E(u.name)}</b></td><td>${E(u.role)}</td><td>${u.role==='Super Admin'?'<small class="muted">All courses</small>':(u.courses||[]).map(id=>course(id)?pill(course(id).name,'acc'):'').join(' ')||pill('None','bad')}</td><td class="mono">${E(u.username)}</td><td>${E(u.email)}</td><td><small>${u.lastLoginAt?fmtT(u.lastLoginAt):'Never'}</small></td><td>${u.active?pill('Active','good'):pill('Off','bad')}</td><td>${u.id===cur().id?`<div class="actions nowrap"><button class="btn sm" data-act="editUser" data-id="${E(u.id)}">Edit</button><small class="muted">You</small></div>`:`<div class="actions nowrap"><button class="btn sm" data-act="editUser" data-id="${E(u.id)}">Edit</button><button class="btn sm" data-act="userCourses" data-id="${E(u.id)}">Courses</button><button class="btn sm" data-act="userToggle" data-id="${E(u.id)}">${u.active?'Switch off':'Switch on'}</button><button class="btn sm" data-act="userPw" data-id="${E(u.id)}">Reset password</button></div>`}</td></tr>`).join('')}</tbody></table></div></div>`}
+  return`<div class="scard"><h2>Staff logins <button class="btn primary" data-act="newUser">Add Principal / Clerk login</button></h2><div class="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th>Courses</th><th>Username</th><th>Email</th><th>Signature</th><th>Last sign-in</th><th>Status</th><th></th></tr></thead><tbody>
+  ${l.map(u=>`<tr><td><b>${E(u.name)}</b></td><td>${E(u.role)}</td><td>${u.role==='Super Admin'?'<small class="muted">All courses</small>':(u.courses||[]).map(id=>course(id)?pill(course(id).name,'acc'):'').join(' ')||pill('None','bad')}</td><td class="mono">${E(u.username)}</td><td>${E(u.email)}</td><td><span class="sig-thumb">${signOf(u)?`<span class="sig-chip">${signImg(signOf(u),'Signature of '+u.name)}</span>`:''}${signPill(u)}</span></td><td><small>${u.lastLoginAt?fmtT(u.lastLoginAt):'Never'}</small></td><td>${u.active?pill('Active','good'):pill('Off','bad')}</td><td>${u.id===cur().id?`<div class="actions nowrap"><button class="btn sm" data-act="editUser" data-id="${E(u.id)}">Edit</button><small class="muted">You</small></div>`:`<div class="actions nowrap"><button class="btn sm" data-act="editUser" data-id="${E(u.id)}">Edit</button><button class="btn sm" data-act="userCourses" data-id="${E(u.id)}">Courses</button><button class="btn sm" data-act="userToggle" data-id="${E(u.id)}">${u.active?'Switch off':'Switch on'}</button><button class="btn sm" data-act="userPw" data-id="${E(u.id)}">Reset password</button></div>`}</td></tr>`).join('')}</tbody></table></div></div>`}
 ACT.newUser=()=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');drawer(`<button class="btn x" data-act="close">Close</button><h2>Add staff login</h2><form data-form="newUser" class="form" style="margin-top:12px">${F('name','Full name',{req:true,span:1})}${F('role','Role',{opts:STAFF_ROLES})}${courseChecks([])}${F('username','Username',{req:true,attrs:'autocapitalize="off" maxlength="30"'})}${F('email','Email',{type:'email',req:true,span:1})}<p class="note span">A temporary password is created; they must change it at first sign-in.</p><div class="actions span"><button class="btn primary">Create login</button></div></form>`)};
 FORM.newUser=(f,d)=>{if(cur().role!=='Super Admin')throw new Error('Not allowed');const un=String(d.username||'').trim().toLowerCase();if(!/^[a-z0-9._-]{3,30}$/.test(un))throw new Error('Username: 3-30 letters, numbers, . _ -');if(db.users.some(u=>u.username.toLowerCase()===un))throw new Error('This username is taken');
   const email=String(d.email||'').trim().toLowerCase();if(!MAIL_OK.test(email))throw new Error('Enter a valid email');if(!STAFF_ROLES.includes(d.role))throw new Error('Choose a role');const courses=readCourseChecks(f);const name=capText(d.name,'Name');if(name.length<2)throw new Error('Enter the name');
@@ -3770,7 +3810,225 @@ function accountPanel(){return`<form class="panel" data-form="myPw"><h2>Change p
 FORM.myPw=(f,d)=>{const u=cur();if(isStudentUser(u))throw new Error('Only the college office can change a student password');if(d.old!==u.password)throw new Error('Current password is wrong');if(!pwOk(d.p1))throw new Error('Use at least 8 characters with a letter and a number');if(d.p1!==d.p2)throw new Error('The two new passwords are not the same');u.password=d.p1;log('Password changed','User',u.username);save();f.reset();toast('Password changed')};
 function staffProfileHtml(){const u=cur();const L=(k,v)=>`<div class="rline"><span>${k}</span><b style="font-weight:500;text-align:right;overflow-wrap:anywhere">${E(v||'-')}</b></div>`;
   return`<button class="btn x" data-act="close">Close</button><div class="who" style="margin:4px 0 14px"><div class="av lg">${E(initials(u.name))}</div><div><h2 style="margin:0">${E(u.name)}</h2><small class="muted">${E(u.role)}</small></div></div>
-  <div class="panel">${L('Username',u.username)}${L('Email',u.email)}${u.phone?L('Mobile',u.phone):''}${L('Last sign-in',fmtT(u.lastLoginAt))}<div class="actions" style="margin-top:10px"><button class="btn sm" data-act="editUser" data-id="${E(u.id)}">Edit details</button></div></div><div class="panel" style="margin-top:12px"><h2>What you can open</h2><div class="actions">${navFor(u).map(n=>pill(n[1])).join('')}</div></div><div class="panel" style="margin-top:12px"><h2>Notifications</h2><div id="notifyPanel">${notifyPanelHtml()}</div></div><div class="panel" style="margin-top:12px"><h2>App</h2><div id="profileInstall">${installPanelHtml()}</div></div><div style="margin-top:12px">${accountPanel()}</div>`}
+  <div class="panel">${L('Username',u.username)}${L('Email',u.email)}${u.phone?L('Mobile',u.phone):''}${L('Last sign-in',fmtT(u.lastLoginAt))}<div class="actions" style="margin-top:10px"><button class="btn sm" data-act="editUser" data-id="${E(u.id)}">Edit details</button></div></div><div style="margin-top:12px">${signPanelHtml(u)}</div><div class="panel" style="margin-top:12px"><h2>What you can open</h2><div class="actions">${navFor(u).map(n=>pill(n[1])).join('')}</div></div><div class="panel" style="margin-top:12px"><h2>Notifications</h2><div id="notifyPanel">${notifyPanelHtml()}</div></div><div class="panel" style="margin-top:12px"><h2>App</h2><div id="profileInstall">${installPanelHtml()}</div></div><div style="margin-top:12px">${accountPanel()}</div>`}
+/* ---------- change 23 (22-11-2026): official signature of every staff login ----------
+   Each Super Admin, Principal and Clerk has one official signature. They add or replace it themselves from
+   Profile → Official signature by uploading a photo / scan of it (change 24: upload only, with a crop box and
+   smart cleaning; drawing it on screen was removed).
+   The invoice shows the signature of the person who issued it, above "Authorised Signatory":
+   - Cash / Cheque: the staff member who entered the payment (typed the invoice no.)
+   - UPI: the staff member who confirmed the payment and added the invoice no.
+   db.signs keeps the saved signatures {id,userId,png,bits,w,h,at,by,sample}; user.signId = the current one.
+   An invoice remembers the signature it was issued with (payment.signId), so a new signature later does not change
+   invoices already issued. Older invoices issued before this change use the issuer's current signature.
+   Staff logins that existed before this change got a SAMPLE (dummy) signature made from their name (sample:true),
+   shown as "Sample" until they add their own. A login created later starts without one and is asked to add it.
+   png  = transparent PNG for the screen; bits = the same signature as a 1-bit mask for the PDF (base64). */
+const SIGN_MAX_W=600,SIGN_MAX_H=170,SIGN_INK='#1b2a5e';
+const staffUser=u=>!!u&&u.role!=='Student';
+const signById=id=>(id&&(db.signs||[]).find(x=>x.id===id))||null;
+const signOf=u=>u?signById(u.signId):null;
+const signState=u=>{const s=signOf(u);return!s?'none':s.sample?'sample':'own'};
+
+/* who signs this invoice, and with which signature (null: invoice not issued yet / nobody known) */
+function invSigner(p){if(!p||p.needsRc)return null;
+  const byId=id=>id?db.users.find(x=>x.id===id&&staffUser(x)):null;
+  const byName=n=>n?db.users.find(x=>staffUser(x)&&x.name===n):null;
+  let u=byId(p.rcById)||byId(p.byId)||byName(p.rcBy||p.confirmedBy)||(p.mode==='UPI'?null:byName(p.by));
+  const sg=signById(p.signId)||signOf(u);
+  if(!u&&sg)u=byId(sg.userId);
+  return u||sg?{name:u?u.name:'',role:u?u.role:'',sign:sg}:null}
+
+/* ---------- change 24: smart cleaning of an uploaded signature photo ----------
+   Works on plain arrays (no screen needed), so it is tested in tests/logic.test.js.
+   1. Shadows / uneven light: the paper brightness is measured in small blocks (the light 10% of each block),
+      and every pixel is compared with the paper around it (n = 255 is paper, low n is ink).
+   2. Ink = clearly darker than its paper (threshold chosen from the picture itself, Otsu).
+   3. Notebook / printed lines are removed: perfectly straight lines that run from edge to edge, and thin lines
+      that cross the whole area. A pen stroke that crosses such a line is kept.
+   4. Specks and dust are removed; big dark patches (table, phone, shadow edge, the paper's border) are removed.
+   5. The first crop box = the main signature (largest stroke + the strokes near it); the person can move / resize it.
+   6. Only the ink inside the box is kept, with soft edges, on a transparent background, cut tight. */
+function signOtsu(h,tot){let all=0;for(let t=0;t<256;t++)all+=t*h[t];let sB=0,wB=0,best=-1,th=128;
+  for(let t=0;t<256;t++){wB+=h[t];if(!wB)continue;const wF=tot-wB;if(!wF)break;sB+=t*h[t];const v=wB*wF*(sB/wB-(all-sB)/wF)**2;if(v>best){best=v;th=t}}return th}
+/* lum: lightness 0..255 of each pixel (W*H). Returns {W,H,n}: lightness compared with the local paper. */
+function signPrepLum(lum,W,H){
+  const B=Math.max(12,Math.round(Math.max(W,H)/40)),bw=Math.ceil(W/B),bh=Math.ceil(H/B),blk=new Float32Array(bw*bh),h=new Uint32Array(256);
+  for(let by=0;by<bh;by++)for(let bx=0;bx<bw;bx++){h.fill(0);let c=0;const x1=Math.min(W,(bx+1)*B),y1=Math.min(H,(by+1)*B);
+    for(let y=by*B;y<y1;y++)for(let x=bx*B;x<x1;x++){h[lum[y*W+x]]++;c++}
+    let k=c*.1,v=255;for(;v>0;v--){k-=h[v];if(k<=0)break}blk[by*bw+bx]=v}
+  const nb=(a,f)=>{const o=new Float32Array(bw*bh);for(let y=0;y<bh;y++)for(let x=0;x<bw;x++){let m=f==='max'?0:0,c=0;
+    for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++){const xx=x+i,yy=y+j;if(xx<0||yy<0||xx>=bw||yy>=bh)continue;const v=a[yy*bw+xx];if(f==='max'){if(v>m)m=v}else{m+=v;c++}}
+    o[y*bw+x]=f==='max'?m:m/c}return o};
+  const bg=nb(nb(blk,'max'),'mean');
+  h.fill(0);for(let i=0;i<W*H;i++)h[lum[i]]++;let k=W*H*.1,gp=255;for(;gp>0;gp--){k-=h[gp];if(k<=0)break}
+  /* where even the "paper" is much darker than the real paper (a dark table, outside the page) nothing is ink */
+  const off=Math.max(40,gp*.45),n=new Uint8Array(W*H);
+  for(let y=0;y<H;y++){const fy=Math.min(bh-1,Math.max(0,(y+.5)/B-.5)),y0=Math.floor(fy),y1=Math.min(bh-1,y0+1),ty=fy-y0;
+    for(let x=0;x<W;x++){const fx=Math.min(bw-1,Math.max(0,(x+.5)/B-.5)),x0=Math.floor(fx),x1=Math.min(bw-1,x0+1),tx=fx-x0;
+      const v=(bg[y0*bw+x0]*(1-tx)+bg[y0*bw+x1]*tx)*(1-ty)+(bg[y1*bw+x0]*(1-tx)+bg[y1*bw+x1]*tx)*ty;
+      n[y*W+x]=v<off?255:Math.min(255,Math.round(lum[y*W+x]*255/v))}}
+  return{W,H,n}}
+/* ink mask of an area, with straight edge-to-edge lines removed (a stroke crossing a line is kept) */
+function signInk(P,x0,y0,w,h){const{W,n}=P,hist=new Uint32Array(256);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++)hist[n[(y0+y)*W+x0+x]]++;
+  const th=Math.max(110,Math.min(200,signOtsu(hist,w*h))),m=new Uint8Array(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++)m[y*w+x]=n[(y0+y)*W+x0+x]<th?1:0;
+  const kill=new Uint8Array(w*h),eh=Math.max(2,Math.round(w*.02)),ev=Math.max(2,Math.round(h*.02));
+  for(let y=0;y<h;y++){let x=0;while(x<w){if(!m[y*w+x]){x++;continue}const s=x;while(x<w&&m[y*w+x])x++;if(s<=eh&&x>=w-eh&&x-s>=40)for(let i=s;i<x;i++)kill[y*w+i]|=1}}
+  for(let x=0;x<w;x++){let y=0;while(y<h){if(!m[y*w+x]){y++;continue}const s=y;while(y<h&&m[y*w+x])y++;if(s<=ev&&y>=h-ev&&y-s>=40)for(let i=s;i<y;i++)kill[i*w+x]|=2}}
+  const out=m.slice();
+  for(let i=0;i<w*h;i++){if(!kill[i])continue;const x=i%w,y=(i/w)|0;let keep=false;
+    if(kill[i]&1)keep=y>=4&&y+4<h&&m[i-4*w]&&m[i+4*w]&&!(kill[i-4*w]&1)&&!(kill[i+4*w]&1);
+    if(!keep&&kill[i]&2)keep=x>=4&&x+4<w&&m[i-4]&&m[i+4]&&!(kill[i-4]&2)&&!(kill[i+4]&2);
+    if(!keep)out[i]=0}
+  return{mask:out,th}}
+/* connected strokes (8 neighbours): label per pixel + {id,a(area),x0,y0,x1,y1} */
+function signComps(m,w,h){const L=new Int32Array(w*h),st=new Int32Array(w*h),list=[];let id=0;
+  for(let i=0;i<w*h;i++){if(!m[i]||L[i])continue;id++;let sp=0,a=0,x0=w,y0=h,x1=-1,y1=-1;st[sp++]=i;L[i]=id;
+    while(sp){const j=st[--sp],x=j%w,y=(j/w)|0;a++;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;
+      for(let dy=-1;dy<=1;dy++){const yy=y+dy;if(yy<0||yy>=h)continue;for(let dx=-1;dx<=1;dx++){const xx=x+dx;if(xx<0||xx>=w)continue;const k=yy*w+xx;if(m[k]&&!L[k]){L[k]=id;st[sp++]=k}}}}
+    list.push({id,a,x0,y0,x1,y1})}
+  return{L,list}}
+/* not part of a signature: a big dark patch, a solid blob, or a thin line that crosses the whole area */
+function signJunk(c,w,h,auto){const bw=c.x1-c.x0+1,bh=c.y1-c.y0+1,fill=c.a/(bw*bh),eh=Math.max(2,w*.02),ev=Math.max(2,h*.02),thin=Math.max(5,.01*Math.max(w,h));
+  const edge=c.x0===0||c.y0===0||c.x1===w-1||c.y1===h-1;
+  if(c.a>(auto?.2:.5)*w*h)return true;
+  if(fill>.45&&bw>.15*w&&bh>.15*h)return true;
+  if(c.x0<=eh&&c.x1>=w-1-eh&&c.a/bw<=thin)return true;
+  if(c.y0<=ev&&c.y1>=h-1-ev&&c.a/bh<=thin)return true;
+  if(auto&&edge&&(bw>.9*w||bh>.9*h))return true;
+  return false}
+/* first crop box: the largest stroke and the strokes near it, with a margin. Box = {x0,y0,x1,y1}, x1/y1 exclusive. */
+function signAuto(P){const{W,H,n}=P,{mask,th}=signInk(P,0,0,W,H),{L,list}=signComps(mask,W,H),speck=Math.max(14,W*H*2e-5);
+  /* strength = how much ink: dark pen strokes win over faint texture of a table or a shadow edge */
+  const str=new Float64Array(list.length+1);for(let i=0;i<W*H;i++)if(L[i])str[L[i]]+=th-n[i];list.forEach(c=>c.s=str[c.id]);
+  const cand=list.filter(c=>c.a>=speck&&!signJunk(c,W,H,true));if(!cand.length)return{x0:0,y0:0,x1:W,y1:H};
+  const seed=cand.reduce((a,b)=>b.s>a.s?b:a),b={x0:seed.x0,y0:seed.y0,x1:seed.x1,y1:seed.y1},used=new Set([seed]);
+  const mg=Math.max(.6*(seed.y1-seed.y0+1),.15*(seed.x1-seed.x0+1),.03*Math.max(W,H)); /* a flat underline is wide but not tall: the name above it still belongs */let grew=true;
+  const dark=.6*seed.s/seed.a; /* grow only with strokes about as dark as the signature (printed labels are lighter) */
+  while(grew){grew=false;for(const c of cand){if(used.has(c)||c.s/c.a<dark)continue;
+    if(c.x1>=b.x0-mg*1.5&&c.x0<=b.x1+mg*1.5&&c.y1>=b.y0-mg&&c.y0<=b.y1+mg){const nx0=Math.min(b.x0,c.x0),ny0=Math.min(b.y0,c.y0),nx1=Math.max(b.x1,c.x1),ny1=Math.max(b.y1,c.y1);
+      used.add(c);if((nx1-nx0)*(ny1-ny0)>.6*W*H)continue;Object.assign(b,{x0:nx0,y0:ny0,x1:nx1,y1:ny1});grew=true}}}
+  const pw=(b.x1-b.x0+1)*.08+8,ph=(b.y1-b.y0+1)*.15+8;
+  return{x0:Math.max(0,Math.floor(b.x0-pw)),y0:Math.max(0,Math.floor(b.y0-ph)),x1:Math.min(W,Math.ceil(b.x1+1+pw)),y1:Math.min(H,Math.ceil(b.y1+1+ph))}}
+/* the ink inside the box: {alpha (0..255 per pixel), w, h, ox, oy (top-left in the photo)}, cut tight; throws a message for the person */
+function signMask(P,box){const{W,n}=P;const x0=Math.max(0,Math.round(box.x0)),y0=Math.max(0,Math.round(box.y0)),w=Math.min(P.W,Math.round(box.x1))-x0,h=Math.min(P.H,Math.round(box.y1))-y0;
+  if(w<12||h<12)throw new Error('The box is too small. Make it bigger around the signature.');
+  const{mask,th}=signInk(P,x0,y0,w,h),{L,list}=signComps(mask,w,h),area=w*h,speck=Math.max(14,area*5e-5),keepId=new Uint8Array(list.length+1);let ink=0;
+  list.forEach(c=>{if(c.a>=speck&&!signJunk(c,w,h,false)){keepId[c.id]=1;ink+=c.a}});
+  if(ink<40)throw new Error('No signature found in the box. Move the box over the signature.');
+  if(ink/area>.35)throw new Error('Too much dark area in the box. Move the box closer around the signature.');
+  const keep=new Uint8Array(area);let bx0=w,by0=h,bx1=-1,by1=-1;
+  for(let i=0;i<area;i++)if(L[i]&&keepId[L[i]]){keep[i]=1;const x=i%w,y=(i/w)|0;if(x<bx0)bx0=x;if(x>bx1)bx1=x;if(y<by0)by0=y;if(y>by1)by1=y}
+  const pd=3;bx0=Math.max(0,bx0-pd);by0=Math.max(0,by0-pd);bx1=Math.min(w-1,bx1+pd);by1=Math.min(h-1,by1+pd);
+  const ow=bx1-bx0+1,oh=by1-by0+1,alpha=new Uint8Array(ow*oh),hi=th+20,span=Math.max(30,hi*.55);
+  for(let y=0;y<oh;y++)for(let x=0;x<ow;x++){const gx=bx0+x,gy=by0+y;let near=false;
+    for(let j=-1;j<=1&&!near;j++)for(let i=-1;i<=1;i++){const xx=gx+i,yy=gy+j;if(xx>=0&&yy>=0&&xx<w&&yy<h&&keep[yy*w+xx]){near=true;break}}
+    if(!near)continue;const v=n[(y0+gy)*W+x0+gx];let a=v>=hi?0:Math.min(255,Math.round((hi-v)/span*255));if(keep[gy*w+gx])a=Math.max(a,140);alpha[y*ow+x]=a}
+  return{alpha,w:ow,h:oh,ox:x0+bx0,oy:y0+by0}}
+
+/* ---------- screen side: picture → arrays, arrays → PNG + 1-bit PDF mask ---------- */
+function signPrep(cv){const W=cv.width,H=cv.height,d=cv.getContext('2d').getImageData(0,0,W,H).data,lum=new Uint8Array(W*H);
+  for(let i=0,j=0;i<d.length;i+=4,j++){const a=d[i+3]/255;lum[j]=Math.round((.299*d[i]+.587*d[i+1]+.114*d[i+2])*a+255*(1-a))}
+  return signPrepLum(lum,W,H)}
+function signRender(m){
+  const cut=document.createElement('canvas');cut.width=m.w;cut.height=m.h;const cg=cut.getContext('2d'),id=cg.createImageData(m.w,m.h);
+  const c=parseInt(SIGN_INK.slice(1),16),R=c>>16&255,G=c>>8&255,B=c&255;
+  for(let i=0;i<m.w*m.h;i++){id.data[i*4]=R;id.data[i*4+1]=G;id.data[i*4+2]=B;id.data[i*4+3]=m.alpha[i]}cg.putImageData(id,0,0);
+  const s=Math.min(1,SIGN_MAX_W/m.w,SIGN_MAX_H/m.h),ow=Math.max(1,Math.round(m.w*s)),oh=Math.max(1,Math.round(m.h*s));
+  const out=document.createElement('canvas');out.width=ow;out.height=oh;const og=out.getContext('2d');og.imageSmoothingQuality='high';og.drawImage(cut,0,0,ow,oh);
+  /* 1-bit mask for the PDF: rows of bytes, first pixel = highest bit, 1 = ink */
+  const a=og.getImageData(0,0,ow,oh).data,rb=Math.ceil(ow/8);let bin='';
+  for(let y=0;y<oh;y++)for(let b=0;b<rb;b++){let v=0;for(let i=0;i<8;i++){const x=b*8+i;if(x<ow&&a[(y*ow+x)*4+3]>110)v|=128>>i}bin+=String.fromCharCode(v)}
+  return{png:out.toDataURL('image/png'),bits:btoa(bin),w:ow,h:oh}}
+const signFromCanvas=cv=>{const P=signPrep(cv);return signRender(signMask(P,{x0:0,y0:0,x1:P.W,y1:P.H}))};
+/* the chosen file on a white sheet (big phone photos scaled down to 1600 px) */
+function signLoad(file){return new Promise((ok,bad)=>{
+  if(!file||!/^image\/(png|jpe?g|webp|gif|bmp)$/.test(file.type))return bad(new Error('Choose a PNG or JPG image of the signature'));
+  if(file.size>15*1024*1024)return bad(new Error('Image is too large (more than 15 MB)'));
+  const img=new Image(),url=URL.createObjectURL(file);
+  img.onload=()=>{URL.revokeObjectURL(url);try{const k=Math.min(1,1600/img.width,1600/img.height);const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.width*k));c.height=Math.max(1,Math.round(img.height*k));
+    const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0,c.width,c.height);ok(c)}catch(e){bad(e)}};
+  img.onerror=()=>{URL.revokeObjectURL(url);bad(new Error('Could not read this image'))};img.src=url})}
+
+/* sample (dummy) signature written from the name, for logins that existed before change 23 */
+function makeSampleSign(name){
+  if(typeof document==='undefined'||!document.createElement)return null;
+  const c=document.createElement('canvas');const g=c&&c.getContext&&c.getContext('2d');if(!g||typeof g.fillText!=='function'||typeof g.getImageData!=='function')return null;
+  const t=String(name||'Staff').replace(/\s+/g,' ').trim();c.width=1000;c.height=260;g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.fillStyle='#000';g.strokeStyle='#000';
+  let sz=92;const font=s=>`italic ${s}px "Segoe Script","Brush Script MT","Lucida Handwriting","Snell Roundhand","Apple Chancery","Dancing Script",cursive`;
+  g.font=font(sz);let w=g.measureText(t).width;if(w>900){sz=Math.floor(sz*900/w);g.font=font(sz);w=g.measureText(t).width}
+  g.fillText(t,40,160);g.lineWidth=4;g.lineCap='round';g.beginPath();g.moveTo(52,196);g.bezierCurveTo(52+w*.35,222,52+w*.7,176,Math.min(960,60+w),190);g.stroke();
+  try{return signFromCanvas(c)}catch(e){return null}}
+function addSign(u,s,by,sample){
+  const old=signOf(u);const r={id:uid('sg'),userId:u.id,png:s.png,bits:s.bits,w:s.w,h:s.h,at:Date.now(),by:by||'',sample:!!sample};
+  db.signs=db.signs||[];db.signs.push(r);u.signId=r.id;
+  /* an old signature no invoice was issued with is not kept */
+  if(old&&!db.payments.some(p=>p.signId===old.id))db.signs=db.signs.filter(x=>x!==old);
+  return r}
+/* gives every staff login without a signature a sample one; false when this device cannot draw (then it is tried again later) */
+function sampleSigns(){if(!db||!Array.isArray(db.users))return false;db.signs=Array.isArray(db.signs)?db.signs:[];let ok=true;
+  db.users.filter(staffUser).forEach(u=>{if(signOf(u))return;const s=makeSampleSign(u.name);if(!s){ok=false;return}addSign(u,s,'System (sample)',true)});return ok}
+
+/* ---------- screens ---------- */
+const signImg=(s,alt,cls='')=>s?`<img class="${cls}" src="${E(s.png)}" alt="${E(alt)}" width="${s.w}" height="${s.h}">`:'';
+const signPill=u=>{const st=signState(u);return st==='own'?pill('Added','good'):st==='sample'?pill('Sample','warn'):pill('Not added','bad')};
+function signPanelHtml(u){u=u||cur();const s=signOf(u),st=signState(u);
+  return`<div class="panel sig-panel" id="sigPanel"><h2>Official signature ${signPill(u)}</h2>
+   <div class="sig-paper${s?'':' empty'}">${s?signImg(s,'Your signature'):'<span>No signature yet</span>'}</div>
+   <p class="note" style="margin:10px 0">${st==='sample'?'<b>This is a sample signature made from your name.</b> Replace it with your real signature. ':st==='own'?`Added on ${E(fmtT(s.at))}. `:'<b>Add your signature.</b> '}It is printed on the invoices you issue: Cash and Cheque payments you enter, and UPI payments you confirm. Invoices already issued keep the signature they were issued with.</p>
+   <div class="actions"><button type="button" class="btn sm ${st==='own'?'':'primary'}" data-act="signEdit">${s?'Replace signature':'Add signature'}</button></div></div>`}
+ui.sig=null;
+const SIGN_FILE=`<input type="file" class="sr" accept="image/png,image/jpeg,image/webp" data-change="signFile">`;
+ACT.signEdit=()=>{const u=cur();if(!staffUser(u))throw new Error('Only staff logins have an official signature');ui.sig={P:null,cv:null,box:null,auto:null,out:null};
+  dialog(`<h3>Your official signature</h3><p class="muted" style="margin:0 0 12px">Upload a photo or scan of your signature. The background is cleaned automatically; only the signature is printed on your invoices, above “Authorised Signatory”.</p>
+   <div id="sigPick"><label class="sig-drop" id="sigDrop">${SIGN_FILE}<b>Choose image</b><small>A phone photo is fine: paper, shadows, notebook lines and dust are removed. Best result: dark pen on light paper.</small></label></div>
+   <div id="sigCropStep" hidden><p class="note" id="sigCropHelp" style="margin:0 0 8px">Drag the box around your signature. Drag the corners to resize. (Keyboard: arrow keys move it, Shift + arrow keys resize it.)</p>
+    <div class="sig-crop-area"><div class="sig-crop" id="sigCrop"><div class="sig-shade" aria-hidden="true"><div class="sig-hole" id="sigHole"></div></div>
+     <div class="sig-box" id="sigBox" tabindex="0" role="group" aria-label="Signature area" aria-describedby="sigCropHelp"><span class="sig-h nw" data-h="nw"></span><span class="sig-h ne" data-h="ne"></span><span class="sig-h sw" data-h="sw"></span><span class="sig-h se" data-h="se"></span></div></div></div>
+    <div class="actions" style="margin-top:8px"><button type="button" class="btn sm" data-act="signFind">Find signature again</button><button type="button" class="btn sm" data-act="signWhole">Whole image</button><label class="btn sm">${SIGN_FILE}Choose another image</label></div></div>
+   <div class="sig-prev-wrap"><span class="label">Preview on the invoice</span><div class="sig-paper empty" id="sigPrev"><span>Your signature will show here</span></div><small class="err" id="sigErr" role="alert"></small></div>
+   <div class="actions" style="justify-content:flex-end;margin-top:12px"><button type="button" class="btn" data-act="closeDialog">Cancel</button><button type="button" class="btn primary" id="sigSave" data-act="signSave" disabled>Save signature</button></div>`,'Official signature');
+  const d=$('#sigDrop');if(d){d.addEventListener('dragover',e=>{e.preventDefault();d.classList.add('over')});d.addEventListener('dragleave',()=>d.classList.remove('over'));
+    d.addEventListener('drop',e=>{e.preventDefault();d.classList.remove('over');const f=e.dataTransfer&&e.dataTransfer.files[0];if(f)signTake(f)})}};
+function signShow(out,err,busy){if(!ui.sig)return;ui.sig.out=out||null;const pv=$('#sigPrev'),er=$('#sigErr'),sv=$('#sigSave');if(!pv)return;
+  pv.className='sig-paper'+(out?'':' empty');pv.innerHTML=out?signImg(out,'Preview of your signature'):`<span>${busy?'Cleaning the image…':'Your signature will show here'}</span>`;if(er)er.textContent=err||'';if(sv)sv.disabled=!out}
+/* a file was chosen: load it, find the signature, show the crop box and the cleaned preview */
+function signTake(f){if(!ui.sig)return;signShow(null,'',true);
+  signLoad(f).then(cv=>new Promise(r=>setTimeout(()=>r(cv),30))).then(cv=>{if(!ui.sig)return;const P=signPrep(cv),box=signAuto(P);Object.assign(ui.sig,{cv,P,box,auto:{...box}});
+    $('#sigPick').hidden=true;$('#sigCropStep').hidden=false;const cr=$('#sigCrop');cr.querySelector('canvas')?.remove();cv.className='sig-src';cr.prepend(cv);
+    signCropInit();signPlace();signPreview()}).catch(e=>signShow(null,e.message))}
+CHG.signFile=el=>{const f=el.files&&el.files[0];el.value='';if(f)signTake(f)};
+function signPreview(){const S=ui.sig;if(!S||!S.P)return;try{signShow(signRender(signMask(S.P,S.box)))}catch(e){signShow(null,e.message)}}
+function signPlace(){const S=ui.sig;if(!S||!S.P)return;const{W,H}=S.P,b=S.box;
+  [$('#sigBox'),$('#sigHole')].forEach(el=>{if(!el)return;el.style.left=b.x0/W*100+'%';el.style.top=b.y0/H*100+'%';el.style.width=(b.x1-b.x0)/W*100+'%';el.style.height=(b.y1-b.y0)/H*100+'%'})}
+/* move the whole box or one corner; the cleaned preview updates when the finger / mouse is released */
+function signCropInit(){const bx=$('#sigBox'),cr=$('#sigCrop');if(!bx||bx._ready)return;bx._ready=true;let st=null,tm=0;
+  const lim=()=>{const{W,H}=ui.sig.P;return{W,H,min:Math.max(16,Math.round(.04*Math.max(W,H)))}};
+  const set=(x0,y0,x1,y1)=>{const{W,H,min}=lim();x0=Math.max(0,Math.min(x0,W-min));y0=Math.max(0,Math.min(y0,H-min));x1=Math.min(W,Math.max(x1,x0+min));y1=Math.min(H,Math.max(y1,y0+min));ui.sig.box={x0,y0,x1,y1};signPlace()};
+  const later=()=>{clearTimeout(tm);tm=setTimeout(signPreview,250)};
+  bx.addEventListener('pointerdown',e=>{if(!ui.sig)return;e.preventDefault();bx.setPointerCapture(e.pointerId);st={h:e.target.dataset.h||'move',x:e.clientX,y:e.clientY,b:{...ui.sig.box}};bx.focus({preventScroll:true})});
+  bx.addEventListener('pointermove',e=>{if(!st||!ui.sig)return;const r=cr.getBoundingClientRect(),{W,H}=lim(),dx=(e.clientX-st.x)*W/r.width,dy=(e.clientY-st.y)*H/r.height,b=st.b;
+    if(st.h==='move'){const w=b.x1-b.x0,h=b.y1-b.y0,x0=Math.max(0,Math.min(W-w,b.x0+dx)),y0=Math.max(0,Math.min(H-h,b.y0+dy));set(x0,y0,x0+w,y0+h);return}
+    set(st.h.includes('w')?Math.min(b.x0+dx,b.x1-lim().min):b.x0,st.h.includes('n')?Math.min(b.y0+dy,b.y1-lim().min):b.y0,st.h.includes('e')?b.x1+dx:b.x1,st.h.includes('s')?b.y1+dy:b.y1)});
+  const end=()=>{if(!st)return;st=null;signPreview()};bx.addEventListener('pointerup',end);bx.addEventListener('pointercancel',end);
+  bx.addEventListener('keydown',e=>{const k={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];if(!k||!ui.sig)return;e.preventDefault();
+    const{W,H}=lim(),s=Math.max(2,Math.round(.02*Math.max(W,H))),b=ui.sig.box,dx=k[0]*s,dy=k[1]*s;
+    if(e.shiftKey)set(b.x0,b.y0,b.x1+dx,b.y1+dy);else{const w=b.x1-b.x0,h=b.y1-b.y0,x0=Math.max(0,Math.min(W-w,b.x0+dx)),y0=Math.max(0,Math.min(H-h,b.y0+dy));set(x0,y0,x0+w,y0+h)}later()})}
+ACT.signFind=()=>{const S=ui.sig;if(!S||!S.P)return;S.box={...S.auto};signPlace();signPreview()};
+ACT.signWhole=()=>{const S=ui.sig;if(!S||!S.P)return;S.box={x0:0,y0:0,x1:S.P.W,y1:S.P.H};signPlace();signPreview()};
+ACT.signSave=()=>{const u=cur();if(!staffUser(u))throw new Error('Only staff logins have an official signature');const o=ui.sig&&ui.sig.out;if(!o)throw new Error('Upload your signature first');
+  const before=signState(u);addSign(u,o,u.name,false);ui.sig=null;
+  log('Official signature changed','User',u.username,{signature:{none:'not added',sample:'sample',own:'own'}[before]},{signature:'own (new)'});
+  save();closeDialog();const p=$('#sigPanel');if(p)p.outerHTML=signPanelHtml(u);renderSignBar();if(ui.route==='settings')renderPage();toast('Signature saved. It will be on the invoices you issue.')};
+
+/* reminder strip for a staff login that has no signature yet (a sample one counts as added) */
+function renderSignBar(){const slot=document.getElementById('signSlot');if(!slot)return;const u=cur();let hide=false;try{hide=sessionStorage.getItem('npcte_sbar')==='1'}catch(e){}
+  if(!staffUser(u)||signOf(u)||hide){slot.innerHTML='';return}
+  slot.innerHTML=`<div class="installbar ib-app nbar" role="region" aria-label="Official signature"><div class="seal" aria-hidden="true">✍</div><div><b>Add your official signature</b><small>It is printed on the invoices you issue (cash and cheque you enter, UPI you confirm).</small></div>
+   <div class="actions nowrap"><button class="btn primary" data-act="signEdit">Add signature</button><button class="btn" data-act="sbarHide" aria-label="Hide">Later</button></div></div>`}
+ACT.sbarHide=()=>{try{sessionStorage.setItem('npcte_sbar','1')}catch(e){}renderSignBar()};
 /* =====================================================================
    Student portal (spec §9): Home · Fees · Notices · Profile, installable PWA
    ===================================================================== */

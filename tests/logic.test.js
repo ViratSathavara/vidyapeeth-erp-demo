@@ -342,4 +342,50 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  th=false;try{A.readEnrol('BED26-001',null)}catch(e){th=/EN followed by 8 digits/.test(e.message)}ok(th,'old format refused for a new student');
  ok(A.readEnrol('en24022099',null)==='EN24022099','EN + 8 digits accepted (upper-cased)');
  const old=D.students.find(s=>!/^EN\d{8}$/.test(s.enrol));ok(A.readEnrol(old.enrol,old)===old.enrol.toUpperCase(),'an existing old number can stay when the student is edited');}
+// change 23: official signature of the staff member who issued the invoice
+{const D=A.db;const lg=un=>{const u=D.users.find(x=>x.username===un);A.sesSet(u.id);return u};
+ const fake=n=>({png:'data:image/png;base64,iVBORw0KGgo'+n,bits:Buffer.from([0xF0,0x0F,0xAA,0x55]).toString('base64'),w:16,h:2});
+ ok(A.sampleSigns()===false||D.users.filter(u=>u.role!=='Student').every(u=>A.signOf(u)),'no canvas in tests: sample signatures are tried again later');
+ const cl=lg('clerk');A.addSign(cl,fake('A'),cl.name,false);const s1=A.signOf(cl);ok(s1&&!s1.sample&&cl.signId===s1.id,'clerk signature saved');
+ const sB=D.students.find(s=>s.status==='ACTIVE'&&A.feeSum(s).sems.some(m=>m.due>=300000));const sem=A.feeSum(sB).sems.find(m=>m.due>=300000).sem;
+ const pc=A.recordPayment(sB,{rc:'7401',sem,mode:'CASH',amount:100000,invoiceDate:'2026-11-20'});
+ ok(pc.signId===s1.id&&pc.rcById===cl.id,'cash invoice keeps the clerk\'s signature');
+ const sg=A.invSigner(pc);ok(sg&&sg.name===cl.name&&sg.sign===s1,'signer of a cash invoice = who entered it');
+ const h=A.receiptHtml(pc);ok(h.includes(s1.png)&&h.includes('Authorised Signatory')&&h.includes(cl.name),'screen invoice shows the signature and the name');
+ const pdf=A.receiptPdf(pc,true);ok(/\/ImageMask true \/BitsPerComponent 1/.test(pdf)&&pdf.includes('Authorised Signatory')&&pdf.includes(cl.name),'PDF invoice has the signature (1-bit mask) and the name');
+ A.addSign(cl,fake('B'),cl.name,false);const s2=A.signOf(cl);ok(s2!==s1&&A.signById(s1.id)&&A.invSigner(pc).sign===s1,'a new signature does not change an invoice already issued');
+ A.addSign(cl,fake('C'),cl.name,false);ok(!A.signById(s2.id),'an unused old signature is not kept');
+ // UPI: signed by the staff member who confirms it
+ const pr=lg('principal');A.addSign(pr,fake('P'),pr.name,false);
+ A.sesSet(sB.userId);const o=A.provider.createOrder(sB,sem,100000,'student');const up=A.handleUpiWebhook(A.gwEvent(o.id,'captured'));
+ ok(up.needsRc&&A.invSigner(up)===null,'UPI waiting for confirmation has no signer yet');lg('principal');
+ try{A.FORM.rcConfirm({dataset:{id:up.id}},{rc:'7402',cnote:''})}catch(e){if(!/null|innerHTML|firstElementChild/.test(e.message))console.log('confirm',e.message)}
+ ok(up.rc==='7402'&&up.signId===A.signOf(pr).id&&A.invSigner(up).name===pr.name,'UPI invoice signed by the Principal who confirmed it');
+ // older invoice without a saved signature: the issuer's current one; a new login starts without one
+ const old=D.payments.find(p=>p.status==='SUCCESS'&&p.byId===cl.id&&!p.signId&&p.rc);ok(!old||A.invSigner(old).sign===A.signOf(cl),'older invoice uses the issuer\'s current signature');
+ const nu={id:'u_new',role:'Clerk',name:'New Clerk',username:'newclerk',email:'new@npcte.org',password:'x',active:true,courses:['BED']};D.users.push(nu);A.sesSet(nu.id);
+ ok(/Not added/.test(A.signPanelHtml(nu))&&/Add signature/.test(A.staffProfileHtml()),'new login: profile asks to add the signature');D.users.pop();
+ lg('admin');A.addSign(cl,Object.assign(fake('S')),'System (sample)',true);ok(/Sample/.test(A.setUsers())&&/Sample/.test(A.signPanelHtml(cl)),'sample signature is marked Sample in Staff logins and Profile');}
+// change 24: smart cleaning of an uploaded signature photo (synthetic phone photo)
+{const W=800,H=500,lum=new Uint8Array(W*H);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++)lum[y*W+x]=y>=460?40:Math.round(x<400?230-(400-x)*.25:230); // shadow on the left, dark table at the bottom
+ for(let x=0;x<W;x++)for(const y of [100,101])lum[y*W+x]=150;                                       // notebook line from edge to edge
+ for(const [x,y] of [[150,200],[650,300],[120,380]])lum[y*W+x]=20;                                   // dust
+ const ink=(x,y)=>{for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++){const xx=x+i,yy=y+j;if(xx>=0&&yy>=0&&xx<W&&yy<H)lum[yy*W+xx]=35}};
+ for(let x=200;x<=600;x++)ink(x,Math.round(250+Math.sin((x-200)/30)*40));                             // the signature stroke (half in the shadow)
+ for(let y=80;y<=250;y++)ink(300,y);                                                                  // a stroke crossing the notebook line
+ const P=A.signPrepLum(lum,W,H);
+ ok(P.n[300*W+50]>200&&P.n[300*W+700]>200,'shadow: paper in the shadow counts as paper');
+ const b=A.signAuto(P);ok(b.x0<=199&&b.x1>=602&&b.y0<=79&&b.y1>=292&&b.y1<460,'first crop box holds the signature and leaves out the table ('+JSON.stringify(b)+')');
+ const m=A.signMask(P,{x0:100,y0:60,x1:700,y1:330});
+ ok(m.ox>=190&&m.ox+m.w<=612&&m.oy>=74&&m.oy+m.h<=298,'specks removed, cut tight around the signature ('+[m.ox,m.oy,m.w,m.h]+')');
+ const row=100-m.oy;let lineInk=0;for(let x=0;x<m.w;x++)if(m.alpha[row*m.w+x]>0)lineInk++;
+ ok(lineInk>0&&lineInk<=12,'notebook line removed, the pen stroke crossing it is kept ('+lineInk+' px left on that row)');
+ let sig=0;for(let x=200;x<=600;x+=10){const y=Math.round(250+Math.sin((x-200)/30)*40);if(m.alpha[(y-m.oy)*m.w+(x-m.ox)]>=140)sig++}ok(sig>=40,'signature stroke kept, also in the shadow');
+ {const W2=700,H2=260,l2=new Uint8Array(W2*H2).fill(235);const dot=(x,y)=>{for(let j=-2;j<=2;j++)for(let i=-2;i<=2;i++)l2[(y+j)*W2+x+i]=30};
+  for(let x=80;x<=620;x++)dot(x,200-Math.round((x-80)/90));                    // flat underline (the strongest stroke)
+  for(const x0 of [100,190,280,370,460])for(let y=90;y<=150;y++)dot(x0+Math.round((150-y)/4),y); // the name: separate letters above it
+  const b2=A.signAuto(A.signPrepLum(l2,W2,H2));ok(b2.y0<=88&&b2.y1>=202,'flat underline: the name above it is in the first box too ('+JSON.stringify(b2)+')')}
+ let th=false;try{A.signMask(P,{x0:620,y0:120,x1:780,y1:200})}catch(e){th=/No signature found/.test(e.message)}ok(th,'empty box: asks to move the box over the signature');
+ th=false;try{A.signMask(P,{x0:0,y0:420,x1:800,y1:500})}catch(e){th=/No signature found|Too much dark/.test(e.message)}ok(th,'box on the table only: refused');}
 console.log('pass',pass,'fail',fail);

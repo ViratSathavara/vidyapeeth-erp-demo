@@ -1,6 +1,6 @@
 /* ---------- PDF writer (A4, standard fonts, JPEG images, no libraries so it works offline) ----------
    Fonts: Helvetica / Helvetica-Bold (default) and Times-Bold / Times-BoldItalic / Times-Italic (o.font 'tb' 'tbi' 'ti').
-   Images: JPEG (DCTDecode) from RCPT_IMG (p4c_assets.js), with an optional soft mask and opacity. */
+   Images: JPEG (DCTDecode) from RCPT_IMG (p4c_assets.js), with an optional soft mask and opacity; 1-bit stencil masks for signatures (change 23). */
 const HELV=[278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
 function pdfSafe(t){
   return String(t??'').replace(/₹/g,'Rs. ').replace(/[–—]/g,'-').replace(/[·•]/g,'-').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/…/g,'...')
@@ -26,10 +26,11 @@ function makePdf(draw,meta){
     stamp(t,o={}){const{size=70,color='#f3c4c4',x=300,y=470}=o;const w=pdfW(t,size,true);const c=Math.cos(Math.PI/4),s=Math.sin(Math.PI/4);
       out.push(`q ${c.toFixed(4)} ${s.toFixed(4)} ${(-s).toFixed(4)} ${c.toFixed(4)} ${x} ${H-y} cm BT /F2 ${size} Tf ${col(color)} rg ${(-w/2).toFixed(1)} 0 Td (${pdfEsc(t)}) Tj ET Q`)},
     /* JPEG image from RCPT_IMG; o.alpha = opacity 0..1. Returns false when the image is not available. */
-    image(name,x,y,w,h,o={}){const im=typeof RCPT_IMG!=='undefined'&&RCPT_IMG[name];if(!im)return false;
-      let k=imgs.findIndex(v=>v.name===name);if(k<0){imgs.push({name,im});k=imgs.length-1}
+    /* change 23: name can also be an image object; {bits,w,h} is a 1-bit stencil (a signature) painted in o.color */
+    image(name,x,y,w,h,o={}){const im=typeof name==='object'?name:typeof RCPT_IMG!=='undefined'&&RCPT_IMG[name];if(!im)return false;
+      let k=imgs.findIndex(v=>v.im===im);if(k<0){imgs.push({name,im});k=imgs.length-1}
       let g='';if(o.alpha!=null&&o.alpha<1){let j=gs.indexOf(o.alpha);if(j<0){gs.push(o.alpha);j=gs.length-1}g=`/GS${j+1} gs `}
-      out.push(`q ${g}${w} 0 0 ${h} ${x} ${H-y-h} cm /Im${k+1} Do Q`);return true},
+      out.push(`q ${g}${im.bits?col(o.color||'#000000')+' rg ':''}${w} 0 0 ${h} ${x} ${H-y-h} cm /Im${k+1} Do Q`);return true},
     wrap(x,y,t,width,o={}){const size=o.size||10,words=pdfSafe(t).split(/\s+/);let line='',yy=y;words.forEach(w=>{const tr=line?line+' '+w:w;if(pdfW(tr,size,o.bold,o.font)>width&&line){api.text(x,yy,line,o);yy+=size+(o.lead||4);line=w}else line=tr});if(line){api.text(x,yy,line,o);yy+=size+(o.lead||4)}return yy}
   };
   draw(api);
@@ -49,7 +50,8 @@ function makePdf(draw,meta){
   ];
   const add=o=>{objs.push(o);return objs.length};
   const jpeg=(b64,w,h,gray,extra='')=>{const bin=atob(b64);return add(`<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /${gray?'DeviceGray':'DeviceRGB'} /BitsPerComponent 8 /Filter /DCTDecode${extra} /Length ${bin.length} >>\nstream\n${bin}\nendstream`)};
-  const xo=imgs.map((v,i)=>{const m=v.im.mask?jpeg(v.im.mask,v.im.w,v.im.h,true):0;return`/Im${i+1} ${jpeg(v.im.jpg,v.im.w,v.im.h,v.im.gray,m?` /SMask ${m} 0 R`:'')} 0 R`});
+  const stencil=im=>{const bin=atob(im.bits);return add(`<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ImageMask true /BitsPerComponent 1 /Decode [1 0] /Length ${bin.length} >>\nstream\n${bin}\nendstream`)};
+  const xo=imgs.map((v,i)=>{if(v.im.bits)return`/Im${i+1} ${stencil(v.im)} 0 R`;const m=v.im.mask?jpeg(v.im.mask,v.im.w,v.im.h,true):0;return`/Im${i+1} ${jpeg(v.im.jpg,v.im.w,v.im.h,v.im.gray,m?` /SMask ${m} 0 R`:'')} 0 R`});
   const gso=gs.map((a,i)=>`/GS${i+1} ${add(`<< /Type /ExtGState /ca ${a} /CA ${a} >>`)} 0 R`);
   const res=`/Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 8 0 R /F4 9 0 R /F5 10 0 R >>${xo.length?` /XObject << ${xo.join(' ')} >>`:''}${gso.length?` /ExtGState << ${gso.join(' ')} >>`:''} >>`;
   const pageObj=c=>`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] ${res} /Contents ${c} 0 R >>`;

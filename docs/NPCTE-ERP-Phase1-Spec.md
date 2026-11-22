@@ -62,13 +62,23 @@ Folder layout:
 - **Course switch in the top bar** (for logins with 2+ courses): *All courses* (default) / B.Ed / M.Ed / … — every screen is filtered to the chosen course. The server applies the same filter on every query (`courseId IN (user's courses)`).
 - **Batch** = a course's admission year + duration, e.g. B.Ed `2025-27`. It is a dropdown (8 years back to 1 year ahead), pre-filled from the student and required on every receipt.
 
+### 2.2 Official signature of every staff login (change 23, 22-11-2026)
+- Every Super Admin, Principal and Clerk login has **one official signature**. Each person adds or replaces it **themselves** after signing in: Profile → **Official signature** → upload a **photo or scan** of the signature (PNG / JPG / WEBP up to 15 MB; big photos are scaled to 1600 px). Drawing it on screen is not offered (change 24). The change is logged (Activity log: "Official signature changed").
+- **Crop box (change 24):** after upload the photo is shown with a box that already sits on the signature (found automatically: the darkest main stroke and the strokes near it, printed labels and the table left out). The person drags the box to move it and its corners to resize it (keyboard: arrows move, Shift + arrows resize); buttons *Find signature again*, *Whole image*, *Choose another image*. The cleaned preview updates when the box is released; only the ink inside the box is kept.
+- **Smart cleaning (change 24), at upload time, nothing for the person to do:** shadows and uneven light are evened out (each pixel is compared with the paper around it); a dark table / anything outside the page is ignored; notebook rules, margin lines and paper edges that cross the whole area are removed (a pen stroke crossing them is kept); dust and specks are removed; the paper becomes transparent and the signature is cut tight and printed in one dark ink colour. An empty box or a box full of dark area is refused with a message ("Move the box over the signature").
+- **On the invoice** (screen, print and PDF, student copy and office copy): above "Authorised Signatory" under the "For <college>" line, the signature and the name of **the person who issued that invoice**: Cash / Cheque = the staff member who entered the payment and typed the invoice no.; UPI = the staff member who **confirmed** the payment and added the invoice no. A UPI payment still waiting for confirmation has no invoice and no signature yet.
+- An invoice **keeps the signature it was issued with** (`Payment.signatureId`): a new signature later does not change invoices already issued. Invoices issued before change 23 use the issuer's current signature. With a signature the footer reads "This is a computer-generated invoice." (without one it keeps "...does not require a physical signature").
+- **Existing logins** (before change 23) got a **sample (dummy) signature** written from their name, marked **Sample** in the profile and in Settings → Staff logins until they replace it. A **new login** starts with none: it sees an "Add your official signature" strip at the top of the app (Later = hide for this session) and the Add signature button in the profile. Settings → Staff logins shows each login's signature with Added / Sample / Not added.
+- Data: `StaffSignature(id, userId, imagePng, imageMask1bit, width, height, isSample, createdBy, createdAt)`; `User.signatureId` = current one; `Payment.signatureId` = the one printed on that invoice. A replaced signature that no invoice used is deleted.
+
 ---
 
 ## 3. Data model (minimum)
 
 ```
 College(id, name, trustName, address, phone, email, logoUrl, receiptPrefix, settings JSON)
-User(id, collegeId, role[SUPER_ADMIN|PRINCIPAL|CLERK|STUDENT], name, email, phone, passwordHash, mustChangePassword, active, lastLoginAt)
+User(id, collegeId, role[SUPER_ADMIN|PRINCIPAL|CLERK|STUDENT], name, email, phone, passwordHash, mustChangePassword, active, lastLoginAt, signatureId?)
+StaffSignature(id, userId, imagePng, imageMask1bit, width, height, isSample, createdBy, createdAt)   -- change 23, §2.2
 Course(id, collegeId, code[BED|MED], name, semesters=4)
 FeeTemplate(id, courseId, semester 1..4, defaultAmount)          -- default ₹30,000 per sem (editable in Settings)
 Student(id, collegeId, userId, enrolmentNo, name, gender, dob, phone, email, address, photoUrl,
@@ -79,7 +89,8 @@ StudentSemesterFee(id, studentId, semester 1..4, amount, dueDate?)  -- copied fr
 Payment(id, collegeId, studentId, semester, batch, mode[CASH|CHEQUE|UPI], amount,
         invoiceDate, entryAt, chequeNo?, bankName?, chequeDate?, upiRef?, providerTxnId?,
         cashInHand (paise, CASH only, default 0),            -- change 4: part of the cash kept in the college
-        status[PENDING|SUCCESS|FAILED|CANCELLED], cancelReason?, receiptNo, receiptPdfUrl, depositId?, createdBy)
+        status[PENDING|SUCCESS|FAILED|CANCELLED], cancelReason?, receiptNo, receiptPdfUrl, depositId?, createdBy,
+        issuedBy (who typed the invoice no.: entered cash/cheque or confirmed UPI), signatureId?)   -- change 23
 PaymentExpenseItem(id, paymentId, amount, reason, billUrl?)  -- change 4: expense-now part of a CASH payment
         -- toBank = amount - sum(expense items) - cashInHand  (only toBank waits for the office's bank deposit, §5.6)
 CashSpend(id, collegeId, courseId, ref e.g. EXP-0001, date, amount, status[ACTIVE|CANCELLED], cancelReason?, createdBy, createdAt)

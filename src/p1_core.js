@@ -75,6 +75,9 @@ function migrate(){
     (cashbox().deposits||[]).forEach(d=>db.deposits.push({id:d.id,ref:d.ref,type:'CASH',course:d.course,periodFrom:d.depositedOn,periodTo:d.depositedOn,total:d.total,feeTotal:0,cihTotal:d.total,count:d.lines.length,depositedOn:d.depositedOn,bankRef:d.bankRef,by:d.by,byId:d.byId||'',at:d.at,cihLines:d.lines,demo:d.demo}));
     cashbox().deposits=[];Object.keys(db.roles).forEach(r=>{db.roles[r]=(db.roles[r]||[]).filter(k=>k!=='cash.view'&&k!=='cash.deposit')})}
   cashbox();
+  /* change 23: official signatures. Staff logins that existed before get a sample (dummy) signature once, to be replaced with their own. */
+  if(!Array.isArray(db.signs))db.signs=[];
+  if(!db.mig.sign23&&typeof sampleSigns==='function'&&sampleSigns())db.mig.sign23=1;
   /* change 5: example cash-in-hand data, once, only if nothing of the kind exists yet (a browser that already uses cash in hand is left alone) */
   if(!db.mig.cashDemo){db.mig.cashDemo=1;if(!db.payments.some(p=>payCih(p)>0)&&!cashbox().spends.length&&!db.deposits.some(d=>(d.cihLines||[]).length)){const n=seedCashDemo();if(n)log('Sample cash in hand data added','System','',null,null,n+' cash invoices with cash in hand, with expenses and a bank deposit')}}
 }
@@ -253,7 +256,7 @@ function recordPayment(s,o){
   const p={id:uid('p'),studentId:s.id,sem:o.sem,mode:o.mode,amount:o.amount,invoiceDate,entryAt,paidAt:o.paidAt||entryAt,
     chequeNo:o.chequeNo||'',bank:o.bank||'',chequeDate:o.chequeDate||'',upiRef:o.upiRef||'',providerTxnId:o.providerTxnId||'',note:o.note||'',
     batch:o.batch||defaultBatch(s),reason:o.reason||'',category:o.category||'',status:'SUCCESS',cancelReason:'',rc,depositId:'',by:u?u.name:'Payment gateway',byId:u?u.id:'',dateEdits:[]};
-  if(rc){p.rcAt=entryAt;p.rcBy=u?u.name:''}else p.needsRc=true;
+  if(rc){p.rcAt=entryAt;p.rcBy=u?u.name:'';p.rcById=u?u.id:'';if(u&&u.signId)p.signId=u.signId}else p.needsRc=true; /* change 23: the invoice keeps the signature of the staff member who issued it */
   if(o.mode==='CASH'){if((o.expenseItems||[]).length)p.expenseItems=o.expenseItems;if(o.cih>0)p.cih=o.cih}
   db.payments.push(p);
   log('Payment recorded','Payment',p.rc||('UPI '+(p.upiRef||'')),null,{student:s.enrol,batch:p.batch,sem:p.sem,mode:p.mode,amount:inr(p.amount),invoiceDate:fmtD(p.invoiceDate),
@@ -427,7 +430,8 @@ function seed(){
       {id:'u_prinm',role:'Principal',name:'Principal, M.Ed',username:'principalmed',email:'principal.med@npcte.org',phone:'',password:'principal123',mustChange:false,active:true,lastLoginAt:0,courses:['MED']},
       {id:'u_clerk',role:'Clerk',name:'Accounts Clerk',username:'clerk',email:'accounts@npcte.org',phone:'',password:'clerk123',mustChange:false,active:true,lastLoginAt:0,courses:['BED','MED']}],
     students:[],refs:[],payments:[],deposits:[],notices:[],notifs:[],audit:[],events:[],outbox:[],upiOrders:[],enquiries:[],
-    cashbox:{spends:[],deposits:[]},counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1,cash:1,cashDemo:1,cash7:1}};
+    cashbox:{spends:[],deposits:[]},counters:{enrol:{},exp:1,ref:0},mig:{stuPw:1,cash:1,cashDemo:1,cash7:1},signs:[]};
+  if(typeof sampleSigns==='function'&&sampleSigns())db.mig.sign23=1; /* change 23: sample (dummy) signatures for the starting staff logins */
   /* real college data (fee registers 2026-27), available only after the password gate has decrypted it */
   if(typeof REAL!=='undefined'&&REAL){seedReal(REAL)}else{
   /* sample names only (demo) */

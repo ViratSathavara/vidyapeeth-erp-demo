@@ -290,8 +290,9 @@ function receiptHtml(p){
      <div class="inv-tot">${row('Total fee',I.fee)}${I.earlier>0?row('Paid earlier',I.earlier):''}${row('Amount paid now',I.paidNow)}${row('Balance due',I.balance,'bal')}</div></div>
     ${exp}
     <div class="inv-notes"><b>Notes</b><ul>${I.notes.map(n=>`<li>${E(n)}</li>`).join('')}</ul></div>
-    <div class="inv-sign"><i>${E(R.signFor)}</i><span>Authorised Signatory</span></div>
-    <p class="inv-foot">This is a computer-generated invoice and does not require a physical signature.</p>
+    ${(()=>{const sg=typeof invSigner==='function'?invSigner(p):null; /* change 23: signature of the person who issued this invoice */
+      return`<div class="inv-sign"><i>${E(R.signFor)}</i><div class="inv-sig">${sg&&sg.sign?signImg(sg.sign,'Signature of '+(sg.name||'the issuer')):''}</div>${sg&&sg.name?`<b>${E(sg.name)}</b>`:''}<span>Authorised Signatory</span></div>
+    <p class="inv-foot">${sg&&sg.sign?'This is a computer-generated invoice.':'This is a computer-generated invoice and does not require a physical signature.'}</p>`})()}
    </div>
   </article>`;
 }
@@ -416,7 +417,7 @@ ACT.rcConfirm=el=>{need('fees.confirm','confirm UPI payments');const p=db.paymen
     <div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-act="closeDialog">Not now</button><button class="btn primary">Confirm and issue invoice</button></div></form>`,'Confirm UPI payment');const i=$('#f_rc');if(i)i.focus()};
 FORM.rcConfirm=(f,d)=>{need('fees.confirm','confirm UPI payments');const p=db.payments.find(x=>x.id===f.dataset.id);if(!p||!p.needsRc)throw new Error('This payment already has its invoice no.');guardStudent(p.studentId);if(p.status!=='SUCCESS')throw new Error('Only a successful payment can be confirmed');
   const s=stu(p.studentId);const rc=rcCheck(d.rc,payCourse(p),p.id);const u=cur();
-  p.rc=rc;p.needsRc=false;p.rcAt=Date.now();p.rcBy=u.name;p.confirmedBy=u.name;p.confirmedAt=p.rcAt;const cn=capText(d.cnote,'Remarks',200);if(cn)p.confirmNote=cn;
+  p.rc=rc;p.needsRc=false;p.rcAt=Date.now();p.rcBy=u.name;p.rcById=u.id;p.confirmedBy=u.name;p.confirmedAt=p.rcAt;if(u.signId)p.signId=u.signId; /* change 23: signed by the person who confirmed it */const cn=capText(d.cnote,'Remarks',200);if(cn)p.confirmNote=cn;
   log('UPI payment confirmed','Payment',rc,{invoiceNo:''},{invoiceNo:rc,student:s.enrol,amount:inr(p.amount),utr:p.upiRef||''});
   if(db.settings.mail.sendReceipts)queueMail({kind:'receipt',paymentId:p.id,studentId:s.id,to:[s.email],subject:`Fee invoice ${p.rc} - ${db.college.short}`});
   notify('payment',`Your fee invoice ${rc} is ready`,`${inr(p.amount)} · Semester ${p.sem}. Open Fees to download it.`,{students:[s.id],portal:'sfees',tone:'good',self:true});
