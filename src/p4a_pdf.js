@@ -64,3 +64,40 @@ function makePdf(draw,meta){
   pdf+=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`+offs.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')+`trailer\n<< /Size ${objs.length+1} /Root 1 0 R /Info 7 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return pdf;
 }
+
+/* ---------- change 28: the same page on a canvas (screen view and print = the PDF page itself) ----------
+   pdfRecord runs a draw function (the one that makes the PDF) and keeps every call; pdfCanvas loads the images and
+   paints the calls on a canvas, point for point, with the same positions and text widths as the PDF.
+   Fonts: Helvetica / Times in the PDF = Arial / Times New Roman on screen (same letter widths). */
+function pdfRecord(draw){const ops=[];
+  const api={rect:(...a)=>ops.push(['rect',a]),line:(...a)=>ops.push(['line',a]),width:(t,o={})=>pdfW(t,o.size||10,o.bold,o.font),newPage(){},
+    text:(...a)=>ops.push(['text',a]),textUp:(...a)=>ops.push(['textUp',a]),stamp:(...a)=>ops.push(['stamp',a]),
+    image(name,x,y,w,h,o={}){const im=typeof name==='object'?name:typeof RCPT_IMG!=='undefined'&&RCPT_IMG[name];if(!im)return false;ops.push(['image',[im,x,y,w,h,o]]);return true},
+    wrap(x,y,t,width,o={}){const size=o.size||10,words=pdfSafe(t).split(/\s+/);let line='',yy=y;words.forEach(w=>{const tr=line?line+' '+w:w;if(pdfW(tr,size,o.bold,o.font)>width&&line){api.text(x,yy,line,o);yy+=size+(o.lead||4);line=w}else line=tr});if(line){api.text(x,yy,line,o);yy+=size+(o.lead||4)}return yy}};
+  draw(api);return ops}
+const PDF_IMG=new WeakMap();
+const pdfLoadImg=src=>new Promise((ok,bad)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>bad(new Error('Could not load an invoice image'));i.src=src});
+/* an invoice image ready to paint: JPEG (+ its soft mask as transparency), or a signature's transparent PNG */
+function pdfImgSource(im){if(PDF_IMG.has(im))return PDF_IMG.get(im);
+  const pr=(async()=>{if(im.png)return pdfLoadImg(im.png);
+    const j=await pdfLoadImg('data:image/jpeg;base64,'+im.jpg);if(!im.mask)return j;
+    const m=await pdfLoadImg('data:image/jpeg;base64,'+im.mask);const c=document.createElement('canvas');c.width=im.w;c.height=im.h;const g=c.getContext('2d');
+    g.drawImage(m,0,0,im.w,im.h);const md=g.getImageData(0,0,im.w,im.h);g.clearRect(0,0,im.w,im.h);g.drawImage(j,0,0,im.w,im.h);const d=g.getImageData(0,0,im.w,im.h);
+    for(let i=0;i<d.data.length;i+=4)d.data[i+3]=md.data[i];g.putImageData(d,0,0);return c})();
+  PDF_IMG.set(im,pr);return pr}
+const pdfCanvasFont=(o,size)=>{const f=o.font,T='"Times New Roman",Times,"Liberation Serif","Noto Serif",serif',S='Arial,Helvetica,"Liberation Sans",Roboto,sans-serif';
+  return f==='tb'?`bold ${size}px ${T}`:f==='tbi'?`italic bold ${size}px ${T}`:f==='ti'?`italic ${size}px ${T}`:`${o.bold?'bold ':''}${size}px ${S}`};
+/* scale = canvas pixels per PDF point (A4 = 595 x 842 pt) */
+async function pdfCanvas(draw,scale,meta={}){const W=meta.w||595,H=meta.h||842,ops=pdfRecord(draw);
+  const srcs=await Promise.all(ops.map(o=>o[0]==='image'?pdfImgSource(o[1][0]).catch(()=>null):null));
+  const c=document.createElement('canvas');c.width=Math.round(W*scale);c.height=Math.round(H*scale);const g=c.getContext('2d');
+  g.scale(scale,scale);g.fillStyle='#ffffff';g.fillRect(0,0,W,H);g.textBaseline='alphabetic';
+  ops.forEach(([k,a],i)=>{
+    if(k==='rect'){const[x,y,w,h,fill]=a;g.fillStyle=fill;g.fillRect(x,y,w,h)}
+    else if(k==='line'){const[x1,y1,x2,y2,stroke='#d7dce5',w=.8]=a;g.strokeStyle=stroke;g.lineWidth=w;g.beginPath();g.moveTo(x1,y1);g.lineTo(x2,y2);g.stroke()}
+    else if(k==='text'){const[x,y,t,o={}]=a;const size=o.size||10,w=pdfW(t,size,o.bold,o.font),al=o.align||'left',px=al==='right'?x-w:al==='center'?x-w/2:x;
+      g.font=pdfCanvasFont(o,size);g.fillStyle=o.color||'#1b2437';g.fillText(pdfSafe(t),px,y)}
+    else if(k==='textUp'){const[x,y,t,o={}]=a;g.save();g.translate(x,y);g.rotate(-Math.PI/2);g.font=pdfCanvasFont(o,o.size||10);g.fillStyle=o.color||'#1b2437';g.fillText(pdfSafe(t),0,0);g.restore()}
+    else if(k==='stamp'){const[t,o={}]=a;const{size=70,color='#f3c4c4',x=300,y=470}=o;const w=pdfW(t,size,true);g.save();g.translate(x,y);g.rotate(-Math.PI/4);g.font=pdfCanvasFont({bold:true},size);g.fillStyle=color;g.fillText(pdfSafe(t),-w/2,0);g.restore()}
+    else if(k==='image'&&srcs[i]){const[,x,y,w,h,o]=a;g.save();if(o.alpha!=null)g.globalAlpha=o.alpha;g.drawImage(srcs[i],x,y,w,h);g.restore()}});
+  return c}

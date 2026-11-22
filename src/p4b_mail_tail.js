@@ -88,17 +88,22 @@ function receiptPdf(p,studentCopy,gIn){if(studentCopy===undefined)studentCopy=is
     let ny=Math.max(646.2,y+50);g.text(L,ny,'Notes',{size:9,bold:true,color:INK});ny+=16.3;
     const notes=I.notes.slice();
     if(!studentCopy&&(p.expenseItems||[]).length)notes.splice(notes.length-1,0,'Expense details: '+p.expenseItems.map(x=>`${x.reason} Rs. ${amt2(x.amount)}${x.doc?' (bill attached)':''}`).join('; ')+'.');
-    /* change 23: the signature block sits bottom-right; note lines that reach it are wrapped narrower so they never run under it */
-    const SG=typeof invSigner==='function'?invSigner(p):null,SX=Math.min(395.3,RT-g.width(R.signFor,{font:'ti',size:8.5})-4),full=W-10.4,narrow=Math.max(150,SX-14-(L+10.4));
-    notes.forEach(t=>{if(ny>800)return;const lines=Math.ceil(g.width(t,{size:8.5})/full);g.rect(L+0.5,ny-4.2,2.6,2.6,MUT);ny=g.wrap(L+10.4,ny,t,ny+lines*13>714?narrow:full,{size:8.5,color:MUT,lead:4.5})});
-    /* signature and footer: "For <college>", the issuer's signature on the line, the issuer's name, "Authorised Signatory" */
-    const sy=Math.max(706,Math.min(728,ny+14)),LX=Math.min(SX,RT-170);
-    g.text(RT,sy,R.signFor,{font:'ti',size:8.5,color:MUT,align:'right'});
-    if(SG&&SG.sign){const s=SG.sign,bw=RT-LX,bh=34;const k=Math.min(bw/s.w,bh/s.h),iw=s.w*k,ih=s.h*k;g.image(s,(LX+RT)/2-iw/2,sy+42-ih,iw,ih,{color:SIGN_INK})}
-    g.line(LX,sy+45,RT,sy+45,INK,.8);
-    if(SG&&SG.name)g.text(RT,sy+57,SG.name,{size:8.5,bold:true,color:INK,align:'right'});
-    g.text(RT,SG&&SG.name?sy+69:sy+58,'Authorised Signatory',{size:8.5,color:MUT,align:'right'});
-    g.text(CX,818,SG&&SG.sign?'This is a computer-generated invoice.':'This is a computer-generated invoice and does not require a physical signature.',{size:7.5,color:MUT,align:'center'});
+    const drawn=[]; /* change 23: where each note line ends, so the signature never covers a note */
+    notes.forEach(t=>{if(ny>782)return;g.rect(L+0.5,ny-4.2,2.6,2.6,MUT);let line='',yy=ny;pdfSafe(t).split(/\s+/).forEach(w=>{const tr=line?line+' '+w:w;if(g.width(tr,{size:8.5})>W-10.4&&line){drawn.push([yy,L+10.4+g.width(line,{size:8.5})]);yy+=13;line=w}else line=tr});if(line)drawn.push([yy,L+10.4+g.width(line,{size:8.5})]);
+      ny=g.wrap(L+10.4,ny,t,W-10.4,{size:8.5,color:MUT,lead:4.5})});
+    /* signature and footer (the college's final design: unchanged) */
+    const sy=Math.max(711.5,ny+16);
+    if(sy<790){g.text(RT,sy,R.signFor,{font:'ti',size:8.5,color:MUT,align:'right'});g.line(395.3,sy+8.5,RT,sy+8.5,INK,.8);g.text(RT,sy+22,'Authorised Signatory',{size:8.5,color:MUT,align:'right'})}
+    /* change 23 (25, 27): ONLY a small signature of the person who issued the invoice is added; nothing else moves.
+       Place: the empty space on the right just above "For <college>" (the box from x 437 to the right edge), centred in it.
+       A long invoice whose "For <college>" block does not fit the page (old rule, unchanged) gets only the signature at the same place,
+       kept above the footer. It is never drawn over a note: then it sits on the line (block shown) or is left out (no block). */
+    {const SG=typeof invSigner==='function'?invSigner(p):null;
+     if(SG&&SG.sign){const s=SG.sign,k=Math.min(110/s.w,24/s.h),iw=s.w*k,ih=s.h*k,sx=(437+RT)/2-iw/2;let bot=Math.min(sy-8,806);
+      const hit=b=>drawn.some(([y,r])=>y-7<b+1&&y+2>b-ih-1&&r>sx-4);
+      if(hit(bot))bot=sy<790?sy+9.5:0;
+      if(bot)g.image(s,sx,bot-ih,iw,ih,{color:SIGN_INK})}}
+    g.text(CX,818,'This is a computer-generated invoice and does not require a physical signature.',{size:7.5,color:MUT,align:'center'});
     /* faint emblem over the middle of the page */
     g.image('wm',203.6,285.9,300,305,{alpha:.07});
     if(cancelled)g.stamp('CANCELLED',{size:84,color:'#f6caca',x:352,y:480});

@@ -10,6 +10,8 @@ A.load();const db=A.db;let RCN=70000;const nrc=()=>String(RCN++);
  ok(db.payments.filter(p=>p.depositId).every(p=>!p.cih),'example: receipts already deposited are untouched');
  console.log('  example data:',L.length,'receipts ·',cb.spends.length,'expenses ·',cd.length,'cash-in-hand deposits ·',db.courses.map(c=>c.id+' left '+A.inr(A.cihBalance(c.id))).join(', '));}
 // login as clerk
+// change 28: the screen / print invoice is the PDF page itself; its text = the text drawn on that page
+const pageOps=p=>A.pdfRecord(g=>A.receiptPdf(p,undefined,g));const pageText=p=>pageOps(p).filter(o=>o[0]==='text').map(o=>A.pdfSafe(o[1][2])).join(' | ');
 const login=un=>{const u=db.users.find(x=>x.username===un);A.sesSet(u.id);return u};
 login('clerk');
 // render every staff view without throwing
@@ -76,12 +78,12 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  try{A.FORM.collect({dataset:{mode:'CASH'}},{amount:'10000',batch:'2025-27',invoiceDate:'2026-11-08',rc:nrc()})}catch(e){quiet(e)}
  const pe=db.payments.at(-1);ok(pe.mode==='CASH'&&pe.batch==='2025-27'&&pe.expenseItems.length===2&&A.payExp(pe)===500000&&A.payCih(pe)===300000&&A.payToBank(pe)===200000,'cash split saved: 5,000 expense + 3,000 cash in hand + 2,000 bank');
  ok(A.semSummary(s2,m2.sem).due===due0-1000000,'the whole fee counts as paid');ok(!A.db.expenses&&!A.feeTabs().some(t=>t[0]==='expenses'),'no separate expense section');
- ok(/2025-27/.test(A.receiptHtml(pe))&&/Exam fees/.test(A.receiptHtml(pe))&&/Where this cash went/.test(A.receiptHtml(pe)),'office receipt shows where the cash went');
+ ok(/2025-27/.test(pageText(pe))&&/Exam fees/.test(pageText(pe))&&/Cash split/.test(pageText(pe)),'office invoice page shows where the cash went');
  A.ui.f['audit.tx']={modes:['CASH'],split:'cih'};ok(A.txFiltered().some(r=>r.id===pe.id&&r.batch==='2025-27')&&A.txFiltered().every(r=>r.mode==='CASH'&&A.payCih(r.rec)>0),'audit filter: cash with cash in hand');
  const dq=A.depPending().find(p=>p.id===pe.id);ok(dq&&A.payToBank(dq)===200000,'to deposit: only the to-bank part of a split cash fee');
  ok(!A.depPending().some(p=>p.mode!=='CASH'),'change 7: cheque and UPI are never waiting for a deposit');
  ok(A.receiptPdf(pe).startsWith('%PDF'),'split pdf');
- const su2=db.users.find(u=>u.studentId===s2.id);A.sesSet(su2.id);ok(!/Where this cash went|cash in hand/i.test(A.receiptHtml(pe)),'student receipt hides the split');login('clerk');}
+ const su2=db.users.find(u=>u.studentId===s2.id);A.sesSet(su2.id);ok(!/Cash split|cash in hand|Expense details/i.test(pageText(pe)),'student invoice page hides the split');login('clerk');}
 // ---- course scope (B.Ed / M.Ed principals, one clerk for both, Super Admin all) ----
 {const bed=db.students.filter(x=>x.course==='BED').length,med=db.students.filter(x=>x.course==='MED').length;
  login('principal');A.setPickedCourse('');ok(A.vStudents().length===bed&&A.vStudents().every(x=>x.course==='BED'),'B.Ed principal sees only B.Ed');
@@ -96,8 +98,8 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  ok(/Ph\.D/.test(A.setCourses()),'courses tab lists PhD');ok(/Courses/.test(A.setUsers()),'staff logins show courses');
  for(const un of ['admin','principal','clerk']){login(un);for(const fn of ['viewDashboard','feeCollect']){try{A[fn]()}catch(e){ok(false,un+' '+fn+': '+e.message)}}}
  login('clerk');ok(A.colRows().length===db.students.filter(x=>x.status==='ACTIVE').length,'collect list shows every active student');
- const pp=db.payments.find(p=>p.status==='SUCCESS');const su=db.users.find(u=>u.studentId===pp.studentId);A.sesSet(su.id);ok(!/Mode: By/.test(A.receiptHtml(pp))&&/Tuition fee/.test(A.receiptHtml(pp)),'student receipt hides mode, shows tuition fee');
- login('clerk');ok(/Mode: By/.test(A.receiptHtml(pp)),'office receipt shows mode');}
+ const pp=db.payments.find(p=>p.status==='SUCCESS');const su=db.users.find(u=>u.studentId===pp.studentId);A.sesSet(su.id);ok(!/Mode: By/.test(pageText(pp))&&/Tuition fee/.test(pageText(pp)),'student invoice page hides mode, shows tuition fee');
+ login('clerk');ok(/Mode: By/.test(pageText(pp)),'office invoice page shows mode');}
 // ---- event log: every role, scoped viewing ----
 {login('clerk');A.ev('Click','Collect','Riya Joshi');login('admin');A.ev('Page','Opened page','Settings');A.evFlush();
  ok(db.events.length>=2&&db.events.some(e=>e.actor==='Accounts Clerk'&&e.cat==='Click')&&db.events.some(e=>e.role==='Super Admin'),'events logged for clerk and super admin');
@@ -351,8 +353,21 @@ login('clerk');{const s2=db.students.find(x=>x.status==='ACTIVE'&&A.feeSum(x).pa
  const pc=A.recordPayment(sB,{rc:'7401',sem,mode:'CASH',amount:100000,invoiceDate:'2026-11-20'});
  ok(pc.signId===s1.id&&pc.rcById===cl.id,'cash invoice keeps the clerk\'s signature');
  const sg=A.invSigner(pc);ok(sg&&sg.name===cl.name&&sg.sign===s1,'signer of a cash invoice = who entered it');
- const h=A.receiptHtml(pc);ok(h.includes(s1.png)&&h.includes('Authorised Signatory')&&h.includes(cl.name),'screen invoice shows the signature and the name');
- const pdf=A.receiptPdf(pc,true);ok(/\/ImageMask true \/BitsPerComponent 1/.test(pdf)&&pdf.includes('Authorised Signatory')&&pdf.includes(cl.name),'PDF invoice has the signature (1-bit mask) and the name');
+ const h=pageText(pc);ok(pageOps(pc).some(o=>o[0]==='image'&&o[1][0]===s1)&&h.includes('Authorised Signatory')&&h.includes('does not require a physical signature'),'screen invoice (the PDF page) shows the signature, footer unchanged');
+ const pdf=A.receiptPdf(pc,true);ok(/\/ImageMask true \/BitsPerComponent 1/.test(pdf)&&pdf.includes('Authorised Signatory')&&pdf.includes('does not require a physical signature'),'PDF invoice has the signature (1-bit mask), footer unchanged');
+ const strip=x=>x.replace(/q [\d.]+ [\d.]+ [\d.]+ rg [\d.]+ 0 0 [\d.]+ [\d.]+ [\d.]+ cm \/Im\d+ Do Q\n?/g,'').replace(/\/Im\d+/g,'/Im');const pg=x=>strip(x.split('stream\n')[1].split('\nendstream')[0]);
+ {const keep=cl.signId;cl.signId='';const sgs=D.signs;D.signs=[];const plain=A.receiptPdf(pc,true);D.signs=sgs;cl.signId=keep;
+  ok(pg(plain)===pg(pdf),'invoice layout is exactly the final design: with a signature only the signature image is added');}
+ // change 27: a long office copy (like invoice 1779) keeps the original layout exactly (no "For <college>" block fits, as before); only the signature is added
+ {const sL=D.students.find(s=>s.status==='ACTIVE'&&A.feeSum(s).sems.some(m=>m.due>=1300000));const mL=A.feeSum(sL).sems.find(m=>m.due>=1300000).sem;
+  A.recordPayment(sL,{rc:'7411',sem:mL,mode:'CASH',amount:400000,invoiceDate:'2026-10-20'});
+  const pL=A.recordPayment(sL,{rc:'7412',sem:mL,mode:'CASH',amount:850000,invoiceDate:'2026-10-28',note:'Group of 6 receipts - total Rs. 60,000 - BY EXP STAFF PROFILE PAY 7500 X 8 =60,000',expenseItems:[{amount:850000,reason:'STAFF PROFILE PAY 7500 X 8 =60,000',doc:null}]});
+  const lp=A.receiptPdf(pL,false);
+  ok(!lp.includes('Authorised Signatory')&&/\/ImageMask true/.test(lp),'long office copy: layout as before, only the signature added');
+  ok(['Cash split','Remarks: Group of 6','Expense details','Entered by'].every(x=>lp.includes(x)),'long office copy: every note still printed');
+  {const keep=cl.signId;cl.signId='';const sgs=D.signs;D.signs=[];const plainL=A.receiptPdf(pL,false);D.signs=sgs;cl.signId=keep;
+   const st=x=>x.split('stream\n')[1].split('\nendstream')[0].replace(/q [\d.]+ [\d.]+ [\d.]+ rg [\d.]+ 0 0 [\d.]+ [\d.]+ [\d.]+ cm \/Im\d+ Do Q\n?/g,'').replace(/\/Im\d+/g,'/Im');
+   ok(st(plainL)===st(lp),'long office copy: page identical apart from the signature');}}
  A.addSign(cl,fake('B'),cl.name,false);const s2=A.signOf(cl);ok(s2!==s1&&A.signById(s1.id)&&A.invSigner(pc).sign===s1,'a new signature does not change an invoice already issued');
  A.addSign(cl,fake('C'),cl.name,false);ok(!A.signById(s2.id),'an unused old signature is not kept');
  // UPI: signed by the staff member who confirms it

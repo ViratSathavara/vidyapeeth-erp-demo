@@ -266,48 +266,33 @@ function renderPayPage(id){
 ACT.ppPay=el=>{const p=handleUpiWebhook(gwEvent(el.dataset.id,'captured'));save();ev('Form','UPI paid on pay page',el.dataset.id);renderPayPage(el.dataset.id);if(p)toast('Payment successful · '+p.rc)};
 ACT.ppDecline=el=>{handleUpiWebhook(gwEvent(el.dataset.id,'failed'));save();renderPayPage(el.dataset.id)};
 
-/* ---------- invoice view ---------- */
-/* on-screen and printed invoice: the same design as the PDF fee invoice */
-function receiptHtml(p){
-  const sv=isStudentUser(cur());const I=rcptInfo(p,sv),{s,R,cancelled}=I;
-  const img=k=>typeof RCPT_IMG!=='undefined'&&RCPT_IMG[k]?`data:image/jpeg;base64,${RCPT_IMG[k].jpg}`:'';
-  /* office copy only: where this cash went (change 4). The student copy never shows it. */
-  const exp=!sv&&(payExp(p)||payCih(p))?`<div class="inv-exp"><b>Where this cash went</b>${(p.expenseItems||[]).map((x,i)=>`<div class="rline"><span>Expense: ${E(x.reason)}${x.doc?` <button class="lnk" data-act="expDocOpen" data-id="${E(p.id)}" data-i="${i}">📎 bill</button>`:''}</span><span>${inr(x.amount)}</span></div>`).join('')}
-    ${payCih(p)?`<div class="rline"><span>Cash in hand${p.status==='SUCCESS'?` <small class="muted">(${inr(cihLeft(p))} not used yet)</small>`:''}</span><span>${inr(payCih(p))}</span></div>`:''}<div class="rline"><span><b>To bank</b></span><b>${inr(payToBank(p))}</b></div></div>`:'';
-  const row=(k,v,cls='')=>`<div class="inv-r ${cls}"><span>${k}</span><b>${amt2(v)}</b></div>`;
-  return`<article class="inv ${cancelled?'cancelled':''}" aria-label="Fee invoice ${E(p.rc)}">
-   <div class="inv-band" aria-hidden="true">${img('logo')?`<span class="inv-logo"><img src="${img('logo')}" alt=""></span>`:''}<span class="inv-word">NPCTE</span></div>
-   <div class="inv-main">
-    <div class="inv-top"><i>${E(R.naac)}</i><div class="inv-con"><span>☎ College : ${E(R.mobCollege)} (Mo.)</span><span>Trust : ${E(R.mobTrust)} (Mo.)</span><span>E-mail : ${E(R.email)}</span><span>Web : ${E(R.web)}</span></div></div>
-    <div class="inv-name">${E(R.fullName)}</div>${img('guj')?`<img class="inv-guj" src="${img('guj')}" alt="">`:''}
-    <div class="inv-trust">${E(R.trustLine)}</div><div class="inv-addr">${E(R.address)}</div>
-    <h3 class="inv-title"><span>Fee</span> Invoice${cancelled?'<em>Cancelled</em>':''}</h3>
-    <div class="inv-meta"><div><small>Invoice no.</small><b class="mono">${E(p.rc)}</b></div><div><small>Invoice date</small><b>${longD(p.invoiceDate)}</b></div><div><small>Batch</small><b>${E(batchOf(p))}</b></div><div><small>Course</small><b>${E(I.cname.replace(' - ',' – '))}</b></div></div>
-    <div class="inv-box"><div><small>Billed to</small><b>${E(s.name)}</b><span>Student ID: ${E(s.enrol)}</span><span>Category: ${E(s.category)}</span></div>
-     <div><small>Payment details</small><b>${sv?'Fee: Tuition fee':'Mode: '+E(I.mode)}</b><span>Received by: ${E(p.by||'College office')}</span><span>Payment date: ${longD(I.payDate)}</span></div></div>
-    <div class="inv-tbl"><div class="inv-th"><span>Description</span><span>Amount (₹)</span></div><div class="inv-td alt"><span>Tuition fee – Semester ${p.sem}</span><span>${amt2(I.fee)}</span></div><div class="inv-td"><span>Less: Scholarship / concession</span><span>0.00</span></div></div>
-    <div class="inv-sum"><div class="inv-words"><small>Amount paid in words:</small><b>${E(inWords(I.paidNow))}</b></div>
-     <div class="inv-tot">${row('Total fee',I.fee)}${I.earlier>0?row('Paid earlier',I.earlier):''}${row('Amount paid now',I.paidNow)}${row('Balance due',I.balance,'bal')}</div></div>
-    ${exp}
-    <div class="inv-notes"><b>Notes</b><ul>${I.notes.map(n=>`<li>${E(n)}</li>`).join('')}</ul></div>
-    ${(()=>{const sg=typeof invSigner==='function'?invSigner(p):null; /* change 23: signature of the person who issued this invoice */
-      return`<div class="inv-sign"><i>${E(R.signFor)}</i><div class="inv-sig">${sg&&sg.sign?signImg(sg.sign,'Signature of '+(sg.name||'the issuer')):''}</div>${sg&&sg.name?`<b>${E(sg.name)}</b>`:''}<span>Authorised Signatory</span></div>
-    <p class="inv-foot">${sg&&sg.sign?'This is a computer-generated invoice.':'This is a computer-generated invoice and does not require a physical signature.'}</p>`})()}
-   </div>
-  </article>`;
-}
+/* ---------- invoice view ----------
+   change 28: there is no separate HTML invoice any more. The screen and Print show the PDF page itself: the same drawing code
+   (receiptPdf) painted on a canvas by p4a_pdf.js, so what is seen, printed and downloaded is one and the same design. */
+const invoiceCanvas=(p,scale)=>pdfCanvas(g=>receiptPdf(p,isStudentUser(cur()),g),scale);
+/* the drawer shows the page as soon as its images are loaded */
+function invoicePageShow(p){const box=$('#invPage');if(!box)return;
+  invoiceCanvas(p,Math.min(3,2*(window.devicePixelRatio||1))).then(c=>{if(!box.isConnected)return;c.setAttribute('role','img');c.setAttribute('aria-label',`Fee invoice ${p.rc} (PDF page)`);box.innerHTML='';box.appendChild(c);
+    /* small screens: tap the page to see it at full size (scroll inside), tap again to fit */
+    box.tabIndex=0;box.title='Tap to zoom';const z=()=>{box.classList.toggle('zoom');box.title=box.classList.contains('zoom')?'Tap to fit':'Tap to zoom'};
+    box.addEventListener('click',z);box.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();z()}})})
+   .catch(e=>{box.innerHTML=`<div class="inv-wait">Could not show the invoice here. Use Download PDF.</div>`})}
 function showReceipt(p,fresh){
   if(p.needsRc){const s=stu(p.studentId);const st=isStudentUser(cur());
     drawer(`<button class="btn x" data-act="close">Close</button><h2>Payment received</h2><div class="panel rc-wait" style="margin-top:14px"><p style="margin:0 0 8px"><b>${inr(p.amount)}</b> · ${E(s.name)} · Semester ${p.sem} · Batch ${E(batchOf(p))}</p>
      <div class="rline"><span>Paid by</span><b>UPI · UTR ${E(p.upiRef||'—')}</b></div><div class="rline"><span>Paid on</span><b>${fmtT(p.paidAt||p.entryAt)}</b></div><div class="rline"><span>Invoice date</span><b>${fmtD(p.invoiceDate)}</b></div>
      <p class="note" style="margin:10px 0 0">${st?'Your payment is counted. The invoice will be issued as soon as the college office confirms it.':'The money is received (verified by the bank). Check it and add the invoice no. from the invoice book; then the invoice is issued and emailed.'}</p></div>
      ${!st&&can('fees.confirm')&&p.status==='SUCCESS'?`<div class="actions" style="margin-top:14px"><button class="btn primary" data-act="rcConfirm" data-id="${E(p.id)}">Add invoice no.</button></div>`:''}`,false,'Payment received');return}
-  drawer(`<button class="btn x" data-act="close">Close</button><h2>${fresh?'Invoice issued':'Invoice'}</h2><div style="margin-top:14px">${receiptHtml(p)}</div>
+  const bills=!isStudentUser(cur())?(p.expenseItems||[]).map((x,i)=>x.doc?`<button class="btn sm" data-act="expDocOpen" data-id="${E(p.id)}" data-i="${i}">📎 Bill: ${E(x.reason.slice(0,40))}</button>`:'').join(''):'';
+  drawer(`<button class="btn x" data-act="close">Close</button><h2>${fresh?'Invoice issued':'Invoice'}</h2><div class="inv-page" id="invPage" style="margin-top:14px"><div class="inv-wait">Preparing the invoice…</div></div>${bills?`<div class="actions inv-bills">${bills}</div>`:''}
    <div class="actions" style="margin-top:14px"><button class="btn primary" data-act="dlPdf" data-id="${E(p.id)}">Download PDF</button><button class="btn" data-act="printReceipt" data-id="${E(p.id)}">Print</button>${isStudentUser(cur())?'':`<button class="btn" data-act="emailReceipt" data-id="${E(p.id)}">Email again</button>`}
-   ${!isStudentUser(cur())&&p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel invoice</button>`:''}</div>${mailLine(p)}`,false,'Invoice '+p.rc);
+   ${!isStudentUser(cur())&&p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel invoice</button>`:''}</div>${mailLine(p)}`,false,'Invoice '+p.rc);invoicePageShow(p);
 }
 ACT.viewReceipt=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)throw new Error('Invoice not found');guardStudent(p.studentId);if(!isStudentUser(cur()))need('fees.view');showReceipt(p)};
-ACT.printReceipt=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);guardStudent(p.studentId);if(p.needsRc)throw new Error('The invoice is not issued yet: the office must add the invoice no.');const w=$('#printArea')||document.body.appendChild(Object.assign(document.createElement('div'),{id:'printArea'}));w.innerHTML=receiptHtml(p);document.body.classList.add('printing');setTimeout(()=>{window.print();document.body.classList.remove('printing')},50)};
+/* Print = the PDF page as a picture at print quality (about 220 dpi), nothing else on the sheet */
+ACT.printReceipt=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);guardStudent(p.studentId);if(p.needsRc)throw new Error('The invoice is not issued yet: the office must add the invoice no.');
+  invoiceCanvas(p,3).then(c=>{const w=$('#printArea')||document.body.appendChild(Object.assign(document.createElement('div'),{id:'printArea'}));w.innerHTML='';const im=new Image();im.className='inv-print';im.alt='Fee invoice '+p.rc;
+    im.onload=()=>{document.body.classList.add('printing');setTimeout(()=>{window.print();document.body.classList.remove('printing')},50)};im.src=c.toDataURL('image/png');w.appendChild(im)}).catch(e=>toast('Could not print: '+e.message,true))};
 ACT.cancelAsk=el=>{need('fees.cancel','cancel invoices');const p=db.payments.find(x=>x.id===el.dataset.id);
   dialog(`<h3>Cancel ${p.rc?'invoice '+E(p.rc):'this UPI payment'}?</h3><p class="muted" style="margin:0 0 10px">${inr(p.amount)} from ${E(stu(p.studentId).name)}. The invoice stays in the records marked CANCELLED and the semester due goes back up. This cannot be undone.</p>
    <form data-form="cancelReceipt" data-id="${E(p.id)}" class="grid" style="gap:10px">${F('reason','Reason (required)',{type:'textarea',req:true,rows:2,attrs:'maxlength="200" minlength="4"'})}

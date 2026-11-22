@@ -848,44 +848,16 @@ table.dense th,table.dense td{padding:7px 8px;font-size:13px}
 .tabs::-webkit-scrollbar{display:none}
 @media (min-width:900px){.tabs{mask-image:none;-webkit-mask-image:none}}
 
-/* ---------- fee invoice on screen and in print (same design as the PDF) ---------- */
-.inv{--in:#2b2c7e;--ink:#1f2328;--mu:#6b7280;--bx:#eef0f6;display:grid;grid-template-columns:76px minmax(0,1fr);background:#fff;color:var(--ink);border:1px solid #d9dce6;border-radius:12px;overflow:hidden;font-size:13px;line-height:1.45;box-shadow:0 2px 10px rgba(20,40,75,.06)}
-.inv.cancelled{background:repeating-linear-gradient(-45deg,#fff 0 22px,#fff6f6 22px 44px)}
-.inv-band{background:#6a6a64;display:flex;flex-direction:column;align-items:center;gap:18px;padding:12px 8px}
-.inv-logo{background:#fff;padding:4px;border-radius:4px;display:block}.inv-logo img{display:block;width:52px;height:auto}
-.inv-word{writing-mode:vertical-rl;transform:rotate(180deg);color:#fff;font:800 42px/1 Inter,system-ui,sans-serif;letter-spacing:10px;margin-top:auto;margin-bottom:auto}
-.inv-main{padding:16px 18px 14px;min-width:0}
-.inv-top{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.inv-top i{font:italic 700 12px/1.3 Georgia,"Times New Roman",serif;color:var(--in)}
-.inv-con{display:flex;flex-direction:column;align-items:flex-end;font-weight:700;font-size:11px;color:var(--in);line-height:1.5}
-.inv-name{margin-top:8px;text-align:center;font:italic 700 17px/1.25 Georgia,"Times New Roman",serif;color:var(--in)}
-.inv-guj{display:block;width:100%;max-width:440px;height:auto;margin:4px auto 2px}
-.inv-trust{text-align:center;font:italic 700 12px/1.3 Georgia,"Times New Roman",serif}
-.inv-addr{margin-top:6px;background:var(--in);color:#fff;text-align:center;font:700 12px/1.3 Georgia,"Times New Roman",serif;padding:5px 8px}
-.inv-title{margin:14px 0 0;padding-bottom:6px;border-bottom:2.5px solid var(--in);font:700 30px/1.1 Georgia,"Times New Roman",serif;color:var(--ink);display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
-.inv-title span{color:var(--in)}.inv-title em{margin-left:auto;font:700 13px/1 Inter,system-ui,sans-serif;color:#b42318;letter-spacing:.06em;text-transform:uppercase;font-style:normal}
-.inv-meta{display:grid;grid-template-columns:1.3fr 1fr .8fr 1.3fr;gap:8px 12px;margin-top:12px}
-.inv-meta small,.inv-box small,.inv-words small{display:block;color:var(--mu);font-size:10.5px;text-transform:uppercase;letter-spacing:.03em}
-.inv-meta b{font-size:13px;overflow-wrap:anywhere}
-.inv-box{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;background:var(--bx);padding:12px 14px;margin-top:14px}
-.inv-box div{display:flex;flex-direction:column;gap:2px;min-width:0}.inv-box b{font-size:14px;overflow-wrap:anywhere}
-.inv-tbl{margin-top:14px;border-bottom:1px solid #d3d6e6}
-.inv-th,.inv-td{display:flex;justify-content:space-between;gap:12px;padding:8px 12px}
-.inv-th{background:var(--in);color:#fff;font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em}
-.inv-td.alt{background:var(--bx)}.inv-td span:last-child,.inv-th span:last-child{white-space:nowrap;font-variant-numeric:tabular-nums}
-.inv-sum{display:grid;grid-template-columns:1fr minmax(210px,1.1fr);gap:12px 20px;margin-top:12px;align-items:start}
-.inv-words b{display:block;margin-top:2px}
-.inv-r{display:flex;justify-content:space-between;gap:12px;padding:6px 10px;font-size:13.5px}.inv-r b{font-weight:500;font-variant-numeric:tabular-nums}
-.inv-r.bal{background:var(--in);color:#fff;font-weight:700;margin-top:4px}.inv-r.bal b{font-weight:700}
-.inv-exp{margin-top:12px;border:1px solid #d3d6e6;border-radius:8px;padding:8px 12px}.inv-exp .lnk{color:var(--in)}
-.inv-notes{margin-top:14px}.inv-notes b{font-size:12.5px}
-.inv-notes ul{margin:4px 0 0;padding-left:16px;color:var(--mu);font-size:12px}.inv-notes li{margin:2px 0;overflow-wrap:anywhere}
-.inv-sign{margin:16px 0 0 auto;max-width:300px;text-align:right;display:flex;flex-direction:column;gap:4px}
-.inv-sign i{font:italic 11px/1.3 Georgia,"Times New Roman",serif;color:var(--mu)}
-.inv-sig{height:54px;display:flex;align-items:flex-end;justify-content:center;border-bottom:1px solid var(--ink);padding-bottom:2px}
-.inv-sig img{max-height:50px;max-width:100%;width:auto;height:auto;display:block}
-.inv-sign b{font-size:11.5px;font-weight:600;color:var(--ink);margin-top:2px}
-.inv-sign span{font-size:11px;color:var(--mu)}
+/* ---------- change 28: the fee invoice on screen and in print = the PDF page itself (drawn by the same code, p4a_pdf.js) ----------
+   No separate HTML invoice: what is shown, printed and downloaded is one design. */
+.inv-page{position:relative;background:#fff;border:1px solid #d9dce6;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(20,40,75,.08);aspect-ratio:595/842;max-width:760px;margin:0 auto}
+.inv-page canvas{display:block;width:100%;height:auto}
+.inv-page .inv-wait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:14px}
+.inv-page[tabindex]{cursor:zoom-in}.inv-page:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.inv-page.zoom{aspect-ratio:auto;overflow:auto;max-height:78vh;cursor:zoom-out;-webkit-overflow-scrolling:touch}
+.inv-page.zoom canvas{width:max(100%,760px);max-width:none}
+.inv-bills{margin-top:12px}
+@media print{body.printing #printArea img.inv-print{display:block;width:100%;height:auto;margin:0 auto}}
 /* change 23: official signature (profile panel, signature dialog, staff logins) — paper stays white in dark mode so the ink reads like the invoice */
 .sig-paper{background:#fff;border:1px solid #d9dce6;border-radius:12px;min-height:96px;display:flex;align-items:flex-end;justify-content:center;padding:12px 16px 16px;background-image:linear-gradient(#fff calc(100% - 17px),#c9cede calc(100% - 17px),#c9cede calc(100% - 16px),#fff calc(100% - 16px))}
 .sig-paper.empty{align-items:center;padding:12px 16px}
@@ -910,20 +882,6 @@ table.dense th,table.dense td{padding:7px 8px;font-size:13px}
 .sig-h.ne{right:-10px;top:-10px;cursor:nesw-resize}.sig-h.sw{left:-10px;bottom:-10px;cursor:nesw-resize}
 .sig-prev-wrap{margin-top:14px;display:grid;gap:6px}.sig-prev-wrap .err:empty{display:none}
 .sig-thumb{display:inline-flex;align-items:center;gap:8px}.sig-thumb span.sig-chip{background:#fff;border:1px solid #d9dce6;border-radius:8px;padding:2px 8px;height:34px;display:inline-flex;align-items:center}.sig-thumb img{max-height:28px;max-width:110px;width:auto;height:auto;display:block}
-.inv-foot{margin:14px 0 0;text-align:center;color:var(--mu);font-size:10.5px}
-@media (max-width:560px){
- .inv{grid-template-columns:minmax(0,1fr)}
- .inv-band{flex-direction:row;justify-content:space-between;padding:8px 12px}.inv-logo img{width:36px}
- .inv-word{writing-mode:horizontal-tb;transform:none;font-size:22px;letter-spacing:8px;margin:0}
- .inv-main{padding:12px}
- .inv-top{flex-direction:column}.inv-con{align-items:flex-start;flex-direction:row;flex-wrap:wrap;gap:0 10px}
- .inv-name{font-size:15px}.inv-title{font-size:24px}
- .inv-meta{grid-template-columns:1fr 1fr}
- .inv-box{grid-template-columns:1fr}
- .inv-sum{grid-template-columns:1fr}
- .inv-th,.inv-td{padding:7px 10px}
-}
-@media print{#printArea .inv{border:0;box-shadow:none;border-radius:0;font-size:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact}#printArea .inv-sum{grid-template-columns:1fr minmax(210px,1.1fr)}#printArea .inv-meta{grid-template-columns:1.3fr 1fr .8fr 1.3fr}}
 
 /* ---------- filter bars: phone layout (enhanceFilters in p2_shell.js) ---------- */
 .fx-tog{display:none}
@@ -2907,48 +2865,33 @@ function renderPayPage(id){
 ACT.ppPay=el=>{const p=handleUpiWebhook(gwEvent(el.dataset.id,'captured'));save();ev('Form','UPI paid on pay page',el.dataset.id);renderPayPage(el.dataset.id);if(p)toast('Payment successful · '+p.rc)};
 ACT.ppDecline=el=>{handleUpiWebhook(gwEvent(el.dataset.id,'failed'));save();renderPayPage(el.dataset.id)};
 
-/* ---------- invoice view ---------- */
-/* on-screen and printed invoice: the same design as the PDF fee invoice */
-function receiptHtml(p){
-  const sv=isStudentUser(cur());const I=rcptInfo(p,sv),{s,R,cancelled}=I;
-  const img=k=>typeof RCPT_IMG!=='undefined'&&RCPT_IMG[k]?`data:image/jpeg;base64,${RCPT_IMG[k].jpg}`:'';
-  /* office copy only: where this cash went (change 4). The student copy never shows it. */
-  const exp=!sv&&(payExp(p)||payCih(p))?`<div class="inv-exp"><b>Where this cash went</b>${(p.expenseItems||[]).map((x,i)=>`<div class="rline"><span>Expense: ${E(x.reason)}${x.doc?` <button class="lnk" data-act="expDocOpen" data-id="${E(p.id)}" data-i="${i}">📎 bill</button>`:''}</span><span>${inr(x.amount)}</span></div>`).join('')}
-    ${payCih(p)?`<div class="rline"><span>Cash in hand${p.status==='SUCCESS'?` <small class="muted">(${inr(cihLeft(p))} not used yet)</small>`:''}</span><span>${inr(payCih(p))}</span></div>`:''}<div class="rline"><span><b>To bank</b></span><b>${inr(payToBank(p))}</b></div></div>`:'';
-  const row=(k,v,cls='')=>`<div class="inv-r ${cls}"><span>${k}</span><b>${amt2(v)}</b></div>`;
-  return`<article class="inv ${cancelled?'cancelled':''}" aria-label="Fee invoice ${E(p.rc)}">
-   <div class="inv-band" aria-hidden="true">${img('logo')?`<span class="inv-logo"><img src="${img('logo')}" alt=""></span>`:''}<span class="inv-word">NPCTE</span></div>
-   <div class="inv-main">
-    <div class="inv-top"><i>${E(R.naac)}</i><div class="inv-con"><span>☎ College : ${E(R.mobCollege)} (Mo.)</span><span>Trust : ${E(R.mobTrust)} (Mo.)</span><span>E-mail : ${E(R.email)}</span><span>Web : ${E(R.web)}</span></div></div>
-    <div class="inv-name">${E(R.fullName)}</div>${img('guj')?`<img class="inv-guj" src="${img('guj')}" alt="">`:''}
-    <div class="inv-trust">${E(R.trustLine)}</div><div class="inv-addr">${E(R.address)}</div>
-    <h3 class="inv-title"><span>Fee</span> Invoice${cancelled?'<em>Cancelled</em>':''}</h3>
-    <div class="inv-meta"><div><small>Invoice no.</small><b class="mono">${E(p.rc)}</b></div><div><small>Invoice date</small><b>${longD(p.invoiceDate)}</b></div><div><small>Batch</small><b>${E(batchOf(p))}</b></div><div><small>Course</small><b>${E(I.cname.replace(' - ',' – '))}</b></div></div>
-    <div class="inv-box"><div><small>Billed to</small><b>${E(s.name)}</b><span>Student ID: ${E(s.enrol)}</span><span>Category: ${E(s.category)}</span></div>
-     <div><small>Payment details</small><b>${sv?'Fee: Tuition fee':'Mode: '+E(I.mode)}</b><span>Received by: ${E(p.by||'College office')}</span><span>Payment date: ${longD(I.payDate)}</span></div></div>
-    <div class="inv-tbl"><div class="inv-th"><span>Description</span><span>Amount (₹)</span></div><div class="inv-td alt"><span>Tuition fee – Semester ${p.sem}</span><span>${amt2(I.fee)}</span></div><div class="inv-td"><span>Less: Scholarship / concession</span><span>0.00</span></div></div>
-    <div class="inv-sum"><div class="inv-words"><small>Amount paid in words:</small><b>${E(inWords(I.paidNow))}</b></div>
-     <div class="inv-tot">${row('Total fee',I.fee)}${I.earlier>0?row('Paid earlier',I.earlier):''}${row('Amount paid now',I.paidNow)}${row('Balance due',I.balance,'bal')}</div></div>
-    ${exp}
-    <div class="inv-notes"><b>Notes</b><ul>${I.notes.map(n=>`<li>${E(n)}</li>`).join('')}</ul></div>
-    ${(()=>{const sg=typeof invSigner==='function'?invSigner(p):null; /* change 23: signature of the person who issued this invoice */
-      return`<div class="inv-sign"><i>${E(R.signFor)}</i><div class="inv-sig">${sg&&sg.sign?signImg(sg.sign,'Signature of '+(sg.name||'the issuer')):''}</div>${sg&&sg.name?`<b>${E(sg.name)}</b>`:''}<span>Authorised Signatory</span></div>
-    <p class="inv-foot">${sg&&sg.sign?'This is a computer-generated invoice.':'This is a computer-generated invoice and does not require a physical signature.'}</p>`})()}
-   </div>
-  </article>`;
-}
+/* ---------- invoice view ----------
+   change 28: there is no separate HTML invoice any more. The screen and Print show the PDF page itself: the same drawing code
+   (receiptPdf) painted on a canvas by p4a_pdf.js, so what is seen, printed and downloaded is one and the same design. */
+const invoiceCanvas=(p,scale)=>pdfCanvas(g=>receiptPdf(p,isStudentUser(cur()),g),scale);
+/* the drawer shows the page as soon as its images are loaded */
+function invoicePageShow(p){const box=$('#invPage');if(!box)return;
+  invoiceCanvas(p,Math.min(3,2*(window.devicePixelRatio||1))).then(c=>{if(!box.isConnected)return;c.setAttribute('role','img');c.setAttribute('aria-label',`Fee invoice ${p.rc} (PDF page)`);box.innerHTML='';box.appendChild(c);
+    /* small screens: tap the page to see it at full size (scroll inside), tap again to fit */
+    box.tabIndex=0;box.title='Tap to zoom';const z=()=>{box.classList.toggle('zoom');box.title=box.classList.contains('zoom')?'Tap to fit':'Tap to zoom'};
+    box.addEventListener('click',z);box.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();z()}})})
+   .catch(e=>{box.innerHTML=`<div class="inv-wait">Could not show the invoice here. Use Download PDF.</div>`})}
 function showReceipt(p,fresh){
   if(p.needsRc){const s=stu(p.studentId);const st=isStudentUser(cur());
     drawer(`<button class="btn x" data-act="close">Close</button><h2>Payment received</h2><div class="panel rc-wait" style="margin-top:14px"><p style="margin:0 0 8px"><b>${inr(p.amount)}</b> · ${E(s.name)} · Semester ${p.sem} · Batch ${E(batchOf(p))}</p>
      <div class="rline"><span>Paid by</span><b>UPI · UTR ${E(p.upiRef||'—')}</b></div><div class="rline"><span>Paid on</span><b>${fmtT(p.paidAt||p.entryAt)}</b></div><div class="rline"><span>Invoice date</span><b>${fmtD(p.invoiceDate)}</b></div>
      <p class="note" style="margin:10px 0 0">${st?'Your payment is counted. The invoice will be issued as soon as the college office confirms it.':'The money is received (verified by the bank). Check it and add the invoice no. from the invoice book; then the invoice is issued and emailed.'}</p></div>
      ${!st&&can('fees.confirm')&&p.status==='SUCCESS'?`<div class="actions" style="margin-top:14px"><button class="btn primary" data-act="rcConfirm" data-id="${E(p.id)}">Add invoice no.</button></div>`:''}`,false,'Payment received');return}
-  drawer(`<button class="btn x" data-act="close">Close</button><h2>${fresh?'Invoice issued':'Invoice'}</h2><div style="margin-top:14px">${receiptHtml(p)}</div>
+  const bills=!isStudentUser(cur())?(p.expenseItems||[]).map((x,i)=>x.doc?`<button class="btn sm" data-act="expDocOpen" data-id="${E(p.id)}" data-i="${i}">📎 Bill: ${E(x.reason.slice(0,40))}</button>`:'').join(''):'';
+  drawer(`<button class="btn x" data-act="close">Close</button><h2>${fresh?'Invoice issued':'Invoice'}</h2><div class="inv-page" id="invPage" style="margin-top:14px"><div class="inv-wait">Preparing the invoice…</div></div>${bills?`<div class="actions inv-bills">${bills}</div>`:''}
    <div class="actions" style="margin-top:14px"><button class="btn primary" data-act="dlPdf" data-id="${E(p.id)}">Download PDF</button><button class="btn" data-act="printReceipt" data-id="${E(p.id)}">Print</button>${isStudentUser(cur())?'':`<button class="btn" data-act="emailReceipt" data-id="${E(p.id)}">Email again</button>`}
-   ${!isStudentUser(cur())&&p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel invoice</button>`:''}</div>${mailLine(p)}`,false,'Invoice '+p.rc);
+   ${!isStudentUser(cur())&&p.status==='SUCCESS'&&can('fees.cancel')?`<button class="btn danger" data-act="cancelAsk" data-id="${E(p.id)}">Cancel invoice</button>`:''}</div>${mailLine(p)}`,false,'Invoice '+p.rc);invoicePageShow(p);
 }
 ACT.viewReceipt=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);if(!p)throw new Error('Invoice not found');guardStudent(p.studentId);if(!isStudentUser(cur()))need('fees.view');showReceipt(p)};
-ACT.printReceipt=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);guardStudent(p.studentId);if(p.needsRc)throw new Error('The invoice is not issued yet: the office must add the invoice no.');const w=$('#printArea')||document.body.appendChild(Object.assign(document.createElement('div'),{id:'printArea'}));w.innerHTML=receiptHtml(p);document.body.classList.add('printing');setTimeout(()=>{window.print();document.body.classList.remove('printing')},50)};
+/* Print = the PDF page as a picture at print quality (about 220 dpi), nothing else on the sheet */
+ACT.printReceipt=el=>{const p=db.payments.find(x=>x.id===el.dataset.id);guardStudent(p.studentId);if(p.needsRc)throw new Error('The invoice is not issued yet: the office must add the invoice no.');
+  invoiceCanvas(p,3).then(c=>{const w=$('#printArea')||document.body.appendChild(Object.assign(document.createElement('div'),{id:'printArea'}));w.innerHTML='';const im=new Image();im.className='inv-print';im.alt='Fee invoice '+p.rc;
+    im.onload=()=>{document.body.classList.add('printing');setTimeout(()=>{window.print();document.body.classList.remove('printing')},50)};im.src=c.toDataURL('image/png');w.appendChild(im)}).catch(e=>toast('Could not print: '+e.message,true))};
 ACT.cancelAsk=el=>{need('fees.cancel','cancel invoices');const p=db.payments.find(x=>x.id===el.dataset.id);
   dialog(`<h3>Cancel ${p.rc?'invoice '+E(p.rc):'this UPI payment'}?</h3><p class="muted" style="margin:0 0 10px">${inr(p.amount)} from ${E(stu(p.studentId).name)}. The invoice stays in the records marked CANCELLED and the semester due goes back up. This cannot be undone.</p>
    <form data-form="cancelReceipt" data-id="${E(p.id)}" class="grid" style="gap:10px">${F('reason','Reason (required)',{type:'textarea',req:true,rows:2,attrs:'maxlength="200" minlength="4"'})}
@@ -3136,6 +3079,43 @@ function makePdf(draw,meta){
   pdf+=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`+offs.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')+`trailer\n<< /Size ${objs.length+1} /Root 1 0 R /Info 7 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return pdf;
 }
+
+/* ---------- change 28: the same page on a canvas (screen view and print = the PDF page itself) ----------
+   pdfRecord runs a draw function (the one that makes the PDF) and keeps every call; pdfCanvas loads the images and
+   paints the calls on a canvas, point for point, with the same positions and text widths as the PDF.
+   Fonts: Helvetica / Times in the PDF = Arial / Times New Roman on screen (same letter widths). */
+function pdfRecord(draw){const ops=[];
+  const api={rect:(...a)=>ops.push(['rect',a]),line:(...a)=>ops.push(['line',a]),width:(t,o={})=>pdfW(t,o.size||10,o.bold,o.font),newPage(){},
+    text:(...a)=>ops.push(['text',a]),textUp:(...a)=>ops.push(['textUp',a]),stamp:(...a)=>ops.push(['stamp',a]),
+    image(name,x,y,w,h,o={}){const im=typeof name==='object'?name:typeof RCPT_IMG!=='undefined'&&RCPT_IMG[name];if(!im)return false;ops.push(['image',[im,x,y,w,h,o]]);return true},
+    wrap(x,y,t,width,o={}){const size=o.size||10,words=pdfSafe(t).split(/\s+/);let line='',yy=y;words.forEach(w=>{const tr=line?line+' '+w:w;if(pdfW(tr,size,o.bold,o.font)>width&&line){api.text(x,yy,line,o);yy+=size+(o.lead||4);line=w}else line=tr});if(line){api.text(x,yy,line,o);yy+=size+(o.lead||4)}return yy}};
+  draw(api);return ops}
+const PDF_IMG=new WeakMap();
+const pdfLoadImg=src=>new Promise((ok,bad)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>bad(new Error('Could not load an invoice image'));i.src=src});
+/* an invoice image ready to paint: JPEG (+ its soft mask as transparency), or a signature's transparent PNG */
+function pdfImgSource(im){if(PDF_IMG.has(im))return PDF_IMG.get(im);
+  const pr=(async()=>{if(im.png)return pdfLoadImg(im.png);
+    const j=await pdfLoadImg('data:image/jpeg;base64,'+im.jpg);if(!im.mask)return j;
+    const m=await pdfLoadImg('data:image/jpeg;base64,'+im.mask);const c=document.createElement('canvas');c.width=im.w;c.height=im.h;const g=c.getContext('2d');
+    g.drawImage(m,0,0,im.w,im.h);const md=g.getImageData(0,0,im.w,im.h);g.clearRect(0,0,im.w,im.h);g.drawImage(j,0,0,im.w,im.h);const d=g.getImageData(0,0,im.w,im.h);
+    for(let i=0;i<d.data.length;i+=4)d.data[i+3]=md.data[i];g.putImageData(d,0,0);return c})();
+  PDF_IMG.set(im,pr);return pr}
+const pdfCanvasFont=(o,size)=>{const f=o.font,T='"Times New Roman",Times,"Liberation Serif","Noto Serif",serif',S='Arial,Helvetica,"Liberation Sans",Roboto,sans-serif';
+  return f==='tb'?`bold ${size}px ${T}`:f==='tbi'?`italic bold ${size}px ${T}`:f==='ti'?`italic ${size}px ${T}`:`${o.bold?'bold ':''}${size}px ${S}`};
+/* scale = canvas pixels per PDF point (A4 = 595 x 842 pt) */
+async function pdfCanvas(draw,scale,meta={}){const W=meta.w||595,H=meta.h||842,ops=pdfRecord(draw);
+  const srcs=await Promise.all(ops.map(o=>o[0]==='image'?pdfImgSource(o[1][0]).catch(()=>null):null));
+  const c=document.createElement('canvas');c.width=Math.round(W*scale);c.height=Math.round(H*scale);const g=c.getContext('2d');
+  g.scale(scale,scale);g.fillStyle='#ffffff';g.fillRect(0,0,W,H);g.textBaseline='alphabetic';
+  ops.forEach(([k,a],i)=>{
+    if(k==='rect'){const[x,y,w,h,fill]=a;g.fillStyle=fill;g.fillRect(x,y,w,h)}
+    else if(k==='line'){const[x1,y1,x2,y2,stroke='#d7dce5',w=.8]=a;g.strokeStyle=stroke;g.lineWidth=w;g.beginPath();g.moveTo(x1,y1);g.lineTo(x2,y2);g.stroke()}
+    else if(k==='text'){const[x,y,t,o={}]=a;const size=o.size||10,w=pdfW(t,size,o.bold,o.font),al=o.align||'left',px=al==='right'?x-w:al==='center'?x-w/2:x;
+      g.font=pdfCanvasFont(o,size);g.fillStyle=o.color||'#1b2437';g.fillText(pdfSafe(t),px,y)}
+    else if(k==='textUp'){const[x,y,t,o={}]=a;g.save();g.translate(x,y);g.rotate(-Math.PI/2);g.font=pdfCanvasFont(o,o.size||10);g.fillStyle=o.color||'#1b2437';g.fillText(pdfSafe(t),0,0);g.restore()}
+    else if(k==='stamp'){const[t,o={}]=a;const{size=70,color='#f3c4c4',x=300,y=470}=o;const w=pdfW(t,size,true);g.save();g.translate(x,y);g.rotate(-Math.PI/4);g.font=pdfCanvasFont({bold:true},size);g.fillStyle=color;g.fillText(pdfSafe(t),-w/2,0);g.restore()}
+    else if(k==='image'&&srcs[i]){const[,x,y,w,h,o]=a;g.save();if(o.alpha!=null)g.globalAlpha=o.alpha;g.drawImage(srcs[i],x,y,w,h);g.restore()}});
+  return c}
 const rs=p=>'Rs. '+(Math.round(p||0)/100).toLocaleString('en-IN',{maximumFractionDigits:2});
 const pdfBytes=str=>{const u=new Uint8Array(str.length);for(let i=0;i<str.length;i++)u[i]=str.charCodeAt(i)&255;return u};
 const fmtSize=n=>n<1024?n+' B':(n/1024).toFixed(1)+' KB';
@@ -3226,17 +3206,22 @@ function receiptPdf(p,studentCopy,gIn){if(studentCopy===undefined)studentCopy=is
     let ny=Math.max(646.2,y+50);g.text(L,ny,'Notes',{size:9,bold:true,color:INK});ny+=16.3;
     const notes=I.notes.slice();
     if(!studentCopy&&(p.expenseItems||[]).length)notes.splice(notes.length-1,0,'Expense details: '+p.expenseItems.map(x=>`${x.reason} Rs. ${amt2(x.amount)}${x.doc?' (bill attached)':''}`).join('; ')+'.');
-    /* change 23: the signature block sits bottom-right; note lines that reach it are wrapped narrower so they never run under it */
-    const SG=typeof invSigner==='function'?invSigner(p):null,SX=Math.min(395.3,RT-g.width(R.signFor,{font:'ti',size:8.5})-4),full=W-10.4,narrow=Math.max(150,SX-14-(L+10.4));
-    notes.forEach(t=>{if(ny>800)return;const lines=Math.ceil(g.width(t,{size:8.5})/full);g.rect(L+0.5,ny-4.2,2.6,2.6,MUT);ny=g.wrap(L+10.4,ny,t,ny+lines*13>714?narrow:full,{size:8.5,color:MUT,lead:4.5})});
-    /* signature and footer: "For <college>", the issuer's signature on the line, the issuer's name, "Authorised Signatory" */
-    const sy=Math.max(706,Math.min(728,ny+14)),LX=Math.min(SX,RT-170);
-    g.text(RT,sy,R.signFor,{font:'ti',size:8.5,color:MUT,align:'right'});
-    if(SG&&SG.sign){const s=SG.sign,bw=RT-LX,bh=34;const k=Math.min(bw/s.w,bh/s.h),iw=s.w*k,ih=s.h*k;g.image(s,(LX+RT)/2-iw/2,sy+42-ih,iw,ih,{color:SIGN_INK})}
-    g.line(LX,sy+45,RT,sy+45,INK,.8);
-    if(SG&&SG.name)g.text(RT,sy+57,SG.name,{size:8.5,bold:true,color:INK,align:'right'});
-    g.text(RT,SG&&SG.name?sy+69:sy+58,'Authorised Signatory',{size:8.5,color:MUT,align:'right'});
-    g.text(CX,818,SG&&SG.sign?'This is a computer-generated invoice.':'This is a computer-generated invoice and does not require a physical signature.',{size:7.5,color:MUT,align:'center'});
+    const drawn=[]; /* change 23: where each note line ends, so the signature never covers a note */
+    notes.forEach(t=>{if(ny>782)return;g.rect(L+0.5,ny-4.2,2.6,2.6,MUT);let line='',yy=ny;pdfSafe(t).split(/\s+/).forEach(w=>{const tr=line?line+' '+w:w;if(g.width(tr,{size:8.5})>W-10.4&&line){drawn.push([yy,L+10.4+g.width(line,{size:8.5})]);yy+=13;line=w}else line=tr});if(line)drawn.push([yy,L+10.4+g.width(line,{size:8.5})]);
+      ny=g.wrap(L+10.4,ny,t,W-10.4,{size:8.5,color:MUT,lead:4.5})});
+    /* signature and footer (the college's final design: unchanged) */
+    const sy=Math.max(711.5,ny+16);
+    if(sy<790){g.text(RT,sy,R.signFor,{font:'ti',size:8.5,color:MUT,align:'right'});g.line(395.3,sy+8.5,RT,sy+8.5,INK,.8);g.text(RT,sy+22,'Authorised Signatory',{size:8.5,color:MUT,align:'right'})}
+    /* change 23 (25, 27): ONLY a small signature of the person who issued the invoice is added; nothing else moves.
+       Place: the empty space on the right just above "For <college>" (the box from x 437 to the right edge), centred in it.
+       A long invoice whose "For <college>" block does not fit the page (old rule, unchanged) gets only the signature at the same place,
+       kept above the footer. It is never drawn over a note: then it sits on the line (block shown) or is left out (no block). */
+    {const SG=typeof invSigner==='function'?invSigner(p):null;
+     if(SG&&SG.sign){const s=SG.sign,k=Math.min(110/s.w,24/s.h),iw=s.w*k,ih=s.h*k,sx=(437+RT)/2-iw/2;let bot=Math.min(sy-8,806);
+      const hit=b=>drawn.some(([y,r])=>y-7<b+1&&y+2>b-ih-1&&r>sx-4);
+      if(hit(bot))bot=sy<790?sy+9.5:0;
+      if(bot)g.image(s,sx,bot-ih,iw,ih,{color:SIGN_INK})}}
+    g.text(CX,818,'This is a computer-generated invoice and does not require a physical signature.',{size:7.5,color:MUT,align:'center'});
     /* faint emblem over the middle of the page */
     g.image('wm',203.6,285.9,300,305,{alpha:.07});
     if(cancelled)g.stamp('CANCELLED',{size:84,color:'#f6caca',x:352,y:480});
